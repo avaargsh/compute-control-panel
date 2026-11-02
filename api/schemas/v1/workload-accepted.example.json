@@ -1,0 +1,8 @@
+{
+  "workload_id": "workload-example-001",
+  "desired_generation": 1,
+  "desired_state": "ACTIVE",
+  "observed_phase": "PENDING",
+  "compute_operation_id": "compute-operation-example-001",
+  "status_url": "/api/v1/workloads/workload-example-001"
+}
