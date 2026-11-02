@@ -21,7 +21,7 @@ Status: **non-production foundation; Compute Golden Path not yet complete**.
 - `Repository.CreateOperation` atomically commits an immutable operation and an Outbox event; operation row locks, expected-version CAS, PostgreSQL-clock lease expiry and monotonic fencing survive repository reconstruction.
 - Concurrent claim, ACK-loss UNKNOWN recovery, stale worker rejection and historical idempotency replay across workload generation changes have PostgreSQL-backed integration tests.
 - `internal/provider.Adapter` + non-production `FakeProvider` test the inspect-first lost-ACK, duplicate request, fingerprint conflict and authoritative no-effect finality protocol.
-- A strict `gofmt` validation gate runs before migration and Go tests.
+- CI currently runs `gofmt -w .` to normalize the checkout before tests; a non-mutating formatting enforcement gate remains a governance follow-up after a dedicated formatting-only normalization commit.
 - Consolidation scope and evidence limits: [GPU-COMPUTE-PLATFORM-CONSOLIDATION.md](../migration/GPU-COMPUTE-PLATFORM-CONSOLIDATION.md).
 
 ## Boundaries and caveats
