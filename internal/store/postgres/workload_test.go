@@ -1,0 +1,177 @@
+package postgres
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"sync"
+	"testing"
+	"time"
+
+	"database/sql"
+
+	_ "github.com/jackc/pgx/v5/stdlib"
+)
+
+func TestCreateWorkloadConcurrentIdempotentAndOutboxAtomic(t *testing.T) {
+	db := openIntegrationDB(t)
+	repo, err := NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	request := json.RawMessage(`{"api_version":"compute.platform/v1","project_id":"project-int-1","resources":{"cpu":"2"}}`)
+	digest := testDigest(request)
+	tenantID := "tenant_it_" + randomSuffix(t)
+	idempotencyKey := "idem_" + randomSuffix(t)
+
+	const workers = 12
+	results := make([]Workload, workers)
+	created := make([]bool, workers)
+	errs := make([]error, workers)
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			params := createParams(tenantID, idempotencyKey, digest, request, randomSuffix(t), randomSuffix(t))
+			results[i], created[i], errs[i] = repo.CreateWorkload(ctx, params)
+		}()
+	}
+	wg.Wait()
+
+	createdCount := 0
+	stableWorkloadID := ""
+	for i := range results {
+		if errs[i] != nil {
+			t.Fatalf("concurrent CreateWorkload[%d]: %v", i, errs[i])
+		}
+		if created[i] {
+			createdCount++
+		}
+		if stableWorkloadID == "" {
+			stableWorkloadID = results[i].WorkloadID
+		}
+		if results[i].WorkloadID != stableWorkloadID {
+			t.Fatalf("idempotent callers received different workload IDs: %q vs %q", stableWorkloadID, results[i].WorkloadID)
+		}
+	}
+	if createdCount != 1 {
+		t.Fatalf("created=true count = %d, want exactly one", createdCount)
+	}
+
+	var workloadCount, outboxCount int
+	if err := db.QueryRowContext(ctx,
+		`SELECT count(*) FROM compute_workloads WHERE tenant_id=$1 AND idempotency_key=$2`,
+		tenantID, idempotencyKey).Scan(&workloadCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx,
+		`SELECT count(*) FROM compute_outbox_events WHERE tenant_id=$1 AND aggregate_id=$2`,
+		tenantID, stableWorkloadID).Scan(&outboxCount); err != nil {
+		t.Fatal(err)
+	}
+	if workloadCount != 1 || outboxCount != 1 {
+		t.Fatalf("durable rows workload=%d outbox=%d, want 1/1", workloadCount, outboxCount)
+	}
+
+	changedRequest := json.RawMessage(`{"api_version":"compute.platform/v1","project_id":"project-int-1","resources":{"cpu":"4"}}`)
+	changedDigest := testDigest(changedRequest)
+	params := createParams(tenantID, idempotencyKey, changedDigest, changedRequest, randomSuffix(t), randomSuffix(t))
+	if _, _, err := repo.CreateWorkload(ctx, params); !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("same key with changed digest error = %v, want ErrIdempotencyConflict", err)
+	}
+	if err := db.QueryRowContext(ctx,
+		`SELECT count(*) FROM compute_workloads WHERE tenant_id=$1 AND idempotency_key=$2`,
+		tenantID, idempotencyKey).Scan(&workloadCount); err != nil {
+		t.Fatal(err)
+	}
+	if workloadCount != 1 {
+		t.Fatalf("changed-digest request created another workload: count=%d", workloadCount)
+	}
+}
+
+func TestCreateWorkloadRejectsInvalidParams(t *testing.T) {
+	request := json.RawMessage(`{"project_id":"project-1"}`)
+	valid := createParams("tenant-1", "idem-1", testDigest(request), request, "workload-1", "event-1")
+	cases := []struct {
+		name string
+		mutate func(*CreateWorkloadParams)
+	}{
+		{name: "missing tenant", mutate: func(p *CreateWorkloadParams) { p.TenantID = "" }},
+		{name: "profile revision without profile", mutate: func(p *CreateWorkloadParams) { p.ComputeProfileRevision = "2" }},
+		{name: "invalid JSON", mutate: func(p *CreateWorkloadParams) { p.NormalizedRequest = json.RawMessage(`{"broken"`) }},
+		{name: "non-object JSON", mutate: func(p *CreateWorkloadParams) { p.NormalizedRequest = json.RawMessage(`[]`) }},
+		{name: "invalid digest", mutate: func(p *CreateWorkloadParams) { p.RequestDigest = "sha256:BAD" }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			params := valid
+			tc.mutate(&params)
+			if err := validateCreateWorkload(params); !errors.Is(err, ErrInvalidRequest) {
+				t.Fatalf("validation error = %v, want ErrInvalidRequest", err)
+			}
+		})
+	}
+}
+
+func openIntegrationDB(t *testing.T) *sql.DB {
+	t.Helper()
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		t.Skip("DATABASE_URL is not configured; PostgreSQL integration test skipped")
+	}
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open PostgreSQL: %v", err)
+	}
+	db.SetMaxOpenConns(16)
+	db.SetMaxIdleConns(8)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		db.Close()
+		t.Fatalf("ping PostgreSQL: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return db
+}
+
+func createParams(tenantID, idempotencyKey, digest string, request json.RawMessage, workloadID, eventID string) CreateWorkloadParams {
+	return CreateWorkloadParams{
+		WorkloadID: workloadID,
+		TenantID: tenantID,
+		ProjectID: "project-int-1",
+		OwnerService: "agent-runtime",
+		OwnerResourceType: "run",
+		OwnerResourceID: "run-int-1",
+		NormalizedRequest: request,
+		RequestDigest: digest,
+		IdempotencyKey: idempotencyKey,
+		EventID: eventID,
+		CorrelationID: "corr-int-1",
+	}
+}
+
+func testDigest(request []byte) string {
+	digest := sha256.Sum256(request)
+	return "sha256:" + hex.EncodeToString(digest[:])
+}
+
+func randomSuffix(t *testing.T) string {
+	t.Helper()
+	var bytes [12]byte
+	if _, err := rand.Read(bytes[:]); err != nil {
+		t.Fatal(err)
+	}
+	return fmt.Sprintf("%x", bytes[:])
+}
