@@ -275,6 +275,7 @@ func (o Operation) ExpireLease(expectedVersion uint64, now time.Time) (Operation
     if now.IsZero() || now.Before(o.LeaseExpiresAt) { return o, ErrLeaseActive }
     o = o.clearLease()
     o.Status = Unknown
+    o.FenceToken++
     o.Version++
     return o, nil
 }
