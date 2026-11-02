@@ -61,8 +61,12 @@ func TestInboxConcurrentRedeliveryAppliesEffectExactlyOnce(t *testing.T) {
 	wg.Wait()
 	successes := 0
 	for i, err := range errs {
-		if err != nil { t.Fatalf("redelivery[%d]: %v", i, err) }
-		if created[i] { successes++ }
+		if err != nil {
+			t.Fatalf("redelivery[%d]: %v", i, err)
+		}
+		if created[i] {
+			successes++
+		}
 	}
 	if successes != 1 || calls.Load() != 1 {
 		t.Fatalf("event applied %d times, callback invoked %d times", successes, calls.Load())
@@ -71,7 +75,9 @@ func TestInboxConcurrentRedeliveryAppliesEffectExactlyOnce(t *testing.T) {
 	var cursor int64
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM compute_inbox_events
 		WHERE consumer_name=$1 AND event_id=$2 AND state='APPLIED'`, e.ConsumerName, e.EventID).Scan(&applied); err != nil { t.Fatal(err) }
-	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM compute_outbox_events WHERE event_id=$1`, effectID).Scan(&outbox); err != nil { t.Fatal(err) }
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM compute_outbox_events WHERE event_id=$1`, effectID).Scan(&outbox); err != nil {
+		t.Fatal(err)
+	}
 	if err := db.QueryRowContext(ctx, `SELECT last_applied_version FROM compute_inbox_cursors
 		WHERE consumer_name=$1 AND tenant_id=$2 AND aggregate_type=$3 AND aggregate_id=$4`,
 		e.ConsumerName, e.TenantID, e.AggregateType, e.AggregateID).Scan(&cursor); err != nil { t.Fatal(err) }
@@ -83,7 +89,9 @@ func TestInboxConcurrentRedeliveryAppliesEffectExactlyOnce(t *testing.T) {
 		t.Fatal("restarted consumer repeated a committed effect")
 		return nil
 	})
-	if err != nil || ok { t.Fatalf("restart redelivery: created=%v err=%v", ok, err) }
+	if err != nil || ok {
+		t.Fatalf("restart redelivery: created=%v err=%v", ok, err)
+	}
 }
 
 func TestInboxGapCollisionAndTenantIsolationFailClosed(t *testing.T) {
@@ -100,7 +108,9 @@ func TestInboxGapCollisionAndTenantIsolationFailClosed(t *testing.T) {
 	if applied, err := apply(gap); applied || !errors.Is(err, ErrInboxGap) {
 		t.Fatalf("out-of-order event accepted: %v %v", applied, err)
 	}
-	if applied, err := apply(first); !applied || err != nil { t.Fatalf("first event: %v %v", applied, err) }
+	if applied, err := apply(first); !applied || err != nil {
+		t.Fatalf("first event: %v %v", applied, err)
+	}
 	versionCollision := inboxFixture(t, tenant, aggregate, 1)
 	if applied, err := apply(versionCollision); applied || !errors.Is(err, ErrInboxConflict) {
 		t.Fatalf("different event id reused version: %v %v", applied, err)
@@ -116,10 +126,16 @@ func TestInboxGapCollisionAndTenantIsolationFailClosed(t *testing.T) {
 		t.Fatalf("event id crossed tenant: %v %v", applied, err)
 	}
 	second := inboxFixture(t, tenant, aggregate, 2)
-	if applied, err := apply(second); !applied || err != nil { t.Fatalf("second event: %v %v", applied, err) }
-	if applied, err := apply(gap); !applied || err != nil { t.Fatalf("third event: %v %v", applied, err) }
+	if applied, err := apply(second); !applied || err != nil {
+		t.Fatalf("second event: %v %v", applied, err)
+	}
+	if applied, err := apply(gap); !applied || err != nil {
+		t.Fatalf("third event: %v %v", applied, err)
+	}
 	tenantB := inboxFixture(t, "isolated-"+tenant, aggregate, 1)
-	if applied, err := apply(tenantB); !applied || err != nil { t.Fatalf("other tenant's independent sequence: %v %v", applied, err) }
+	if applied, err := apply(tenantB); !applied || err != nil {
+		t.Fatalf("other tenant's independent sequence: %v %v", applied, err)
+	}
 }
 
 func TestInboxHandlerRollbackRetainsUnappliedMessage(t *testing.T) {
@@ -131,17 +147,27 @@ func TestInboxHandlerRollbackRetainsUnappliedMessage(t *testing.T) {
 	effectID := "out-effect-" + randomSuffix(t)
 	reject := errors.New("domain transaction refused event")
 	applied, err := repo.ApplyInboxEvent(ctx, e, func(ctx context.Context, tx *sql.Tx, e InboxEvent) error {
-		if err := persistInboxEffect(t, ctx, tx, e, effectID); err != nil { return err }
+		if err := persistInboxEffect(t, ctx, tx, e, effectID); err != nil {
+			return err
+		}
 		return reject
 	})
-	if applied || !errors.Is(err, reject) { t.Fatalf("failed handler marked event applied: %v %v", applied, err) }
+	if applied || !errors.Is(err, reject) {
+		t.Fatalf("failed handler marked event applied: %v %v", applied, err)
+	}
 	var count int
-	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM compute_outbox_events WHERE event_id=$1`, effectID).Scan(&count); err != nil { t.Fatal(err) }
-	if count != 0 { t.Fatalf("failed handler committed side effect: %d", count) }
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM compute_outbox_events WHERE event_id=$1`, effectID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("failed handler committed side effect: %d", count)
+	}
 	applied, err = repo.ApplyInboxEvent(ctx, e, func(ctx context.Context, tx *sql.Tx, e InboxEvent) error {
 		return persistInboxEffect(t, ctx, tx, e, effectID)
 	})
-	if !applied || err != nil { t.Fatalf("retry after rollback: %v %v", applied, err) }
+	if !applied || err != nil {
+		t.Fatalf("retry after rollback: %v %v", applied, err)
+	}
 }
 
 func TestInboxMalformedPayloadCannotAcknowledge(t *testing.T) {
@@ -152,7 +178,9 @@ func TestInboxMalformedPayloadCannotAcknowledge(t *testing.T) {
 	for _, raw := range []string{"null", "[]", "{", fmt.Sprintf("{%q:%q}", "x", "y")} {
 		bad := e
 		bad.Payload = json.RawMessage(raw)
-		if raw[0] == '{' && raw != "{" { bad.SchemaVersion = 0 }
+		if raw[0] == '{' && raw != "{" {
+			bad.SchemaVersion = 0
+		}
 		applied, err := repo.ApplyInboxEvent(context.Background(), bad,
 			func(context.Context, *sql.Tx, InboxEvent) error { t.Fatal("invalid envelope dispatched"); return nil })
 		if applied || !errors.Is(err, ErrInboxInvalid) {

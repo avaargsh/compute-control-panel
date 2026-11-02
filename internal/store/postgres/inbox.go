@@ -106,9 +106,9 @@ func (r *Repository) ApplyInboxEvent(
 
 	var (
 		tenantID, producer, eventType, aggregateType, aggregateID, state string
-		schemaVersion int
-		aggregateVersion int64
-		payloadMatches bool
+		schemaVersion                                                    int
+		aggregateVersion                                                 int64
+		payloadMatches                                                   bool
 	)
 	err = tx.QueryRowContext(ctx, `SELECT tenant_id,producer,event_type,schema_version,
 		aggregate_type,aggregate_id,aggregate_version,payload=$3::jsonb,state
