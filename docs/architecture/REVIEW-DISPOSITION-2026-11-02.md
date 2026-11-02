@@ -26,3 +26,13 @@ Status: proposed v0.2 corrections incorporated; not a formal GitHub approval.
 - Provider-specific authoritative operation lookup and exact UID absence proof.
 
 No custom scheduler is approved. The Go operation package is a pure domain prototype; it is not a durable provider controller.
+
+
+## Cross-repository contract corrections — 2026-11-02
+
+| Finding | Required correction | Disposition |
+|---|---|---|
+| Compute API used RunIntent as owner reference despite Runtime owning run_id | Use agent-runtime/run/<run_id> for direct Run capacity; reserve sandbox-provider/sandbox-claim/<claim_id> for sandbox capacity | Updated in API/ADR contracts; integration test open |
+| Guard and Compute journals were described as if they shared one operation identity | Separate action_operation_id from compute_operation_id; Guard owns action hash/Permit, Compute owns provider_request_digest and provider reconciliation | Updated in domain/ADR contracts |
+| Permit reference alone did not prove the exact Compute request was authorized | Require Guard verification/attestation binding Permit audience and normalized Compute request digest; fail closed until implemented | Open implementation gate |
+| SandboxProvider and Runtime could both request the same capacity | Make the requester path mutually exclusive and test one Workload per claim | Updated in API/ADR contracts; integration test open |

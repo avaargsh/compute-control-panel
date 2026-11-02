@@ -26,3 +26,13 @@
 - [ ] Kubernetes Job adapter with Kueue built-in Job integration.
 - [ ] Kueue admission, queueing, requeue, Pod placement and quota-release integration tests.
 - [ ] Provider expansion only after first adapter conformance passes.
+
+
+## Cross-repository gates
+
+- [ ] Runtime StartRun persists unique run_intent_id → run_id mapping and authoritative lookup.
+- [ ] Compute owner_ref uses agent-runtime/run/<run_id> for direct Run capacity, never RunIntent.
+- [ ] SandboxProvider is the sole Compute caller for a SandboxClaim; duplicate direct Runtime request is rejected.
+- [ ] EngageGuard Permit attestation binds guard_operation_id, audience and exact normalized Compute request digest.
+- [ ] Guard action_operation_id and Compute compute_operation_id are distinct and linked by references only.
+- [ ] Add consumer-driven tests for both journals independently entering UNKNOWN and reconciling.
