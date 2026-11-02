@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -179,7 +178,3 @@ func (r *Repository) ReconcileOperation(
 	}
 	return next, nil
 }
-
-// compile-time reminders: use transaction errors as returned, not ambiguous
-// success indicators. The caller must reconcile transaction commit UNKNOWN.
-var _ = errors.Is
