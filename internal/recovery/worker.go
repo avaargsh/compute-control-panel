@@ -6,7 +6,6 @@ package recovery
 import (
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -154,4 +153,3 @@ func randomID(prefix string) (string, error) {
 }
 
 var _ Journal = (*postgres.Repository)(nil)
-var _ = sql.ErrNoRows
