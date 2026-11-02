@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -198,5 +199,32 @@ func TestInboxMissingAppliedReceiptRollsBackBusinessEffect(t *testing.T) {
 	}
 	if applied, err := repo.ApplyInbox(ctx, e, inboxEffect); err != nil || !applied {
 		t.Fatalf("retry after complete rollback: applied=%t err=%v", applied, err)
+	}
+}
+
+func TestInboxRejectsAmbiguousJSONPayload(t *testing.T) {
+	db := openIntegrationDB(t)
+	repo, _ := NewRepository(db)
+	e := inboxFixture(t, "tenant-json-"+randomSuffix(t), "aggregate-"+randomSuffix(t), 1)
+	for _, payload := range [][]byte{
+		[]byte(`{"operation_id":"op-a","operation_id":"op-b"}`),
+		[]byte(`{"resource":{"cpu":"2","cpu":"8"}}`),
+	} {
+		e.EventID = "ambiguous-" + randomSuffix(t)
+		e.Payload = payload
+		if _, err := repo.ApplyInbox(context.Background(), e, inboxEffect); !errors.Is(err, ErrInboxInvalid) {
+			t.Errorf("ambiguous JSON payload accepted: %s: %v", payload, err)
+		}
+	}
+}
+
+func TestInboxRejectsExcessiveJSONNesting(t *testing.T) {
+	db := openIntegrationDB(t)
+	repo, _ := NewRepository(db)
+	e := inboxFixture(t, "tenant-depth-"+randomSuffix(t), "aggregate-"+randomSuffix(t), 1)
+	const depth = maxNormalizedRequestJSONDepth + 1
+	e.Payload = []byte(`{"nested":` + strings.Repeat("[", depth) + `0` + strings.Repeat("]", depth) + `}`)
+	if _, err := repo.ApplyInbox(context.Background(), e, inboxEffect); !errors.Is(err, ErrInboxInvalid) {
+		t.Fatalf("excessive JSON nesting accepted: %v", err)
 	}
 }
