@@ -57,10 +57,10 @@ func setupUnknown(t *testing.T) (*sql.DB, *postgres.Repository, operation.Operat
 	_, created, err := repo.CreateWorkload(ctx, postgres.CreateWorkloadParams{
 		WorkloadID: wID, TenantID: tenant, ProjectID: "project-1",
 		OwnerService: "agent-runtime", OwnerResourceType: "run",
-		OwnerResourceID: "run-" + uniqueID(t),
+		OwnerResourceID:   "run-" + uniqueID(t),
 		NormalizedRequest: request, RequestDigest: digest,
 		IdempotencyKey: "workload-idem-" + uniqueID(t),
-		EventID: "workload-event-" + uniqueID(t), CorrelationID: "corr-1",
+		EventID:        "workload-event-" + uniqueID(t), CorrelationID: "corr-1",
 	})
 	if err != nil || !created {
 		t.Fatalf("create workload: %t %v", created, err)
@@ -156,6 +156,7 @@ func TestRecoverUnknownRefusesUnregisteredProviderBeforeLease(t *testing.T) {
 }
 
 type brokenInspector struct{}
+
 func (brokenInspector) Apply(context.Context, provider.Request) (provider.Acknowledgement, error) {
 	panic("recover must never call Apply")
 }

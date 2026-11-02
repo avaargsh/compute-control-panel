@@ -36,13 +36,13 @@ type Journal interface {
 // caller. Source and adapter version are audit labels, not cryptographic
 // attestations; real provider authentication remains a production gate.
 type RegisteredProvider struct {
-	Adapter provider.Adapter
-	Source string
+	Adapter        provider.Adapter
+	Source         string
 	AdapterVersion string
 }
 
 type Worker struct {
-	journal Journal
+	journal   Journal
 	providers map[string]RegisteredProvider
 }
 
@@ -103,15 +103,15 @@ func (w *Worker) RecoverUnknown(ctx context.Context, tenantID, operationID, owne
 		return operation.Operation{}, err
 	}
 	request := provider.Request{
-		OperationID: claimed.ID,
-		TenantID: claimed.TenantID,
-		WorkloadID: claimed.WorkloadID,
-		ProviderID: claimed.ProviderID,
-		IdempotencyKey: claimed.IdempotencyKey,
-		RequestDigest: claimed.RequestDigest,
+		OperationID:       claimed.ID,
+		TenantID:          claimed.TenantID,
+		WorkloadID:        claimed.WorkloadID,
+		ProviderID:        claimed.ProviderID,
+		IdempotencyKey:    claimed.IdempotencyKey,
+		RequestDigest:     claimed.RequestDigest,
 		DesiredGeneration: claimed.Generation,
-		Kind: claimed.Kind,
-		TargetResourceID: claimed.TargetResourceID,
+		Kind:              claimed.Kind,
+		TargetResourceID:  claimed.TargetResourceID,
 		TargetResourceUID: claimed.TargetResourceUID,
 	}
 	if err := request.Validate(); err != nil {
@@ -131,12 +131,12 @@ func (w *Worker) RecoverUnknown(ctx context.Context, tenantID, operationID, owne
 	}
 	next, err := w.journal.ReconcileOperation(ctx, tenantID, operationID,
 		claimed.Version, owner, claimed.FenceToken, postgres.InspectionEvidence{
-			ObservationID: observationID,
-			EventID: eventID,
-			CorrelationID: "provider-inspection-" + claimed.ID,
-			Source: registered.Source,
+			ObservationID:  observationID,
+			EventID:        eventID,
+			CorrelationID:  "provider-inspection-" + claimed.ID,
+			Source:         registered.Source,
 			AdapterVersion: registered.AdapterVersion,
-			Observation: obs,
+			Observation:    obs,
 		})
 	if err != nil {
 		return operation.Operation{}, fmt.Errorf("persist provider inspection: %w", err)
