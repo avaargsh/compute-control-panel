@@ -186,7 +186,10 @@ func validSHA256Digest(value string) bool {
 	return err == nil
 }
 
-// DigestRequest hashes an RFC 8785-canonicalized JSON object. The caller must\n// canonicalize the request before passing bytes here; CreateWorkload verifies\n// that the stored request bytes and supplied digest agree exactly.\nfunc DigestRequest(normalizedRequest []byte) (string, error) {
+// DigestRequest hashes an RFC 8785-canonicalized JSON object. The caller must
+// canonicalize the request before passing bytes here; CreateWorkload verifies
+// that the stored request bytes and supplied digest agree exactly.
+func DigestRequest(normalizedRequest []byte) (string, error) {
 	if len(normalizedRequest) == 0 || !json.Valid(normalizedRequest) {
 		return "", ErrInvalidRequest
 	}
