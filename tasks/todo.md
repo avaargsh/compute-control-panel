@@ -12,7 +12,7 @@
 - [ ] Align SandboxProvider claim/provision with Compute Allocation ownership.
 - [ ] Align EngageGuard Permit/action_hash schema and replay semantics.
 - [ ] Add OpenAPI and JSON Schema source files plus schema lint/compatibility checks.
-- [ ] Obtain independent architecture review; keep PR Draft until blockers are resolved.
+- [x] Obtain independent architecture review; keep PR Draft until blockers are resolved.
 
 ## Implementation
 
