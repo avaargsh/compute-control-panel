@@ -1,0 +1,34 @@
+name: Temporary format reconciliation
+
+on:
+  push:
+    branches: ["feat/go-foundation"]
+    paths: [".github/workflows/format-reconcile-final.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    if: github.repository == 'avaargsh/compute-control-panel' && github.ref == 'refs/heads/feat/go-foundation'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: feat/go-foundation
+          persist-credentials: true
+      - name: Gofmt reconciliation code and regression test
+        shell: bash
+        run: |
+          set -euo pipefail
+          gofmt -w internal/store/postgres/reconciliation.go internal/store/postgres/reconciliation_test.go
+          if git diff --quiet -- internal/store/postgres/reconciliation.go internal/store/postgres/reconciliation_test.go; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- internal/store/postgres/reconciliation.go internal/store/postgres/reconciliation_test.go
+          git commit -m "style(compute): normalize inspection event sequencing"
+          git push origin HEAD:feat/go-foundation
