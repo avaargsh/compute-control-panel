@@ -57,3 +57,33 @@ cluster ingress/network policy.
 4. Implement Kubernetes Job + Kueue + DRA adapter with exact-UID deletion finality, then migrate GHCR/distroless, cosign, Trivy and release acceptance gates.
 
 No custom GPU scheduler is part of this plan.
+
+
+## P0 Outbox delivery slice
+
+The durable Outbox is a **tenant-scoped at-least-once** protocol, not an
+exactly-once broker abstraction:
+
+- `Repository.ClaimOutbox` uses PostgreSQL `FOR UPDATE SKIP LOCKED`,
+  database-clock leases, and monotonically increasing `attempts` as a
+  delivery fencing token. It does not allow a later version of the same
+  aggregate to pass an earlier unpublished event; other tenants/aggregates
+  can make independent progress.
+- `MarkOutboxPublished` and `RetryOutbox` use the exact tenant, event ID,
+  owner, attempt and unexpired lease. A stale publisher cannot ACK or
+  retry an event after another worker has reclaimed it.
+- `internal/outbox.Dispatcher` is a bounded in-process adapter: it
+  claims a committed event, calls a `Publisher` interface once and
+  persists an ACK or a delayed retry. If a broker ACK is ambiguous or a
+  PostgreSQL ACK fails after send, the event can be redelivered with the
+  same stable `event_id`. Consumers MUST deduplicate; duplicate delivery
+  is an expected failure mode.
+- No broker connection/authentication, durable process supervisor, Inbox
+  consumer, poison-event quarantine policy, operator tooling or production
+  recovery deployment is included. A QUARANTINED predecessor blocks later
+  versions of the same aggregate until an explicitly approved repair.
+- Database tests verify concurrency, tenant isolation, strict same-aggregate
+  sequence, expired-lease takeover, stale ACK refusal and retry. Dispatcher
+  tests verify publisher ACK sequencing, ambiguous failure and persistence
+  failure visibility. CI provides PostgreSQL integration and Go Race evidence
+  only, not broker end-to-end acceptance.
