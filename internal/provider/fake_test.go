@@ -62,8 +62,15 @@ func TestFakeProviderNeverInfersNoEffectFromMissingResource(t *testing.T) {
         final.ResourceVersion=="" || final.ObservedAt.IsZero() {
         t.Fatalf("explicit final no-effect evidence unavailable: %+v %v",final,err)
     }
-    if _,err:=fake.Apply(context.Background(),req); !errors.Is(err,ErrOperationConflict) {
-        t.Fatalf("final tombstone allowed unsafe new side effect: %v",err)
+    // The authoritative NOT_APPLIED_FINAL is what permits a retry with
+    // the very same operation ID, idempotency key, and digest.
+    if _,err:=fake.Apply(context.Background(),req); err!=nil {
+        t.Fatalf("same-key retry after final no-effect proof failed: %v",err)
+    }
+    applied,err:=fake.Inspect(context.Background(),req)
+    if err!=nil || applied.Result!=operation.ResourcePresent ||
+        applied.ResourceOperationID!=req.OperationID {
+        t.Fatalf("safe retry was not attributable to original operation: %+v %v",applied,err)
     }
 }
 
