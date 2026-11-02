@@ -7,7 +7,6 @@ import (
     "context"
     "errors"
     "fmt"
-    "strings"
     "sync"
     "time"
 
@@ -120,6 +119,7 @@ func sameRequest(a,b Request)bool {
 func (f *FakeProvider) Apply(ctx context.Context,req Request)(Acknowledgement,error) {
     if err:=ctx.Err(); err!=nil { return Acknowledgement{},err }
     if err:=req.Validate(); err!=nil { return Acknowledgement{},err }
+    if req.Kind!=operation.Create { return Acknowledgement{},ErrInvalidRequest }
     f.mu.Lock()
     defer f.mu.Unlock()
     existing,found:=f.journal[req.OperationID]
@@ -130,9 +130,7 @@ func (f *FakeProvider) Apply(ctx context.Context,req Request)(Acknowledgement,er
     }
     if !existing.applied {
         // A fake CREATE is materialized once per exact operation identity.
-        // UPDATE/DELETE require a real provider-specific target adapter;
-        // no fake shortcut is allowed for those operations.
-        if req.Kind!=operation.Create { return Acknowledgement{},ErrInvalidRequest }
+        // UPDATE/DELETE need target-aware provider-specific implementations.
         f.generation++
         existing.applied=true
         existing.noEffectFinal=false
@@ -191,6 +189,3 @@ func (f *FakeProvider) Inspect(ctx context.Context,req Request)(operation.Observ
 
 var _ Adapter = (*FakeProvider)(nil)
 
-// Keep digest validation in the domain; this local check only guards obvious
-// whitespace inputs before building an immutable Operation value.
-var _ = strings.TrimSpace
