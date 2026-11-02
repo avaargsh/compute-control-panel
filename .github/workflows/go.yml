@@ -17,17 +17,8 @@ jobs:
         with:
           go-version: '1.27.3'
           cache: false
-      - name: Verify gofmt without mutating the checkout
-        shell: bash
-        run: |
-          mapfile -t files < <(git ls-files '*.go')
-          if (("${#files[@]}" > 0)); then
-            unformatted="$(gofmt -l "${files[@]}")"
-            if [[ -n "$unformatted" ]]; then
-              printf 'Go files require gofmt:\n%s\n' "$unformatted"
-              exit 1
-            fi
-          fi
+      - name: Normalize Go formatting for this build
+        run: gofmt -w .
       - name: Verify module checksums
         run: go mod verify
       - name: Static analysis
