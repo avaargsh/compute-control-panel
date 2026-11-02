@@ -59,7 +59,7 @@ func trustedObservation(o operation.Operation, result operation.ObservationResul
 
 func inspectionEvidence(o operation.Operation, obs operation.Observation) InspectionEvidence {
 	return InspectionEvidence{
-		ObservationID: "inspection-"+o.ID, EventID: "event-reconciled-"+o.ID,
+		ObservationID: "inspection-" + o.ID, EventID: "event-reconciled-" + o.ID,
 		CorrelationID: "corr-reconciled", Source: "trusted-fake-provider",
 		AdapterVersion: "test-v1", Observation: obs,
 	}
@@ -119,7 +119,7 @@ func TestReconcileFailureRollsBackObservationAndState(t *testing.T) {
 	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM compute_resource_observations WHERE observation_id=$1", evidence.ObservationID).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("orphaned observation on transaction failure: count=%d err=%v", count, err)
 	}
-	evidence.EventID = "event-new-"+randomSuffix(t)
+	evidence.EventID = "event-new-" + randomSuffix(t)
 	if _, err := repo.ReconcileOperation(ctx, o.TenantID, o.ID, o.Version, "reconciler", o.FenceToken, evidence); err != nil {
 		t.Fatalf("reconciliation cannot resume after rolled-back attempt: %v", err)
 	}

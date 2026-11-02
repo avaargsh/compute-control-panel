@@ -18,12 +18,12 @@ import (
 // authoritative Inspect. It is an internal persistence boundary, not an HTTP
 // request DTO, attestation or proof of source authenticity.
 type InspectionEvidence struct {
-	ObservationID string
-	EventID       string
-	CorrelationID string
-	Source        string
+	ObservationID  string
+	EventID        string
+	CorrelationID  string
+	Source         string
 	AdapterVersion string
-	Observation   operation.Observation
+	Observation    operation.Observation
 }
 
 func (e InspectionEvidence) validate() error {
@@ -145,13 +145,13 @@ func (r *Repository) ReconcileOperation(
 		return operation.Operation{}, operation.ErrStale
 	}
 	eventPayload, err := json.Marshal(struct {
-		OperationID string `json:"operation_id"`
-		WorkloadID string `json:"workload_id"`
-		ObservationID string `json:"observation_id"`
-		Status operation.Status `json:"status"`
-		DesiredGeneration uint64 `json:"desired_generation"`
-		CleanupRequired bool `json:"cleanup_required"`
-		ReconcileRequired bool `json:"reconcile_required"`
+		OperationID       string           `json:"operation_id"`
+		WorkloadID        string           `json:"workload_id"`
+		ObservationID     string           `json:"observation_id"`
+		Status            operation.Status `json:"status"`
+		DesiredGeneration uint64           `json:"desired_generation"`
+		CleanupRequired   bool             `json:"cleanup_required"`
+		ReconcileRequired bool             `json:"reconcile_required"`
 	}{
 		OperationID: next.ID, WorkloadID: next.WorkloadID,
 		ObservationID: evidence.ObservationID, Status: next.Status,
