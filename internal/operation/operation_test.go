@@ -126,7 +126,8 @@ func TestStaleGenerationCreateSchedulesCompensation(t *testing.T) {
         ResourceOperationID: "op-1", ResourceGeneration: 7,
         ResourceVersion: "rv-30", ObservedAt: now.Add(3*time.Second),
     })
-    if err != nil || superseded.Status != Superseded || !superseded.CompensationRequired {
+    if err != nil || superseded.Status != Superseded ||
+        !superseded.CleanupRequired || !superseded.ReconcileRequired {
         t.Fatalf("stale create not compensated: %+v %v", superseded, err)
     }
 }
@@ -171,4 +172,34 @@ func TestDeleteOperationRequiresTargetIdentity(t *testing.T) {
     op := fixture(Delete)
     op.TargetResourceUID = ""
     if !errors.Is(op.Validate(), ErrInvalid) { t.Fatal("delete without UID accepted") }
+}
+
+func TestStaleGenerationUpdateReconcilesWithoutDeletingTarget(t *testing.T) {
+    now := time.Unix(800, 0).UTC()
+    op := fixture(Update)
+    op.TargetResourceID = "job-existing"
+    op.TargetResourceUID = "uid-existing"
+    op = claimAndStart(t, op, now)
+    op = reconcile(t, op, now.Add(2*time.Second))
+    superseded, err := op.ApplyObservation(op.Version, "reconciler-1", op.FenceToken, now.Add(3*time.Second), 8, Observation{
+        OperationID: "op-1", TenantID: "tenant-1", WorkloadID: "workload-1",
+        ProviderID: "provider-1", DesiredGeneration: 7,
+        Result: ResourcePresent, ResourceID: "job-existing", ResourceUID: "uid-existing",
+        ResourceOperationID: "op-1", ResourceGeneration: 7,
+        ResourceVersion: "rv-60", ObservedAt: now.Add(3*time.Second),
+    })
+    if err != nil || superseded.Status != Superseded ||
+        superseded.CleanupRequired || !superseded.ReconcileRequired {
+        t.Fatalf("stale update scheduled unsafe deletion: %+v %v", superseded, err)
+    }
+    if superseded.ProviderResourceID != "job-existing" || superseded.ProviderResourceUID != "uid-existing" {
+        t.Fatalf("stale update lost provider identity: %+v", superseded)
+    }
+}
+
+func TestUpdateOperationRequiresExactTargetIdentity(t *testing.T) {
+    op := fixture(Update)
+    op.TargetResourceID = ""
+    op.TargetResourceUID = ""
+    if !errors.Is(op.Validate(), ErrInvalid) { t.Fatal("update without target UID accepted") }
 }
