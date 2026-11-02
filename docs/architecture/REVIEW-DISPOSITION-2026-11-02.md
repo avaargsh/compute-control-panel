@@ -15,6 +15,8 @@ Status: proposed v0.2 corrections incorporated; not a formal GitHub approval.
 | SandboxProvider and ComputeProvider could both create the same resource | SandboxProvider owns sandbox lifecycle; Compute owns capacity/Workload/Allocation | Fixed in cross-domain boundary docs |
 | API success could imply provider success | Workload create/delete intent returns 202 after DB + Outbox commit; reconcile asynchronously | Fixed in API contract documentation |
 
+| Persisted operation status vocabulary differed between STATE-MACHINES.md and Go v1 | Freeze PENDING/LEASED/IN_FLIGHT/UNKNOWN/RECONCILING/SUCCEEDED/FAILED/MANUAL_REVIEW/SUPERSEDED; provider ACK remains receipt/evidence | Aligned STATE-MACHINES.md with internal/operation v1; API/schema compatibility validation remains open |
+
 ## Remaining acceptance gaps
 
 - PostgreSQL migrations, Workload/Allocation/Operation persistence and tenant/project authorization.
