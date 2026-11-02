@@ -224,3 +224,22 @@ func TestUpdateObservationMustMatchOperationTargetIdentity(t *testing.T) {
 		t.Fatalf("update accepted provider evidence for a different target: %v", err)
 	}
 }
+
+
+func TestApplyObservationRejectsFutureEvidence(t *testing.T) {
+    now := time.Unix(1000, 0).UTC()
+    op := claimAndStart(t, fixture(Create), now)
+    op = reconcile(t, op, now.Add(2*time.Second))
+    observation := Observation{
+        OperationID: op.ID, TenantID: op.TenantID, WorkloadID: op.WorkloadID,
+        ProviderID: op.ProviderID, DesiredGeneration: op.Generation,
+        Result: ResourcePresent, ResourceID: "job-1", ResourceUID: "uid-1",
+        ResourceOperationID: op.ID, ResourceGeneration: op.Generation,
+        ResourceVersion: "rv-future", ObservedAt: now.Add(10*time.Second),
+    }
+    _, err := op.ApplyObservation(op.Version, "reconciler-1", op.FenceToken,
+        now.Add(3*time.Second), op.Generation, observation)
+    if !errors.Is(err, ErrObservation) {
+        t.Fatalf("future-dated observation was accepted: %v", err)
+    }
+}
