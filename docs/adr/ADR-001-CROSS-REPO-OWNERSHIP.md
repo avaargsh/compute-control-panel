@@ -1,118 +1,110 @@
 # ADR-001: Cross-Repository Compute Ownership and References
 
-- Status: Accepted for the Compute CP boundary; upstream identity alignment remains BLOCKED
+- Status: Proposed v0.3; implementation and contract-test gate
 - Date: 2026-11-02
 - Owners: compute-control-panel maintainers
-- Scope: agent-control-panel, agent-runtime, EngageGuard, SandboxProvider and Compute CP integration
+- Scope: agent-control-panel, agent-runtime, EngageGuard, Compute CP and selected SandboxProvider
 
 ## Context
 
-The platform is split across independent repositories. Each service must own its own database and state transitions. A resource can be referenced by several services, but it must have one authoritative writer.
+Compute CP is one service in a multi-repository platform. A resource may be referenced by several services, but each business fact and each external side effect must have one authoritative writer. The current ACP architecture already separates RunIntent from Runtime Run identity; Compute CP must consume that contract rather than preserve an obsolete identity conflict.
 
-Current source documents are not fully aligned:
-- agent-control-panel/docs/architecture/BASELINE.md says the Control Plane owns Session/Run identity and Run lifecycle coordination.
-- agent-runtime/README.md says Runtime owns Run identity and Run/Task lifecycle projections.
-- Compute CP must not choose between these claims by assumption.
-
-The Agent Control Panel P0 design also refers to SandboxProvider allocation/claim while Compute CP owns ComputeWorkload and Allocation. Without a boundary, both paths could create the same underlying CPU/GPU resource.
-
-EngageGuard owns authorization/Permit evidence. Compute CP needs its own durable journal for provider-side compute mutations. These journals are related but not interchangeable.
+Two operation journals are required because they record different side effects: EngageGuard records the protected Agent action and authorization/receipt lifecycle; Compute CP records the provider-side compute mutation and reconciliation. They must not share an identifier or overwrite each other's state.
 
 ## Decision
 
-### 1. Compute ownership
+### 1. Compute domain authority
 
 Compute CP is the sole authority for:
 - ComputeProvider registration identity and adapter configuration;
-- ComputePool and ComputeProfile;
-- ComputeWorkload desired state and lifecycle projection;
-- Allocation identity and provider binding;
-- ComputeOperation, dispatch attempts and UNKNOWN reconciliation;
-- QueueBinding and provider observation projections.
+- ComputePool, ComputeProfile and QuotaBinding;
+- ComputeWorkload intent and lifecycle projection;
+- Allocation identity and provider-resource mapping;
+- compute_operation_id, provider dispatch attempts, provider request digest and UNKNOWN reconciliation;
+- timestamped ResourceObservation projections.
 
-Compute CP is not a scheduler or executor. Kueue owns admission/quota/fair sharing; Kubernetes Scheduler owns Pod placement; native controllers and providers own actual external state.
+Compute CP is not an Agent lifecycle service, generic sandbox manager, Kubernetes scheduler, Kueue admission controller or provider inventory source of truth.
 
-### 2. Upstream Agent reference
+### 2. Agent identity references
 
-Compute CP accepts an opaque, tenant-scoped requester_ref. It stores the caller's stable resource type and ID, but does not create, mutate or resolve Agent Run/Session state.
+- Agent Control Plane owns run_intent_id and its immutable request digest.
+- Agent Runtime consumes run_intent_id and creates run_id, workflow_id and run_attempt_id. Runtime derives workflow_id as agent-run/v1/<run_id>.
+- Compute CP does not accept RunIntent as the canonical owner of an allocation. For non-sandbox Run capacity, owner_ref is agent-runtime/run/<run_id>.
+- For sandboxed execution, owner_ref is sandbox-provider/sandbox-claim/<claim_id>. SandboxProvider owns the SandboxClaim and is the sole Compute CP caller for the capacity required by that claim.
+- Compute CP treats owner_ref as an opaque, tenant-scoped reference. It does not query ACP, Runtime or SandboxProvider databases.
 
-The target contract is:
-- Agent Control Plane owns a canonical business RunIntent reference.
-- Agent Runtime owns a distinct execution_id and Temporal workflow history.
-- Runtime consumes allocation_id and never creates or releases the Allocation directly.
+Run identity is aligned at the architecture level by ACP ADR-003 and Runtime's StartRun contract. The remaining gate is executable Runtime idempotency/lookup behavior and cross-service tests, not a reason for Compute CP to invent an alternative Run identity.
 
-This target is a proposed cross-repository contract, not a verified current fact. The current ACP baseline and Runtime README conflict on Run identity ownership. Before enabling the golden path, those repositories must publish a coordinated ADR and compatible schema. Until then, Compute CP must not hard-code run_id or execution_id as its domain identity.
+### 3. Sandbox and capacity boundary
 
-### 3. Sandbox boundary
+SandboxProvider owns sandbox identity, isolation, sandbox-session state and sandbox cleanup. Compute CP owns CPU/GPU/accelerator capacity, Workload, Allocation and provider mutations.
 
-SandboxProvider owns sandbox isolation and sandbox-session semantics. It may create runtime-specific sandbox objects only within an already authorized compute allocation or within an explicitly declared non-compute sandbox class.
+Two mutually exclusive request paths are allowed:
 
-For CPU/GPU capacity, SandboxProvider must reference an Allocation from Compute CP. It must not independently create a second Job/Pod/VM or reserve GPU capacity behind Compute CP for the same workload.
+1. Non-sandbox Run capacity: Runtime calls Compute CP directly with owner_ref = agent-runtime/run/<run_id>.
+2. Sandbox capacity: Runtime calls SandboxProvider Claim; SandboxProvider calls Compute CP once with owner_ref = sandbox-provider/sandbox-claim/<claim_id>.
 
-For the v0.1 Kubernetes Job POC, the Compute Kubernetes adapter is the only Job creator. Do not route the same request through a second SandboxProvider provisioner.
+Runtime and SandboxProvider must not create separate ComputeWorkloads for the same sandbox capacity claim. SandboxProvider may create sandbox-specific objects only inside or against the Allocation returned by Compute CP. For the v0.1 Kubernetes Job POC, the Compute Kubernetes adapter is the only creator of the top-level Job.
 
-### 4. Provider operation and governance journals
+### 4. Two operation journals
 
-For a protected compute mutation:
-- EngageGuard owns authorization decision, approval and Permit evidence.
-- The caller supplies permit_ref and action_hash.
-- Compute CP validates the Permit for the exact action and owns ComputeOperation intent, attempt, provider receipt and reconciliation evidence.
-- The ComputeOperation links back to the governance evidence.
+EngageGuard Action Operation:
+- Runtime creates one stable action_operation_id per admitted ActionProposal; ActionRequest v1 serializes it as operation_id.
+- EngageGuard owns the Action Operation record, authorization decision, approval, Permit, action_hash, executor_attempt_id and Receipt.
+- Reusing operation_id with the same canonical ActionRequest returns the same operation. Reusing it with a different action/binding is a conflict.
 
-The operation_id is stable for one immutable side-effect intent. attempt_id changes per dispatch attempt. A changed target or action hash creates a new operation. UNKNOWN is reconciled by Compute CP; Runtime/Temporal may retry the API command with the same idempotency key, but may not independently redispatch the provider mutation.
+Compute Provider Operation:
+- Compute CP creates one compute_operation_id for each immutable provider mutation intent.
+- Compute CP owns provider_request_digest, compute_attempt_id records, provider receipt/observation and UNKNOWN reconciliation.
+- A provider retry reuses compute_operation_id, provider idempotency token and provider_request_digest. A changed target/payload/generation is not a retry.
 
-The action_hash canonicalization, Permit audience, expiry, one-time-use and replay rules must be shared with EngageGuard. No private Compute-only interpretation is allowed.
+Delegation:
+- For an Agent-proposed protected compute action, EngageGuard authorizes the exact action and issues a Permit for the Compute CP audience.
+- Compute CP validates the delegated Permit/action binding at its API enforcement point before accepting the protected mutation. It does not recompute action_hash; it treats the Guard digest as opaque.
+- The Guard action_operation_id and Compute compute_operation_id are linked by references. Guard reconciles the delegated action against Compute CP status; Compute CP reconciles the provider effect.
+- A Compute 202 means durable Workload acceptance, not Allocation readiness. Neither Guard nor Runtime may claim the resource is ready until Compute CP reports a verified BOUND Allocation.
 
-### 5. Retry ownership
+Platform-internal Run capacity needed to execute a Run is an infrastructure orchestration request, not an Agent ActionProposal. Runtime may call Compute CP under authenticated workload identity and Compute policy. It does not create a Guard Operation solely to mirror a ComputeOperation.
+
+### 5. Authorization binding contract
+
+Direct Runtime/SandboxProvider infrastructure requests are authenticated by service workload identity and Compute tenant/project/profile policy.
+
+An Agent-originated protected compute action must include a Guard operation reference, Permit reference, action_hash and Compute CP audience. Compute CP must validate the Permit with EngageGuard and bind it to the exact normalized Compute request digest. A caller-supplied permit_ref or action_hash is not proof of authorization. The Guard-to-Compute verification/attestation schema and golden vectors remain an implementation gate; until they exist, protected Agent-originated Compute mutations fail closed.
+
+Compute CP computes its own provider_request_digest from the normalized provider mutation. It must not reuse action_hash as the provider request digest or attempt to reproduce Guard's canonicalizer.
+
+### 6. Retry ownership
 
 | Layer | Retry responsibility |
 |---|---|
-| API caller / Agent Runtime | Retry the same Compute CP command with the same idempotency key; read operation status |
-| Compute CP | Claim durable operations, dispatch provider actions, inspect UNKNOWN outcomes and decide whether a provider retry is safe |
-| Provider adapter | Apply provider-specific idempotency token/conditional request and normalize external responses |
-| Temporal | Retry workflow/activity orchestration according to Runtime policy; it does not bypass Compute CP to repeat provider calls |
-| EngageGuard | Re-evaluate/revoke authorization according to Permit policy; it does not dispatch provider calls |
+| Agent Control Plane | Retry StartRun dispatch with the same run_intent_id and request digest; reconcile only through Runtime's authoritative registry |
+| Agent Runtime | Retry Guard submission with the same action_operation_id; retry Compute API only with the same per-request Idempotency-Key; query status |
+| EngageGuard | Own Action Operation, Permit, executor attempt and action-level UNKNOWN; query downstream Compute status when delegated |
+| Compute CP | Own compute_operation_id, provider dispatch, provider inspection and provider UNKNOWN |
+| Provider adapter | Apply provider-specific idempotency/conditional writes and normalize receipts |
+| Temporal | Retry Workflow/Activity orchestration; never bypass Guard or Compute to dispatch a provider mutation |
 
-A retry of an API command is not permission to create a new provider operation. An ambiguous provider side effect is never converted into a new attempt with a new operation_id.
+A timeout is not proof of failure. No layer may create a replacement operation to escape UNKNOWN.
 
-## Alternatives considered
+### 7. Kubernetes and Kueue boundary
 
-### Runtime owns Compute Allocation and provider mutation
+Kueue owns queue admission, quota reservation, borrowing, fair sharing and preemption. Kubernetes Scheduler owns Pod-to-Node placement. Kubernetes controllers own Job/Pod lifecycle. Provider/device controllers own actual resource realization. Compute CP owns only its desired Workload, Allocation binding and reconciliation projections.
 
-Rejected. It couples execution lifecycle to infrastructure lifecycle and creates a second provider operation journal.
+The v0.1 integration path is one Kubernetes Job plus Kueue's built-in Job integration. Compute CP does not create or patch the Kueue-native Workload for that Job.
 
-### SandboxProvider provisions compute independently
+## Alternatives rejected
 
-Rejected for CPU/GPU resources. It creates competing resource creators and bypasses provider identity, quota binding, idempotency and release finality.
+- Runtime owns provider mutation: rejected because it duplicates ComputeOperation and couples Run lifecycle to provider state.
+- SandboxProvider independently provisions CPU/GPU: rejected because it creates competing capacity writers.
+- EngageGuard owns the provider journal: rejected because it would make Guard a second authority for Kubernetes/Kueue/provider state.
+- Compute CP owns Run identity: rejected because it would create an Agent lifecycle authority in the compute domain.
+- Compute CP implements its own scheduler: rejected because it duplicates Kueue admission and Kubernetes placement.
 
-### Compute CP owns Agent Run identity
+## Consequences and remaining gates
 
-Rejected. Compute CP must not become an Agent lifecycle authority.
-
-### Compute CP builds a scheduler
-
-Rejected. Kueue and Kubernetes already own queue admission and node placement.
-
-## Consequences
-
-Positive:
-- one writer per resource and side effect;
-- stable references across independent service databases;
-- Temporal retry does not duplicate provider mutations;
-- provider UNKNOWN can be reconciled without changing Agent Run identity;
-- Kueue and Kubernetes remain replaceable external scheduling/execution systems.
-
-Costs:
-- cross-repository schemas and compatibility tests are required;
-- release may remain pending while provider/Kueue evidence is unavailable;
-- a coordinated identity ADR is required before the end-to-end golden path.
-
-## Required cross-repository follow-up
-
-1. Resolve Run identity ownership between agent-control-panel and agent-runtime; publish one canonical business reference and a distinct Runtime execution reference.
-2. Update Runtime contract so Compute interactions use allocation_id and Compute CP APIs, never direct provider_resource_id mutation.
-3. Align SandboxProvider claim/provision semantics with Compute Allocation ownership.
-4. Align EngageGuard Permit/action_hash canonicalization and replay rules with ComputeOperation.
-5. Add consumer-driven contract tests for create, read, release, duplicate delivery, UNKNOWN and stale generation.
-
-This ADR does not authorize implementation of a custom scheduler, direct Runtime-to-Provider calls or duplicate Sandbox/Compute provisioning.
+- One writer exists for each platform domain fact and provider-side mutation.
+- Guard and Compute journals can both be UNKNOWN without contradiction because they describe different boundaries.
+- Cross-repository schemas and contract tests are required before enabling the golden path.
+- The Permit-to-Compute request digest attestation is not implemented and remains a fail-closed gate.
+- PostgreSQL persistence, FakeProvider conformance and real Kubernetes/Kueue evidence remain separate acceptance levels.

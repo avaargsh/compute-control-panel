@@ -1,232 +1,213 @@
 # Compute Workload API and Event Contract v1
 
-Status: Proposed; implementation gate  
-Date: 2026-11-02  
-Audience: agent-control-panel, agent-runtime, compute-control-panel
+Status: Proposed v1; implementation gate
+Date: 2026-11-02
+Audience: agent-control-panel, agent-runtime, EngageGuard, compute-control-panel, SandboxProvider
 
 ## 1. Contract principles
 
-- Compute CP is the sole writer for ComputeWorkload, Allocation and ComputeOperation.
-- Consumers use stable platform IDs. Provider-native IDs are opaque and provider-scoped.
-- All state-changing calls are idempotent and asynchronous.
-- A timeout or lost response is an unknown outcome, not a failed operation.
-- API and event schemas are versioned independently from provider-specific payloads.
-- Tenant scope is derived from authenticated identity and validated against any requested project; a body field cannot grant tenant access.
-- No secret bytes, kubeconfig, cloud credential or provider token may appear in request/event payloads.
+- The domain aggregate is ComputeWorkload; the public resource path uses /api/v1/workloads and the wire identifier is workload_id.
+- Compute CP is the sole writer for Workload, Allocation and ComputeOperation.
+- owner_ref is an opaque, tenant-scoped reference to the lifecycle owner: agent-runtime/run/<run_id> or sandbox-provider/sandbox-claim/<claim_id>. RunIntent is not a Compute owner reference.
+- All state-changing calls are asynchronous and idempotent.
+- A lost response is an unknown transport outcome, not proof that the provider operation failed.
+- Tenant scope comes from authenticated workload identity; body fields cannot grant tenant/project access.
+- No provider credential, kubeconfig, raw token or provider secret appears in the request or event.
 
-The contract is resource-oriented under /api/v1. The examples below are illustrative v1 shapes, not implemented endpoints.
+The shapes below are proposed v1 contract examples, not implemented endpoints.
 
-## 2. Create request
+## 2. Create Workload
 
-Request:
-
-~~~http
-POST /api/v1/compute-workloads
-Idempotency-Key: cw-create:ri-001:runtime-primary
+```http
+POST /api/v1/workloads
+Idempotency-Key: compute-request-<stable-opaque-id>
 Content-Type: application/json
-~~~
+```
 
-~~~json
+```json
 {
-  "apiVersion": "compute.platform/v1",
-  "projectId": "project-001",
-  "requesterRef": {
-    "system": "agent-control-panel",
-    "resourceType": "RunIntent",
-    "resourceId": "ri-001"
+  "api_version": "compute.platform/v1",
+  "project_id": "project-001",
+  "owner_ref": {
+    "service": "agent-runtime",
+    "resource_type": "run",
+    "resource_id": "run-001"
   },
-  "profileRef": {
+  "compute_profile_ref": {
     "id": "gpu-inference",
     "revision": "3"
   },
   "resources": {
     "cpu": "16",
     "memory": "64Gi",
-    "accelerators": [
-      {
-        "vendor": "nvidia",
-        "model": "H100",
-        "count": 2
-      }
-    ]
+    "accelerators": [{ "vendor": "nvidia", "model": "H100", "count": 2 }]
   },
   "constraints": {
-    "poolSelector": {
-      "capability": "gpu.nvidia.h100"
-    },
-    "maxDurationSeconds": 7200
+    "pool_selector": { "capability": "gpu.nvidia.h100" },
+    "max_duration_seconds": 7200
   },
   "authorization": {
-    "permitRef": "permit-001",
-    "actionHash": "sha256:..."
+    "guard_operation_id": "action-op-001",
+    "permit_ref": "permit-001",
+    "action_hash": "sha256:...",
+    "audience": "compute-control-panel"
   }
 }
-~~~
+```
 
-Contract notes:
+Authorization is omitted for platform-internal Runtime/SandboxProvider capacity requests authenticated by workload identity and Compute policy. It is required for an Agent-originated protected compute action. Compute CP validates the delegated Permit through EngageGuard and binds it to the exact normalized Compute request. A permit_ref/action_hash pair supplied by the caller is not sufficient by itself; the Guard verification/attestation contract must pass. Until that contract is implemented, protected Agent-originated Compute requests fail closed.
 
-- requesterRef is an opaque, tenant-scoped reference owned by the caller. Compute CP does not resolve it by querying Agent Runtime.
-- RunIntent is the proposed Agent Control Plane resource name. The current Agent Control Panel baseline and Agent Runtime README disagree about Run identity ownership. Until the two repositories resolve that conflict, requesterRef.resourceType is an opaque versioned string and the cross-repository golden path is BLOCKED. Do not silently substitute execution_id.
-- tenantId is taken from authenticated context. projectId must belong to that tenant.
-- Exactly one of profileRef or a fully specified resources object may be supplied; if both are supplied, resources must be a documented override, not an implicit merge.
-- The caller does not select provider_id or provider_resource_id in the normal request. Provider/pool selection is a Compute CP decision constrained by policy.
-- Idempotency-Key is generated once per intent and reused for every retry. It must not include an attempt number or timestamp.
+Request rules:
+- Idempotency-Key is generated and durably stored by the caller once per logical capacity request. It is reused for every retry and does not contain an attempt number or timestamp.
+- The same key + same canonical request digest returns the original Workload/operation reference. The same key + a different digest returns 409 IDEMPOTENCY_KEY_REUSED.
+- Exactly one of compute_profile_ref or a complete resources object is supplied, unless an explicitly versioned override rule applies.
+- The caller cannot choose provider_id, provider_resource_id, Job name, Kueue Workload or NodeName in the normal API.
+- project_id must belong to the authenticated tenant.
+
+Sandbox request example:
+
+```json
+{
+  "api_version": "compute.platform/v1",
+  "project_id": "project-001",
+  "owner_ref": {
+    "service": "sandbox-provider",
+    "resource_type": "sandbox-claim",
+    "resource_id": "claim-001"
+  },
+  "compute_profile_ref": { "id": "sandbox-cpu-gpu", "revision": "1" }
+}
+```
+
+Runtime calls SandboxProvider Claim; SandboxProvider is the only Compute CP caller for this claim. Runtime must not submit a second Workload for the same sandbox capacity.
 
 Response:
 
-~~~http
+```http
 202 Accepted
-Location: /api/v1/compute-workloads/cw-001
-~~~
+Location: /api/v1/workloads/workload-001
+```
 
-~~~json
+```json
 {
-  "workloadId": "cw-001",
-  "generation": 1,
-  "phase": "ACCEPTED",
-  "operationId": "op-001",
-  "statusUrl": "/api/v1/compute-workloads/cw-001"
+  "workload_id": "workload-001",
+  "desired_generation": 1,
+  "desired_state": "ACTIVE",
+  "observed_phase": "PENDING",
+  "compute_operation_id": "compute-op-001",
+  "status_url": "/api/v1/workloads/workload-001"
 }
-~~~
+```
 
-The response confirms durable acceptance of the request, not provider creation, Kueue admission, Pod scheduling or execution readiness.
+202 confirms Workload + Outbox + idempotency record are durable. It does not mean provider creation, Kueue admission, Pod scheduling or Allocation readiness succeeded.
 
-## 3. Read and release operations
+## 3. Read and release
 
-~~~http
-GET /api/v1/compute-workloads/{workloadId}
-GET /api/v1/compute-workloads/{workloadId}/allocations
-GET /api/v1/compute-operations/{operationId}
-DELETE /api/v1/compute-workloads/{workloadId}
-~~~
+```http
+GET /api/v1/workloads/{workload_id}
+GET /api/v1/workloads/{workload_id}/allocations
+GET /api/v1/compute-operations/{compute_operation_id}
+DELETE /api/v1/workloads/{workload_id}
+```
 
-DELETE records desired absence and returns 202 while release is pending. It is idempotent. It does not report Released merely because the delete command or Kubernetes API accepted a deletion request.
-
-The caller polls or consumes events until the workload is RELEASED, REJECTED or FAILED_CONFIRMED. UNKNOWN remains non-terminal and must be reconciled.
+DELETE records desired_state=DELETE_REQUESTED and returns 202. It does not report RELEASED because the API or Kubernetes accepted a deletion request. The caller waits for authoritative provider absence and applicable Kueue reservation release.
 
 ## 4. Allocation reference
 
-~~~json
+```json
 {
-  "allocationId": "alloc-001",
-  "workloadId": "cw-001",
-  "providerId": "provider-001",
-  "providerResourceId": "k8s-job-uid-opaque",
-  "providerResourceRefs": [
-    {
-      "resourceKind": "kubernetes.job",
-      "providerResourceId": "k8s-job-uid-opaque",
-      "namespace": "tenant-001",
-      "name": "cw-001-g1"
-    },
-    {
-      "resourceKind": "kueue.workload",
-      "providerResourceId": "kueue-workload-uid-opaque",
-      "namespace": "tenant-001",
-      "name": "cw-001-g1"
-    }
+  "allocation_id": "alloc-001",
+  "workload_id": "workload-001",
+  "provider_id": "provider-001",
+  "provider_resource_id": "k8s-job-uid-opaque",
+  "provider_resource_refs": [
+    { "resource_kind": "kubernetes.job", "provider_resource_id": "job-uid", "namespace": "tenant-001", "name": "workload-001-g1" },
+    { "resource_kind": "kueue.workload", "provider_resource_id": "kueue-uid", "namespace": "tenant-001", "name": "workload-001-g1" }
   ],
-  "poolId": "pool-gpu-east",
-  "generation": 1,
+  "pool_id": "pool-gpu-east",
+  "desired_generation": 1,
   "phase": "BOUND",
-  "observedAt": "2026-11-02T10:00:00Z"
+  "observed_at": "2026-11-02T10:00:00Z"
 }
-~~~
+```
 
-- allocationId is the stable platform reference consumed by Agent Control Plane and Runtime.
-- providerId is the stable Compute CP registration identity.
-- providerResourceId is an opaque external identifier and is only meaningful with providerId, resourceKind and provider scope. It may be absent before the provider object is discovered.
-- providerResourceRefs records auxiliary provider objects. Kueue Workload references are observations created/owned by Kueue, not resources Compute CP may patch.
-- generation binds the Allocation to the exact ComputeWorkload desired generation.
-
-Runtime consumes allocationId and, only when needed, provider-neutral capability/endpoint references. Runtime must not dispatch provider Create/Delete or infer allocation state from a providerResourceId.
+- allocation_id is the stable platform reference consumed by Runtime/SandboxProvider.
+- provider_id scopes every provider-native resource ID. A provider_resource_id alone is never globally meaningful.
+- Kueue Workload references are read-only observations; Compute CP does not patch or delete the Kueue-owned object.
+- BOUND means the provider resource mapping is verified and usable. It does not mean the Agent Run has started or succeeded.
 
 ## 5. Error contract
 
-All errors use one envelope:
-
-~~~json
-{
-  "error": {
-    "code": "IDEMPOTENCY_KEY_PAYLOAD_MISMATCH",
-    "message": "The idempotency key was already used with a different request.",
-    "retryable": false,
-    "correlationId": "corr-001"
-  }
-}
-~~~
-
-Minimum semantics:
+Errors use the platform envelope with code, message, retryable, correlation_id and bounded details.
 
 | Condition | HTTP | Required behavior |
 |---|---:|---|
-| Invalid schema/resource request | 422 | No provider side effect |
+| Invalid schema or unsupported resource capability | 422 | No provider side effect |
 | Unauthenticated | 401 | No resource disclosure |
 | Tenant/project mismatch | 403 | Do not reveal cross-tenant resource existence |
-| Resource not found in caller scope | 404 | No cross-tenant lookup leak |
-| Same key, different canonical request hash | 422 | Reject; never replay a different request |
-| Same key, request still in flight | 202 or 409 | Return same resource/status reference or bounded retry guidance; never dispatch a second operation |
-| Stale generation / resource version conflict | 409 | Caller must re-read and submit a new intent if needed |
-| Provider outcome ambiguous | 202 | Preserve UNKNOWN and return operation status URL; do not report failure |
+| Resource absent in caller scope | 404 | No cross-tenant lookup leak |
+| Same Idempotency-Key with different request digest | 409 | Reject; never replay a different request |
+| Same key while request is in flight | 202 or 409 | Return same Workload/status reference; never dispatch a second logical operation |
+| Stale desired generation/version | 409 | Caller re-reads and creates a new intent if needed |
+| Provider outcome ambiguous | 202 | Preserve UNKNOWN and return the operation status URL |
 
-## 6. Idempotency and operation identity
+## 6. Identifier and journal boundaries
 
-- idempotency_key is stable across retries of one caller intent.
-- request_hash is computed from canonical validated request content, excluding transport-only trace headers.
-- operation_id identifies one immutable provider-side action and remains stable across retries/reconciliation.
-- attempt_id identifies one dispatch attempt and changes per attempt.
-- action_hash binds the protected action to the Permit. Its canonicalization algorithm is owned by the cross-repository authorization contract; Compute CP must not invent a private incompatible algorithm.
-- desired_generation fences the operation to the ComputeWorkload version it was created for.
-- Reusing an idempotency key with a different request_hash is a hard conflict.
-- The idempotency record must outlive the maximum redelivery/retry/reconciliation window. No fixed TTL is assumed in v1.
+- caller Idempotency-Key identifies one immutable Compute API request and is stable across retries.
+- workload_id and allocation_id are created by Compute CP.
+- compute_operation_id is created by Compute CP for one immutable provider mutation; compute_attempt_id is unique per provider dispatch attempt.
+- provider_request_digest is computed by Compute CP from the normalized provider mutation and is distinct from Guard action_hash.
+- action_operation_id (ActionRequest wire operation_id) is created by Runtime and owned by EngageGuard. guard_operation_id in the authorization block references that action operation.
+- action_hash and Permit are Guard-owned. Compute CP treats action_hash as opaque and validates the delegated Permit at its enforcement point; it does not recompute Guard's hash.
+- If a Guard executor delegates to Compute CP, it persists a stable downstream Idempotency-Key before the call and records returned workload_id/compute_operation_id. Guard reconciles the action-level operation; Compute CP reconciles the provider effect.
+- Same Compute Idempotency-Key + same request digest returns the same Workload/operation. Same key + different digest returns 409.
+- A provider retry reuses compute_operation_id, provider idempotency token and provider_request_digest. A changed target, payload or desired generation is a new operation only after prior ambiguity is resolved or safely fenced.
 
 ## 7. Event envelope
 
-All events use an at-least-once delivery envelope:
+Events use the platform envelope and at-least-once delivery:
 
-~~~json
+```json
 {
-  "eventId": "evt-001",
-  "eventType": "compute.allocation.bound.v1",
-  "schemaVersion": "1",
-  "aggregateType": "ComputeWorkload",
-  "aggregateId": "cw-001",
-  "tenantId": "tenant-001",
-  "generation": 1,
-  "occurredAt": "2026-11-02T10:00:00Z",
-  "correlationId": "corr-001",
-  "causationId": "cmd-001",
+  "event_id": "evt-001",
+  "event_type": "compute.allocation.bound.v1",
+  "schema_version": 1,
+  "producer": "compute-control-panel",
+  "tenant_id": "tenant-001",
+  "aggregate_type": "compute_workload",
+  "aggregate_id": "workload-001",
+  "aggregate_version": 4,
+  "occurred_at": "2026-11-02T10:00:00Z",
+  "correlation_id": "corr-001",
+  "causation_id": "cmd-001",
   "traceparent": "00-...",
-  "payload": {}
+  "data": {}
 }
-~~~
+```
 
-Consumers deduplicate by eventId and must also reject stale aggregate generations. Events are published through a transactional outbox; consumers use durable inbox/deduplication. Delivery is at least once, not exactly once.
+Consumers deduplicate by event_id and apply only contiguous aggregate_version. A version gap is parked/recovered; it is not silently skipped. Events are published through transactional Outbox and consumed through durable Inbox. Delivery is at least once, not exactly once.
 
 Initial event types:
 
 | Event | Meaning |
 |---|---|
-| compute.workload.accepted.v1 | Request and desired generation durably accepted |
-| compute.workload.rejected.v1 | Request rejected before provider side effect |
+| compute.workload.accepted.v1 | Workload and desired generation durably accepted |
+| compute.workload.rejected.v1 | Request rejected before any provider dispatch |
 | compute.allocation.bound.v1 | Provider resource binding verified |
 | compute.allocation.observation-updated.v1 | New timestamped provider/Kubernetes/Kueue observation |
-| compute.allocation.releasing.v1 | Desired absence accepted; release not yet proven |
-| compute.allocation.released.v1 | Authoritative absence and applicable quota release verified |
-| compute.operation.unknown.v1 | Dispatch outcome ambiguous; reconciliation required |
-| compute.operation.reconciled.v1 | UNKNOWN resolved with evidence |
-| compute.operation.manual-review.v1 | Automated reconciliation cannot safely decide |
+| compute.allocation.releasing.v1 | Desired absence accepted; release not proven |
+| compute.allocation.released.v1 | Exact provider resource absence and applicable queue release verified |
+| compute.operation.unknown.v1 | Provider outcome ambiguous; reconciliation required |
+| compute.operation.reconciled.v1 | Compute UNKNOWN resolved with evidence |
+| compute.operation.manual-review.v1 | Automated provider reconciliation is unsafe |
 
-An observation event is not a substitute for the terminal allocation event. Consumers must not interpret an event name or transport delivery as proof beyond its payload and source evidence.
+An observation event is evidence/wakeup, not a terminal allocation result.
 
-## 8. Cross-repository dependency
+## 8. Cross-repository compatibility gates
 
-Before the golden path is enabled:
-
-1. Agent Control Panel and Agent Runtime must agree on one canonical upstream business Run reference and one Runtime execution reference.
-2. Agent Control Panel sends the stable caller-owned reference in requesterRef; Compute CP treats it as opaque.
-3. Runtime receives allocationId and does not create or mutate ComputeWorkload/Allocation.
-4. EngageGuard and Compute CP must agree on Permit reference, action_hash canonicalization, audience, expiry and replay semantics.
-5. OpenAPI/JSON Schema and event schema compatibility tests must run against all consumers.
-
-Until those dependencies are resolved, this document defines the Compute CP boundary but does not claim cross-repository compatibility has passed.
+1. ACP owns run_intent_id; Runtime owns run_id/workflow_id. Compute owner_ref uses agent-runtime/run/<run_id>, not RunIntent.
+2. Runtime direct Run capacity and SandboxProvider Claim capacity are mutually exclusive request paths; SandboxProvider is sole requester for a sandbox claim.
+3. EngageGuard owns action_operation_id record, action_hash and Permit. Compute CP owns compute_operation_id and provider reconciliation.
+4. The Guard Permit must bind the exact normalized Compute request digest and audience compute-control-panel. The Guard verification/attestation schema is not implemented; protected Agent-originated Compute requests remain blocked until it is.
+5. OpenAPI/JSON Schema, event schemas and consumer-driven golden tests must run across Runtime, Guard and Compute CP before the golden path is enabled.
+6. No contract claims PostgreSQL, FakeProvider, Kubernetes/Kueue or production acceptance without evidence at the corresponding level.
