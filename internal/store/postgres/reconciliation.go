@@ -144,18 +144,34 @@ func (r *Repository) ReconcileOperation(
 	if affected != 1 {
 		return operation.Operation{}, operation.ErrStale
 	}
+	// Operation.Version also advances for internal leases and recovery CAS.
+	// Outbox aggregate_version is the contiguous emitted-event sequence,
+	// independent of those internal transitions. The locked operation row
+	// serializes reconciliation writers for this aggregate.
+	var previousSequence sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT MAX(aggregate_version) FROM compute_outbox_events
+		WHERE producer=$1 AND tenant_id=$2 AND aggregate_type='compute_operation'
+			AND aggregate_id=$3`, producerName, tenantID, operationID).Scan(&previousSequence); err != nil {
+		return operation.Operation{}, fmt.Errorf("read operation outbox sequence: %w", err)
+	}
+	if !previousSequence.Valid || previousSequence.Int64 >= math.MaxInt64 {
+		return operation.Operation{}, operation.ErrInvalid
+	}
+	eventSequence := previousSequence.Int64 + 1
 	eventPayload, err := json.Marshal(struct {
 		OperationID       string           `json:"operation_id"`
 		WorkloadID        string           `json:"workload_id"`
 		ObservationID     string           `json:"observation_id"`
 		Status            operation.Status `json:"status"`
 		DesiredGeneration uint64           `json:"desired_generation"`
+		OperationVersion  uint64           `json:"operation_version"`
 		CleanupRequired   bool             `json:"cleanup_required"`
 		ReconcileRequired bool             `json:"reconcile_required"`
 	}{
 		OperationID: next.ID, WorkloadID: next.WorkloadID,
 		ObservationID: evidence.ObservationID, Status: next.Status,
-		DesiredGeneration: next.Generation, CleanupRequired: next.CleanupRequired,
+		DesiredGeneration: next.Generation, OperationVersion: next.Version,
+		CleanupRequired: next.CleanupRequired,
 		ReconcileRequired: next.ReconcileRequired,
 	})
 	if err != nil {
@@ -168,7 +184,7 @@ func (r *Repository) ReconcileOperation(
 		VALUES($1,$2,'compute.operation.reconciled.v1',1,$3,
 			'compute_operation',$4,$5,clock_timestamp(),$6,$7,$8::jsonb,'PENDING')`,
 		evidence.EventID, producerName, tenantID, operationID,
-		int64(next.Version), evidence.CorrelationID,
+		eventSequence, evidence.CorrelationID,
 		evidence.ObservationID, eventPayload)
 	if err != nil {
 		return operation.Operation{}, fmt.Errorf("append reconciliation outbox: %w", err)
