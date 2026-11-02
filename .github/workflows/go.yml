@@ -46,4 +46,6 @@ jobs:
       - name: Static analysis
         run: go vet ./...
       - name: Race-enabled tests
+        env:
+          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
         run: go test -race -count=1 ./...
