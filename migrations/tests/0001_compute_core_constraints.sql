@@ -93,7 +93,7 @@ BEGIN
             allocation_id, tenant_id, workload_id, provider_id, pool_id, desired_generation, phase
         ) VALUES (
             'allocation-cross-tenant-ci', 'tenant-ci-other', 'workload-ci-1',
-            'provider-ci-other', 'pool-ci-other', 2, 'PENDING'
+            'provider-ci-other', 'pool-ci-other', 2, 'RELEASED'
         );
         RAISE EXCEPTION 'cross-tenant allocation reference unexpectedly accepted';
     EXCEPTION
