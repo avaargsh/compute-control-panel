@@ -39,6 +39,10 @@ jobs:
         env:
           PGPASSWORD: compute-ci
         run: psql --host=127.0.0.1 --username=postgres --dbname=postgres --set=ON_ERROR_STOP=1 --file=migrations/0001_compute_core.sql
+      - name: Validate PostgreSQL schema constraints
+        env:
+          PGPASSWORD: compute-ci
+        run: psql --host=127.0.0.1 --username=postgres --dbname=postgres --set=ON_ERROR_STOP=1 --file=migrations/tests/0001_compute_core_constraints.sql
       - name: Static analysis
         run: go vet ./...
       - name: Race-enabled tests
