@@ -214,7 +214,7 @@ CREATE TABLE compute_outbox_events (
     lease_expires_at TIMESTAMPTZ,
     published_at TIMESTAMPTZ,
     last_error_code TEXT,
-    UNIQUE (producer, aggregate_type, aggregate_id, aggregate_version),
+    UNIQUE (producer, tenant_id, aggregate_type, aggregate_id, aggregate_version),
     CHECK ((lease_owner IS NULL) = (lease_expires_at IS NULL)),
     CHECK ((delivery_state = 'PUBLISHING') = (lease_owner IS NOT NULL)),
     CHECK ((delivery_state = 'PUBLISHED') = (published_at IS NOT NULL))
@@ -240,7 +240,7 @@ CREATE TABLE compute_inbox_events (
     applied_at TIMESTAMPTZ,
     error_code TEXT,
     PRIMARY KEY (consumer_name, event_id),
-    UNIQUE (consumer_name, aggregate_type, aggregate_id, aggregate_version),
+    UNIQUE (consumer_name, tenant_id, aggregate_type, aggregate_id, aggregate_version),
     CHECK ((state = 'APPLIED') = (applied_at IS NOT NULL)),
     CHECK ((state = 'QUARANTINED') = (error_code IS NOT NULL))
 );
