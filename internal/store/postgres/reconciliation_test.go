@@ -66,7 +66,7 @@ func inspectionEvidence(o operation.Operation, obs operation.Observation) Inspec
 }
 
 func TestReconcileAtomicEvidenceAndOutboxAfterLostACK(t *testing.T) {
-	repo, db, ctx, o := setupReconciliation(t)
+	_, db, ctx, o := setupReconciliation(t)
 	fake := provider.NewFakeProvider()
 	req := provider.Request{
 		OperationID: o.ID, TenantID: o.TenantID, WorkloadID: o.WorkloadID,
