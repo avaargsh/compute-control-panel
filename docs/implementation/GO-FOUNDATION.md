@@ -18,17 +18,20 @@ Status: **non-production foundation; Compute Golden Path not yet complete**.
 - `internal/store/postgres.Repository.CreateWorkload` atomically commits tenant-scoped idempotency claim, Workload and accepted Outbox event.
 - Concurrent same-key/same-digest requests replay the stable Workload identity; same-key/different-digest returns `ErrIdempotencyConflict`.
 - PostgreSQL integration tests exercise concurrent callers, one Workload/Outbox row, changed-digest rejection, request digest binding and input validation.
+- `Repository.CreateOperation` atomically commits an immutable operation and an Outbox event; operation row locks, expected-version CAS, PostgreSQL-clock lease expiry and monotonic fencing survive repository reconstruction.
+- Concurrent claim, ACK-loss UNKNOWN recovery, stale worker rejection and historical idempotency replay across workload generation changes have PostgreSQL-backed integration tests.
+- `internal/provider.Adapter` + non-production `FakeProvider` test the inspect-first lost-ACK, duplicate request, fingerprint conflict and authoritative no-effect finality protocol.
+- A strict `gofmt` validation gate runs before migration and Go tests.
+- Consolidation scope and evidence limits: [GPU-COMPUTE-PLATFORM-CONSOLIDATION.md](../migration/GPU-COMPUTE-PLATFORM-CONSOLIDATION.md).
 
 ## Boundaries and caveats
 
 Kubernetes/Kueue/provider APIs are authoritative for actual admission,
-scheduling, running, and resource existence. `Operation.Verify` is only
+scheduling, running, and resource existence. `Operation.ApplyObservation` is only
 a pure rule; an authenticated Provider adapter must supply observations
 from its own inspect call, never untrusted user JSON.
 
-The repository currently implements only Workload create + idempotency + Outbox transaction. PostgreSQL operation lease/CAS repository, migration runner, read/list/delete API, authorization/quota, durable workers, FakeProvider and Kubernetes/Kueue integration remain absent. Integration tests pass against PostgreSQL 16 CI; no production deployment or restore evidence is claimed. A successful mutation acknowledgement does not prove
-release or execution completion. The current readiness endpoint indicates
-process admission only.
+The repository includes Workload/Operation create + transactional Outbox, PostgreSQL operation CAS/lease state, and a pure FakeProvider contract. The fake adapter is process-local only: production-authenticated Inspect, durable post-observation commits, outbox delivery workers, migration runner, read/list/delete API, tenant AuthN/AuthZ/RLS, quota and Kubernetes/Kueue/DRA adapters remain absent. PostgreSQL 16 integration tests do not establish production restore or multi-process crash recovery. A successful mutation acknowledgement does not prove release or execution completion. Readiness indicates process admission, not dependency health.
 
 ## Local
 
@@ -43,9 +46,9 @@ cluster ingress/network policy.
 
 ## Next P0 slice
 
-1. Migration runner and PostgreSQL operation repository: expected-version CAS, durable claim/lease, monotonic fence token, expiry-to-UNKNOWN and authoritative reconcile transitions.
-2. Workload/Allocation read/list/delete API, quota and tenant authorization.
-3. FakeProvider SPI with stable operation IDs and inspect-first recovery.
-4. Kubernetes Job + Kueue adapter and deletion-finality integration tests.
+1. Wire provider-authenticated Inspect into a durable reconcile + immutable observation + outbox transaction; verify UNKNOWN outcomes across real process termination.
+2. Complete Workload/Allocation API, generation CAS, tenant AuthN/AuthZ and quota policy; keep Kueue as the admission authority.
+3. Add schema migration/rollback testing, backup/restore, unique operation event delivery and operational metrics.
+4. Implement Kubernetes Job + Kueue + DRA adapter with exact-UID deletion finality, then migrate GHCR/distroless, cosign, Trivy and release acceptance gates.
 
 No custom GPU scheduler is part of this plan.
