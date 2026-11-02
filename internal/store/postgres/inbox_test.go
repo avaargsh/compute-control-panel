@@ -192,3 +192,46 @@ func TestInboxMalformedPayloadCannotAcknowledge(t *testing.T) {
 		}
 	}
 }
+
+func TestInboxPartialInternalReceiptUpdateRollsBackDomainEffect(t *testing.T) {
+	for _, removed := range []string{"receipt", "cursor"} {
+		t.Run(removed, func(t *testing.T) {
+			db := openIntegrationDB(t)
+			repo, _ := NewRepository(db)
+			ctx := context.Background()
+			tenant := "inbox-tenant-" + randomSuffix(t)
+			e := inboxFixture(t, tenant, "run-"+randomSuffix(t), 1)
+			effectID := "out-effect-" + randomSuffix(t)
+
+			applied, err := repo.ApplyInboxEvent(ctx, e, func(ctx context.Context, tx *sql.Tx, e InboxEvent) error {
+				if err := persistInboxEffect(t, ctx, tx, e, effectID); err != nil {
+					return err
+				}
+				if removed == "receipt" {
+					_, err := tx.ExecContext(ctx, "DELETE FROM compute_inbox_events WHERE consumer_name=$1 AND event_id=$2", e.ConsumerName, e.EventID)
+					return err
+				}
+				_, err := tx.ExecContext(ctx, `DELETE FROM compute_inbox_cursors
+					WHERE consumer_name=$1 AND tenant_id=$2 AND aggregate_type=$3 AND aggregate_id=$4`,
+					e.ConsumerName, e.TenantID, e.AggregateType, e.AggregateID)
+				return err
+			})
+			if applied || !errors.Is(err, ErrInboxUnresolved) {
+				t.Fatalf("missing required %s update was acknowledged: applied=%t err=%v", removed, applied, err)
+			}
+			var count int
+			if err := db.QueryRowContext(ctx,
+				"SELECT count(*) FROM compute_outbox_events WHERE event_id=$1", effectID).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 0 {
+				t.Fatalf("partial %s commit leaked a domain outbox effect: %d", removed, count)
+			}
+			if applied, err := repo.ApplyInboxEvent(ctx, e, func(ctx context.Context, tx *sql.Tx, e InboxEvent) error {
+				return persistInboxEffect(t, ctx, tx, e, effectID)
+			}); err != nil || !applied {
+				t.Fatalf("retry after aborted %s update: applied=%t err=%v", removed, applied, err)
+			}
+		})
+	}
+}
