@@ -179,11 +179,14 @@ func validateCreateWorkload(p CreateWorkloadParams) error {
 	if (p.ComputeProfileID == "") != (p.ComputeProfileRevision == "") {
 		return ErrInvalidRequest
 	}
-	if len(p.NormalizedRequest) == 0 || !json.Valid(p.NormalizedRequest) {
+	object, err := strictJSONObject(p.NormalizedRequest)
+	if err != nil {
 		return ErrInvalidRequest
 	}
-	var object map[string]json.RawMessage
-	if err := json.Unmarshal(p.NormalizedRequest, &object); err != nil || object == nil {
+	var requestProjectID string
+	if rawProjectID, ok := object["project_id"]; !ok ||
+		json.Unmarshal(rawProjectID, &requestProjectID) != nil ||
+		requestProjectID == "" || requestProjectID != p.ProjectID {
 		return ErrInvalidRequest
 	}
 	if !validSHA256Digest(p.RequestDigest) {
@@ -212,11 +215,7 @@ func validSHA256Digest(value string) bool {
 // canonicalize the request before passing bytes here; CreateWorkload verifies
 // that the stored request bytes and supplied digest agree exactly.
 func DigestRequest(normalizedRequest []byte) (string, error) {
-	if len(normalizedRequest) == 0 || !json.Valid(normalizedRequest) {
-		return "", ErrInvalidRequest
-	}
-	var object map[string]json.RawMessage
-	if err := json.Unmarshal(normalizedRequest, &object); err != nil || object == nil {
+	if _, err := strictJSONObject(normalizedRequest); err != nil {
 		return "", ErrInvalidRequest
 	}
 	digest := sha256.Sum256(normalizedRequest)
