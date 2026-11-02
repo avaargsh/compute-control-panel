@@ -108,8 +108,14 @@ func TestLeaseExpiryAndFencingRejectStaleController(t *testing.T) {
     if err != nil { t.Fatal(err) }
     expired, err := op.ExpireLease(2, now.Add(2*time.Second))
     if err != nil || expired.Status != Unknown { t.Fatalf("expiry: %+v %v", expired, err) }
+    if expired.FenceToken <= op.FenceToken {
+        t.Fatalf("lease expiry did not advance fence token: before=%d after=%d", op.FenceToken, expired.FenceToken)
+    }
     reconciling, err := expired.BeginReconciliation(3, "", 0, "controller-2", now.Add(3*time.Second), time.Minute)
     if err != nil { t.Fatal(err) }
+    if reconciling.FenceToken <= expired.FenceToken {
+        t.Fatalf("reconciliation claim did not advance fence token: before=%d after=%d", expired.FenceToken, reconciling.FenceToken)
+    }
     if _, err := reconciling.ApplyObservation(4, "controller-1", op.FenceToken, now.Add(4*time.Second), 7, Observation{}); !errors.Is(err, ErrStaleLease) {
         t.Fatalf("stale fence committed: %v", err)
     }
