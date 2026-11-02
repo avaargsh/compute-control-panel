@@ -167,6 +167,10 @@ func validateCreateWorkload(p CreateWorkloadParams) error {
 	if !validSHA256Digest(p.RequestDigest) {
 		return ErrInvalidRequest
 	}
+	computedDigest, err := DigestRequest(p.NormalizedRequest)
+	if err != nil || computedDigest != p.RequestDigest {
+		return ErrInvalidRequest
+	}
 	return nil
 }
 
@@ -182,7 +186,7 @@ func validSHA256Digest(value string) bool {
 	return err == nil
 }
 
-func DigestRequest(normalizedRequest []byte) (string, error) {
+// DigestRequest hashes an RFC 8785-canonicalized JSON object. The caller must\n// canonicalize the request before passing bytes here; CreateWorkload verifies\n// that the stored request bytes and supplied digest agree exactly.\nfunc DigestRequest(normalizedRequest []byte) (string, error) {
 	if len(normalizedRequest) == 0 || !json.Valid(normalizedRequest) {
 		return "", ErrInvalidRequest
 	}
