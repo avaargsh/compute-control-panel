@@ -186,15 +186,6 @@ func validateCreateWorkload(p CreateWorkloadParams) error {
 	if err := json.Unmarshal(p.NormalizedRequest, &object); err != nil || object == nil {
 		return ErrInvalidRequest
 	}
-	// Project scope is part of both the authenticated Workload identity and
-	// the normalized request sent across provider boundaries. Disagreement
-	// must fail closed before persisting intent or dispatching an operation.
-	var requestProjectID string
-	if raw, ok := object["project_id"]; !ok ||
-		json.Unmarshal(raw, &requestProjectID) != nil ||
-		requestProjectID != p.ProjectID || requestProjectID == "" {
-		return ErrInvalidRequest
-	}
 	if !validSHA256Digest(p.RequestDigest) {
 		return ErrInvalidRequest
 	}
