@@ -49,9 +49,9 @@ Runtime and SandboxProvider must not create separate ComputeWorkloads for the sa
 ### 4. Two operation journals
 
 EngageGuard Action Operation:
-- Runtime creates one stable action_operation_id per admitted ActionProposal; ActionRequest v1 serializes it as operation_id.
+- Runtime creates one stable guard_submission_key per admitted ActionProposal and sends it as the HTTP Idempotency-Key. EngageGuard creates and returns the server-side operation_id.
 - EngageGuard owns the Action Operation record, authorization decision, approval, Permit, action_hash, executor_attempt_id and Receipt.
-- Reusing operation_id with the same canonical ActionRequest returns the same operation. Reusing it with a different action/binding is a conflict.
+- Reusing the same tenant + guard_submission_key with the same RequestHash returns the same operation_id. Reusing the key with a different RequestHash is a conflict.
 
 Compute Provider Operation:
 - Compute CP creates one compute_operation_id for each immutable provider mutation intent.
@@ -61,7 +61,7 @@ Compute Provider Operation:
 Delegation:
 - For an Agent-proposed protected compute action, EngageGuard authorizes the exact action and issues a Permit for the Compute CP audience.
 - Compute CP validates the delegated Permit/action binding at its API enforcement point before accepting the protected mutation. It does not recompute action_hash; it treats the Guard digest as opaque.
-- The Guard action_operation_id and Compute compute_operation_id are linked by references. Guard reconciles the delegated action against Compute CP status; Compute CP reconciles the provider effect.
+- The Guard operation_id and Compute compute_operation_id are linked by references. Guard reconciles the delegated action against Compute CP status; Compute CP reconciles the provider effect.
 - A Compute 202 means durable Workload acceptance, not Allocation readiness. Neither Guard nor Runtime may claim the resource is ready until Compute CP reports a verified BOUND Allocation.
 
 Platform-internal Run capacity needed to execute a Run is an infrastructure orchestration request, not an Agent ActionProposal. Runtime may call Compute CP under authenticated workload identity and Compute policy. It does not create a Guard Operation solely to mirror a ComputeOperation.
