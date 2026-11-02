@@ -82,8 +82,8 @@ INSERT INTO compute_inbox_events (
     'tenant-ci-1', 'compute_workload', 'workload-ci-1', 1, '{}'::jsonb
 );
 
-INSERT INTO compute_inbox_cursors (consumer_name, aggregate_type, aggregate_id, last_applied_version)
-VALUES ('consumer-ci-1', 'compute_workload', 'workload-ci-1', 0);
+INSERT INTO compute_inbox_cursors (consumer_name, tenant_id, aggregate_type, aggregate_id, last_applied_version)
+VALUES ('consumer-ci-1', 'tenant-ci-1', 'compute_workload', 'workload-ci-1', 0);
 
 -- Cross-tenant workload/allocation references must be rejected.
 DO $$
@@ -138,3 +138,87 @@ BEGIN
         WHEN check_violation THEN NULL;
     END;
 END $$;
+
+-- The same tenant is NOT sufficient provenance for a resource observation.
+-- Both allocation and operation must belong to the exact workload.
+DO $cross_allocation_observation$
+BEGIN
+    BEGIN
+        INSERT INTO compute_resource_observations (
+            observation_id, tenant_id, workload_id, allocation_id, provider_id,
+            desired_generation, resource_kind, result, source, adapter_version, observed_at
+        ) VALUES (
+            'obs-cross-workload-allocation', 'tenant-ci-1', 'workload-ci-1',
+            'allocation-ci-2', 'provider-ci-1', 1, 'kubernetes.job',
+            'UNKNOWN', 'test', 'v1', now()
+        );
+        RAISE EXCEPTION 'cross-workload allocation observation unexpectedly accepted';
+    EXCEPTION WHEN foreign_key_violation THEN NULL;
+    END;
+END $cross_allocation_observation$;
+
+DO $cross_operation_observation$
+BEGIN
+    BEGIN
+        INSERT INTO compute_resource_observations (
+            observation_id, tenant_id, workload_id, allocation_id, compute_operation_id,
+            provider_id, desired_generation, resource_kind, result, source,
+            adapter_version, observed_at
+        ) VALUES (
+            'obs-cross-workload-operation', 'tenant-ci-1', 'workload-ci-2',
+            'allocation-ci-2', 'operation-ci-1', 'provider-ci-1', 1,
+            'kubernetes.job', 'UNKNOWN', 'test', 'v1', now()
+        );
+        RAISE EXCEPTION 'cross-workload operation observation unexpectedly accepted';
+    EXCEPTION WHEN foreign_key_violation THEN NULL;
+    END;
+END $cross_operation_observation$;
+
+DO $cross_provider_observation$
+BEGIN
+    BEGIN
+        INSERT INTO compute_resource_observations (
+            observation_id, tenant_id, workload_id, allocation_id, compute_operation_id,
+            provider_id, desired_generation, resource_kind, result, source,
+            adapter_version, observed_at
+        ) VALUES (
+            'obs-cross-provider', 'tenant-ci-1', 'workload-ci-1',
+            'allocation-ci-1', 'operation-ci-1', 'provider-ci-other', 1,
+            'kubernetes.job', 'UNKNOWN', 'test', 'v1', now()
+        );
+        RAISE EXCEPTION 'cross-provider observation unexpectedly accepted';
+    EXCEPTION WHEN foreign_key_violation THEN NULL;
+    END;
+END $cross_provider_observation$;
+
+DO $cross_generation_observation$
+BEGIN
+    BEGIN
+        INSERT INTO compute_resource_observations (
+            observation_id, tenant_id, workload_id, allocation_id, compute_operation_id,
+            provider_id, desired_generation, resource_kind, result, source,
+            adapter_version, observed_at
+        ) VALUES (
+            'obs-cross-generation', 'tenant-ci-1', 'workload-ci-1',
+            'allocation-ci-1', 'operation-ci-1', 'provider-ci-1', 2,
+            'kubernetes.job', 'UNKNOWN', 'test', 'v1', now()
+        );
+        RAISE EXCEPTION 'cross-generation observation unexpectedly accepted';
+    EXCEPTION WHEN foreign_key_violation THEN NULL;
+    END;
+END $cross_generation_observation$;
+
+-- Cursor identity must include tenant, even for the same consumer and aggregate.
+INSERT INTO compute_inbox_cursors (
+    consumer_name, tenant_id, aggregate_type, aggregate_id, last_applied_version
+) VALUES
+    ('consumer-ci-1', 'tenant-ci-other', 'compute_workload', 'workload-ci-1', 0);
+DO $cursor_isolation$
+BEGIN
+    IF (SELECT count(*) FROM compute_inbox_cursors
+        WHERE consumer_name = 'consumer-ci-1'
+        AND aggregate_type = 'compute_workload'
+        AND aggregate_id = 'workload-ci-1') != 2 THEN
+        RAISE EXCEPTION 'inbox cursor did not distinguish tenants';
+    END IF;
+END $cursor_isolation$;
