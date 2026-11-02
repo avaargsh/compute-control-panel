@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 )
 
 func inboxFixture(t *testing.T, tenant, aggregate string, version int64) InboxEvent {
