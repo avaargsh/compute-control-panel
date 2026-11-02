@@ -30,8 +30,8 @@ type Publisher interface {
 }
 
 type Dispatcher struct {
-	journal Journal
-	publisher Publisher
+	journal      Journal
+	publisher    Publisher
 	retryBackoff time.Duration
 }
 
@@ -39,7 +39,7 @@ func NewDispatcher(journal Journal, publisher Publisher, retryBackoff time.Durat
 	if journal == nil || publisher == nil || retryBackoff < 0 || retryBackoff > 24*time.Hour {
 		return nil, ErrInvalidDispatcher
 	}
-	return &Dispatcher{journal:journal,publisher:publisher,retryBackoff:retryBackoff},nil
+	return &Dispatcher{journal: journal, publisher: publisher, retryBackoff: retryBackoff}, nil
 }
 
 // DispatchOnce leases exactly one event for one tenant. It sends the committed
@@ -48,25 +48,29 @@ func NewDispatcher(journal Journal, publisher Publisher, retryBackoff time.Durat
 // the lease until expiration, after which the event may be re-sent.
 // No caller may infer exactly-once delivery from a successful broker request.
 func (d *Dispatcher) DispatchOnce(ctx context.Context, tenantID, owner string, ttl time.Duration) (bool, error) {
-	e,err:=d.journal.ClaimOutbox(ctx,tenantID,owner,ttl)
-	if errors.Is(err,sql.ErrNoRows) { return false,nil }
-	if err!=nil{return false,fmt.Errorf("claim outbox: %w",err)}
-	if err:=d.publisher.Publish(ctx,e);err!=nil {
+	e, err := d.journal.ClaimOutbox(ctx, tenantID, owner, ttl)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("claim outbox: %w", err)
+	}
+	if err := d.publisher.Publish(ctx, e); err != nil {
 		// A broker timeout can mean the event was already received.
 		// Persist a retry using the SAME event_id: consumers deduplicate.
-		retryErr:=d.journal.RetryOutbox(ctx,e.TenantID,e.ID,owner,e.Attempts,d.retryBackoff,"PUBLISH_FAILED")
-		if retryErr!=nil {
-			return true,errors.Join(fmt.Errorf("publish outbox: %w",err),
-				fmt.Errorf("persist outbox retry: %w",retryErr))
+		retryErr := d.journal.RetryOutbox(ctx, e.TenantID, e.ID, owner, e.Attempts, d.retryBackoff, "PUBLISH_FAILED")
+		if retryErr != nil {
+			return true, errors.Join(fmt.Errorf("publish outbox: %w", err),
+				fmt.Errorf("persist outbox retry: %w", retryErr))
 		}
-		return true,fmt.Errorf("publish outbox: %w",err)
+		return true, fmt.Errorf("publish outbox: %w", err)
 	}
-	if err:=d.journal.MarkOutboxPublished(ctx,e.TenantID,e.ID,owner,e.Attempts);err!=nil{
+	if err := d.journal.MarkOutboxPublished(ctx, e.TenantID, e.ID, owner, e.Attempts); err != nil {
 		// Do NOT issue an immediate second Publish; lease fencing and
 		// at-least-once retry protocol owns the recovery.
-		return true,fmt.Errorf("acknowledge outbox delivery: %w",err)
+		return true, fmt.Errorf("acknowledge outbox delivery: %w", err)
 	}
-	return true,nil
+	return true, nil
 }
 
 var _ Journal = (*postgres.Repository)(nil)
