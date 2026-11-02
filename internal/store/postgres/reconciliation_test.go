@@ -96,6 +96,17 @@ func TestReconcileAtomicEvidenceAndOutboxAfterLostACK(t *testing.T) {
 	if observations != 1 || events != 2 {
 		t.Fatalf("operation, observation and Outbox must commit together: observations=%d events=%d", observations, events)
 	}
+	// Operation state version advances on lease/ACK/recovery claims, but only
+	// published events advance the aggregate event sequence. No gap is allowed.
+	var eventSequence int64
+	if err := db.QueryRowContext(ctx,
+		"SELECT aggregate_version FROM compute_outbox_events WHERE event_id=$1",
+		"event-reconciled-"+o.ID).Scan(&eventSequence); err != nil {
+		t.Fatal(err)
+	}
+	if eventSequence != 2 {
+		t.Fatalf("outbox event sequence skipped versions: got %d, want 2", eventSequence)
+	}
 	if _, err := restarted.ReconcileOperation(ctx, o.TenantID, o.ID, o.Version, "reconciler", o.FenceToken, inspectionEvidence(o, obs)); !errors.Is(err, operation.ErrStale) {
 		t.Fatalf("stale reconciliation double committed: %v", err)
 	}
