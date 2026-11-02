@@ -1,95 +1,369 @@
-// Package operation records provider-side uncertainty without claiming
-// ownership of Kubernetes scheduling or actual resource lifecycle.
+// Package operation owns the durable intent to mutate a compute provider.
+// Provider observations are separate evidence; an API acknowledgement alone
+// never proves allocation, execution, or release.
 package operation
 
-import "errors"
+import (
+    "encoding/hex"
+    "errors"
+    "strings"
+    "time"
+)
 
 type Kind string
+
 const (
     Create Kind = "CREATE"
+    Update Kind = "UPDATE"
     Delete Kind = "DELETE"
 )
+
 type Status string
+
 const (
-    Pending Status = "PENDING"
-    InFlight Status = "IN_FLIGHT"
-    Unknown Status = "UNKNOWN"
-    Verified Status = "VERIFIED"
+    Pending      Status = "PENDING"
+    Leased       Status = "LEASED"
+    InFlight     Status = "IN_FLIGHT"
+    Unknown      Status = "UNKNOWN"
+    Reconciling  Status = "RECONCILING"
+    Succeeded    Status = "SUCCEEDED"
+    Failed       Status = "FAILED"
+    ManualReview Status = "MANUAL_REVIEW"
+    Superseded   Status = "SUPERSEDED"
 )
-type Existence string
+
+type ObservationResult string
+
 const (
-    Exists Existence = "EXISTS"
-    Absent Existence = "ABSENT"
-    Indeterminate Existence = "INDETERMINATE"
+    ResourcePresent        ObservationResult = "RESOURCE_PRESENT"
+    TargetAbsent            ObservationResult = "TARGET_ABSENT"
+    OperationNotAppliedFinal ObservationResult = "OPERATION_NOT_APPLIED_FINAL"
+    OperationInProgress     ObservationResult = "OPERATION_IN_PROGRESS"
+    OperationFailedFinal    ObservationResult = "OPERATION_FAILED_FINAL"
+    ObservationConflict     ObservationResult = "CONFLICT"
 )
+
 var (
-    ErrInvalid = errors.New("invalid operation")
-    ErrStale = errors.New("stale operation version")
-    ErrTransition = errors.New("forbidden operation transition")
-    ErrObservation = errors.New("inconclusive or mismatched provider observation")
+    ErrInvalid       = errors.New("invalid compute operation")
+    ErrStale         = errors.New("stale compute operation version")
+    ErrTransition    = errors.New("forbidden compute operation transition")
+    ErrStaleLease    = errors.New("stale compute operation lease or fencing token")
+    ErrLeaseExpired  = errors.New("compute operation lease expired")
+    ErrLeaseActive   = errors.New("compute operation lease is still active")
+    ErrObservation   = errors.New("provider observation does not match operation")
+    ErrInvalidResult = errors.New("invalid provider observation result")
 )
+
 type Operation struct {
-    ID string
-    TenantID string
-    WorkloadID string
-    ProviderID string
+    ID             string
+    TenantID       string
+    WorkloadID     string
+    ProviderID     string
+    IdempotencyKey string
+    RequestDigest  string
+
     Generation uint64
-    Version uint64
-    Kind Kind
-    Status Status
+    Version    uint64
+    FenceToken uint64
+    Kind       Kind
+    Status     Status
+
+    LeaseOwner     string
+    LeaseExpiresAt time.Time
+
+    TargetResourceID  string
+    TargetResourceUID string
+
+    ProviderResourceID  string
+    ProviderResourceUID string
+    ErrorCode           string
+    ManualReviewCode    string
+    CompensationRequired bool
 }
-// Observation must come from the provider adapter's authenticated inspect
-// response, never from untrusted API caller JSON or a mutation ACK.
+
+// Observation is created by a trusted provider adapter after inspect/lookup.
+// It must not be populated from an API caller's request body.
 type Observation struct {
-    OperationID string
-    Generation uint64
-    ProviderResourceID string
-    Existence Existence
+    OperationID       string
+    TenantID          string
+    WorkloadID        string
+    ProviderID        string
+    DesiredGeneration uint64
+
+    Result ObservationResult
+
+    ResourceID          string
+    ResourceUID         string
+    ResourceOperationID string
+    ResourceGeneration  uint64
+
+    TargetResourceID  string
+    TargetResourceUID string
+
+    ResourceVersion string
+    ObservedAt      time.Time
+    ErrorCode       string
+    ReasonCode      string
 }
+
+func validDigest(value string) bool {
+    if !strings.HasPrefix(value, "sha256:") || len(value) != len("sha256:")+64 {
+        return false
+    }
+    digest := strings.TrimPrefix(value, "sha256:")
+    if strings.ToLower(digest) != digest {
+        return false
+    }
+    _, err := hex.DecodeString(digest)
+    return err == nil
+}
+
 func (o Operation) Validate() error {
-    if o.ID == "" || o.TenantID == "" || o.WorkloadID == "" ||
-        o.ProviderID == "" || o.Generation == 0 || o.Version == 0 {
+    if strings.TrimSpace(o.ID) == "" ||
+        strings.TrimSpace(o.TenantID) == "" ||
+        strings.TrimSpace(o.WorkloadID) == "" ||
+        strings.TrimSpace(o.ProviderID) == "" ||
+        strings.TrimSpace(o.IdempotencyKey) == "" ||
+        !validDigest(o.RequestDigest) ||
+        o.Generation == 0 || o.Version == 0 {
         return ErrInvalid
     }
-    if o.Kind != Create && o.Kind != Delete { return ErrInvalid }
-    switch o.Status {
-    case Pending, InFlight, Unknown, Verified: return nil
+    if o.Kind != Create && o.Kind != Update && o.Kind != Delete {
+        return ErrInvalid
     }
-    return ErrInvalid
+    if o.Kind == Delete && (o.TargetResourceID == "" || o.TargetResourceUID == "") {
+        return ErrInvalid
+    }
+
+    leased := o.Status == Leased || o.Status == InFlight || o.Status == Reconciling
+    if leased {
+        if strings.TrimSpace(o.LeaseOwner) == "" || o.LeaseExpiresAt.IsZero() || o.FenceToken == 0 {
+            return ErrInvalid
+        }
+    } else if o.LeaseOwner != "" || !o.LeaseExpiresAt.IsZero() {
+        return ErrInvalid
+    }
+
+    switch o.Status {
+    case Pending, Leased, InFlight, Unknown, Reconciling:
+        if o.ProviderResourceID != "" || o.ProviderResourceUID != "" ||
+            o.ErrorCode != "" || o.ManualReviewCode != "" || o.CompensationRequired {
+            return ErrInvalid
+        }
+    case Succeeded:
+        if o.ErrorCode != "" || o.ManualReviewCode != "" || o.CompensationRequired {
+            return ErrInvalid
+        }
+        if o.Kind == Delete {
+            if o.TargetResourceID == "" || o.TargetResourceUID == "" {
+                return ErrInvalid
+            }
+        } else if o.ProviderResourceID == "" || o.ProviderResourceUID == "" {
+            return ErrInvalid
+        }
+    case Failed:
+        if o.ErrorCode == "" || o.ManualReviewCode != "" || o.CompensationRequired {
+            return ErrInvalid
+        }
+    case ManualReview:
+        if o.ManualReviewCode == "" || o.ErrorCode != "" || o.CompensationRequired {
+            return ErrInvalid
+        }
+    case Superseded:
+        if o.ErrorCode != "" || o.ManualReviewCode != "" {
+            return ErrInvalid
+        }
+        if o.CompensationRequired && (o.ProviderResourceID == "" || o.ProviderResourceUID == "") {
+            return ErrInvalid
+        }
+    default:
+        return ErrInvalid
+    }
+    return nil
 }
-func (o Operation) Begin(expectedVersion uint64) (Operation, error) {
+
+func (o Operation) checkVersion(expected uint64) error {
+    if o.Version != expected {
+        return ErrStale
+    }
+    return nil
+}
+
+func (o Operation) checkLease(owner string, token uint64, now time.Time) error {
+    if owner == "" || o.LeaseOwner != owner || o.FenceToken != token {
+        return ErrStaleLease
+    }
+    if now.IsZero() || !now.Before(o.LeaseExpiresAt) {
+        return ErrLeaseExpired
+    }
+    return nil
+}
+
+func (o Operation) clearLease() Operation {
+    o.LeaseOwner = ""
+    o.LeaseExpiresAt = time.Time{}
+    return o
+}
+
+func (o Operation) toManualReview(code string) Operation {
+    o = o.clearLease()
+    o.Status = ManualReview
+    o.ManualReviewCode = code
+    o.Version++
+    return o
+}
+
+func (o Operation) Claim(expectedVersion uint64, owner string, now time.Time, ttl time.Duration) (Operation, error) {
     if err := o.Validate(); err != nil { return o, err }
-    if o.Version != expectedVersion { return o, ErrStale }
+    if err := o.checkVersion(expectedVersion); err != nil { return o, err }
     if o.Status != Pending { return o, ErrTransition }
+    if strings.TrimSpace(owner) == "" || now.IsZero() || ttl <= 0 { return o, ErrInvalid }
+    o.Status = Leased
+    o.LeaseOwner = owner
+    o.LeaseExpiresAt = now.Add(ttl)
+    o.FenceToken++
+    o.Version++
+    return o, nil
+}
+
+func (o Operation) Start(expectedVersion uint64, owner string, token uint64, now time.Time) (Operation, error) {
+    if err := o.Validate(); err != nil { return o, err }
+    if err := o.checkVersion(expectedVersion); err != nil { return o, err }
+    if o.Status != Leased { return o, ErrTransition }
+    if err := o.checkLease(owner, token, now); err != nil { return o, err }
     o.Status = InFlight
     o.Version++
     return o, nil
 }
-func (o Operation) LostAck(expectedVersion uint64) (Operation, error) {
+
+func (o Operation) MarkUnknown(expectedVersion uint64, owner string, token uint64, now time.Time) (Operation, error) {
     if err := o.Validate(); err != nil { return o, err }
-    if o.Version != expectedVersion { return o, ErrStale }
+    if err := o.checkVersion(expectedVersion); err != nil { return o, err }
     if o.Status != InFlight { return o, ErrTransition }
+    if err := o.checkLease(owner, token, now); err != nil { return o, err }
+    o = o.clearLease()
     o.Status = Unknown
     o.Version++
     return o, nil
 }
-// Verify never interprets a successful delete ACK as release finality.
-// DELETE requires provider-observed absence for this exact generation;
-// CREATE requires provider-observed existence and a resource identity.
-func (o Operation) Verify(expectedVersion uint64, obs Observation) (Operation, error) {
+
+func (o Operation) ExpireLease(expectedVersion uint64, now time.Time) (Operation, error) {
     if err := o.Validate(); err != nil { return o, err }
-    if o.Version != expectedVersion { return o, ErrStale }
-    if o.Status != InFlight && o.Status != Unknown { return o, ErrTransition }
-    if obs.OperationID != o.ID || obs.Generation != o.Generation {
+    if err := o.checkVersion(expectedVersion); err != nil { return o, err }
+    if o.Status != Leased && o.Status != InFlight && o.Status != Reconciling {
+        return o, ErrTransition
+    }
+    if now.IsZero() || now.Before(o.LeaseExpiresAt) { return o, ErrLeaseActive }
+    o = o.clearLease()
+    o.Status = Unknown
+    o.Version++
+    return o, nil
+}
+
+// BeginReconciliation accepts UNKNOWN after a lost ACK or IN_FLIGHT after a
+// provider ACK. For IN_FLIGHT the current lease owner/token must prove
+// ownership; reconciliation then increments the fencing token.
+func (o Operation) BeginReconciliation(expectedVersion uint64, currentOwner string, currentToken uint64, newOwner string, now time.Time, ttl time.Duration) (Operation, error) {
+    if err := o.Validate(); err != nil { return o, err }
+    if err := o.checkVersion(expectedVersion); err != nil { return o, err }
+    if strings.TrimSpace(newOwner) == "" || now.IsZero() || ttl <= 0 { return o, ErrInvalid }
+
+    switch o.Status {
+    case Unknown:
+        if currentOwner != "" || currentToken != 0 { return o, ErrStaleLease }
+    case InFlight:
+        if err := o.checkLease(currentOwner, currentToken, now); err != nil { return o, err }
+    default:
+        return o, ErrTransition
+    }
+
+    o.Status = Reconciling
+    o.LeaseOwner = newOwner
+    o.LeaseExpiresAt = now.Add(ttl)
+    o.FenceToken++
+    o.Version++
+    return o, nil
+}
+
+func (o Operation) ApplyObservation(expectedVersion uint64, owner string, token uint64, now time.Time, currentDesiredGeneration uint64, obs Observation) (Operation, error) {
+    if err := o.Validate(); err != nil { return o, err }
+    if err := o.checkVersion(expectedVersion); err != nil { return o, err }
+    if o.Status != Reconciling { return o, ErrTransition }
+    if err := o.checkLease(owner, token, now); err != nil { return o, err }
+    if currentDesiredGeneration == 0 || obs.OperationID != o.ID ||
+        obs.TenantID != o.TenantID || obs.WorkloadID != o.WorkloadID ||
+        obs.ProviderID != o.ProviderID || obs.DesiredGeneration != o.Generation ||
+        obs.ResourceVersion == "" || obs.ObservedAt.IsZero() {
         return o, ErrObservation
     }
-    if o.Kind == Create && (obs.Existence != Exists || obs.ProviderResourceID == "") {
-        return o, ErrObservation
+
+    switch obs.Result {
+    case ResourcePresent:
+        if o.Kind == Delete || obs.ResourceID == "" || obs.ResourceUID == "" ||
+            obs.ResourceOperationID != o.ID || obs.ResourceGeneration != o.Generation {
+            return o, ErrObservation
+        }
+    case TargetAbsent:
+        if o.Kind != Delete || obs.TargetResourceID != o.TargetResourceID ||
+            obs.TargetResourceUID != o.TargetResourceUID {
+            return o, ErrObservation
+        }
+    case OperationNotAppliedFinal, OperationInProgress:
+        if obs.ResourceID != "" || obs.ResourceUID != "" || obs.ErrorCode != "" {
+            return o, ErrObservation
+        }
+    case OperationFailedFinal:
+        if obs.ErrorCode == "" || obs.ResourceID != "" || obs.ResourceUID != "" {
+            return o, ErrObservation
+        }
+    case ObservationConflict:
+        if obs.ReasonCode == "" { return o, ErrObservation }
+    default:
+        return o, ErrInvalidResult
     }
-    if o.Kind == Delete && obs.Existence != Absent {
-        return o, ErrObservation
+
+    if currentDesiredGeneration != o.Generation {
+        switch obs.Result {
+        case ResourcePresent:
+            o.ProviderResourceID = obs.ResourceID
+            o.ProviderResourceUID = obs.ResourceUID
+            o.CompensationRequired = o.Kind != Delete
+            o.Status = Superseded
+        case TargetAbsent, OperationNotAppliedFinal, OperationFailedFinal:
+            o.Status = Superseded
+        default:
+            return o.toManualReview("STALE_GENERATION_OUTCOME_AMBIGUOUS"), nil
+        }
+        o = o.clearLease()
+        o.Version++
+        return o, nil
     }
-    o.Status = Verified
+
+    switch obs.Result {
+    case ResourcePresent:
+        o.ProviderResourceID = obs.ResourceID
+        o.ProviderResourceUID = obs.ResourceUID
+        o.Status = Succeeded
+    case TargetAbsent, OperationNotAppliedFinal:
+        if obs.Result == OperationNotAppliedFinal {
+            // Retry is safe only because the provider's operation lookup
+            // authoritatively proved no effect. Keep operation ID and digest.
+            o.Status = Pending
+        } else {
+            o.Status = Succeeded
+        }
+    case OperationInProgress:
+        o = o.clearLease()
+        o.Status = Unknown
+        o.Version++
+        return o, nil
+    case OperationFailedFinal:
+        o.ErrorCode = obs.ErrorCode
+        o.Status = Failed
+    case ObservationConflict:
+        return o.toManualReview(obs.ReasonCode), nil
+    }
+    o = o.clearLease()
     o.Version++
     return o, nil
 }
