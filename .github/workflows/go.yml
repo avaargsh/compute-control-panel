@@ -62,5 +62,4 @@ jobs:
       - name: SIGKILL recovery repeatability
         env:
           DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
-        run: go test -race -count=3 -run '^TestSIGKILLRecoveryLeaseIsFencedBeforeInspection
- ./internal/recovery
+        run: go test -race -count=3 -run '^TestSIGKILLRecoveryLeaseIsFencedBeforeInspection$' ./internal/recovery
