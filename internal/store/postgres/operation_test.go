@@ -164,3 +164,27 @@ func TestOperationLeaseExpiryAdvancesFence(t *testing.T) {
         t.Fatalf("lease expiry failed to fence: %+v %v",expired,err)
     }
 }
+
+
+func TestOldGenerationOperationCannotDispatchButCanReplay(t *testing.T) {
+    db:=openIntegrationDB(t)
+    ctx,cancel:=context.WithTimeout(context.Background(),15*time.Second)
+    defer cancel()
+    repo,_:=NewRepository(db)
+    tenant:="tenant-stale-"+randomSuffix(t)
+    op:=operationFixture(t,repo,ctx,tenant)
+    created,ok,err:=repo.CreateOperation(ctx,op,"event-"+randomSuffix(t),"corr-stale")
+    if err!=nil || !ok {t.Fatalf("initial operation: %+v %t %v",created,ok,err)}
+    _,err=db.ExecContext(ctx,`UPDATE compute_workloads SET desired_generation=2,
+        version=version+1 WHERE tenant_id=$1 AND workload_id=$2`,tenant,op.WorkloadID)
+    if err!=nil {t.Fatal(err)}
+    replay:=op
+    replay.ID="op-unused-"+randomSuffix(t)
+    previous,createdAgain,err:=repo.CreateOperation(ctx,replay,"event-unused-"+randomSuffix(t),"corr-replay")
+    if err!=nil || createdAgain || previous.ID!=created.ID {
+        t.Fatalf("historical idempotency replay rejected after generation update: %+v %t %v",previous,createdAgain,err)
+    }
+    if _,err:=repo.ClaimOperation(ctx,tenant,op.ID,1,"obsolete-worker",time.Minute); !errors.Is(err,operation.ErrStale) {
+        t.Fatalf("stale generation operation was dispatchable: %v",err)
+    }
+}
