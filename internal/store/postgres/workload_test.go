@@ -242,3 +242,38 @@ func TestCreateWorkloadIdempotencyRejectsChangedOwnership(t *testing.T) {
 		t.Fatalf("changed ownership emitted %d events, want 1", count)
 	}
 }
+
+func TestCreateWorkloadRejectsNormalizedRequestProjectMismatch(t *testing.T) {
+	request := json.RawMessage(`{"api_version":"compute.platform/v1","project_id":"project-body","resources":{"cpu":"2"}}`)
+	params := createParams("tenant-project-mismatch", "idem-project-mismatch",
+		testDigest(request), request, "workload-project-mismatch", "event-project-mismatch")
+	params.ProjectID = "project-metadata"
+	if err := validateCreateWorkload(params); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("request body project_id mismatch accepted: %v", err)
+	}
+}
+
+func TestCreateWorkloadRejectsDuplicateNormalizedJSONKeys(t *testing.T) {
+	cases := []struct {
+		name string
+		request json.RawMessage
+	}{
+		{
+			name: "duplicate project id",
+			request: json.RawMessage(`{"api_version":"compute.platform/v1","project_id":"project-a","project_id":"project-b","resources":{"cpu":"2"}}`),
+		},
+		{
+			name: "nested duplicate resource key",
+			request: json.RawMessage(`{"api_version":"compute.platform/v1","project_id":"project-a","resources":{"cpu":"2","cpu":"8"}}`),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			params := createParams("tenant-duplicate-json", "idem-"+tc.name,
+				testDigest(tc.request), tc.request, "workload-"+tc.name, "event-"+tc.name)
+			if err := validateCreateWorkload(params); !errors.Is(err, ErrInvalidRequest) {
+				t.Fatalf("ambiguous normalized request accepted: %v", err)
+			}
+		})
+	}
+}
