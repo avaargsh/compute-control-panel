@@ -203,3 +203,24 @@ func TestUpdateOperationRequiresExactTargetIdentity(t *testing.T) {
     op.TargetResourceUID = ""
     if !errors.Is(op.Validate(), ErrInvalid) { t.Fatal("update without target UID accepted") }
 }
+
+func TestUpdateObservationMustMatchOperationTargetIdentity(t *testing.T) {
+	now := time.Unix(900, 0).UTC()
+	op := fixture(Update)
+	op.TargetResourceID = "job-existing"
+	op.TargetResourceUID = "uid-existing"
+	op = claimAndStart(t, op, now)
+	op = reconcile(t, op, now.Add(2*time.Second))
+	obs := Observation{
+		OperationID: "op-1", TenantID: "tenant-1", WorkloadID: "workload-1",
+		ProviderID: "provider-1", DesiredGeneration: 7,
+		Result: ResourcePresent,
+		ResourceID: "job-foreign", ResourceUID: "uid-foreign",
+		ResourceOperationID: "op-1", ResourceGeneration: 7,
+		TargetResourceID: "job-foreign", TargetResourceUID: "uid-foreign",
+		ResourceVersion: "rv-90", ObservedAt: now.Add(3*time.Second),
+	}
+	if _, err := op.ApplyObservation(op.Version, "reconciler-1", op.FenceToken, now.Add(3*time.Second), 7, obs); !errors.Is(err, ErrObservation) {
+		t.Fatalf("update accepted provider evidence for a different target: %v", err)
+	}
+}
