@@ -74,13 +74,17 @@ func TestInboxConcurrentRedeliveryAppliesEffectExactlyOnce(t *testing.T) {
 	var applied, outbox int
 	var cursor int64
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM compute_inbox_events
-		WHERE consumer_name=$1 AND event_id=$2 AND state='APPLIED'`, e.ConsumerName, e.EventID).Scan(&applied); err != nil { t.Fatal(err) }
+		WHERE consumer_name=$1 AND event_id=$2 AND state='APPLIED'`, e.ConsumerName, e.EventID).Scan(&applied); err != nil {
+		t.Fatal(err)
+	}
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM compute_outbox_events WHERE event_id=$1`, effectID).Scan(&outbox); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.QueryRowContext(ctx, `SELECT last_applied_version FROM compute_inbox_cursors
 		WHERE consumer_name=$1 AND tenant_id=$2 AND aggregate_type=$3 AND aggregate_id=$4`,
-		e.ConsumerName, e.TenantID, e.AggregateType, e.AggregateID).Scan(&cursor); err != nil { t.Fatal(err) }
+		e.ConsumerName, e.TenantID, e.AggregateType, e.AggregateID).Scan(&cursor); err != nil {
+		t.Fatal(err)
+	}
 	if applied != 1 || outbox != 1 || cursor != 1 {
 		t.Fatalf("transaction not atomic: inbox=%d outbox=%d cursor=%d", applied, outbox, cursor)
 	}
