@@ -138,6 +138,28 @@ func (r *Repository) CreateWorkload(ctx context.Context, p CreateWorkloadParams)
 	if existing.RequestDigest != p.RequestDigest {
 		return Workload{}, false, ErrIdempotencyConflict
 	}
+	// The canonical request digest alone is insufficient: the original
+	// Workload creation also binds immutable tenant-scoped metadata which
+	// is stored outside normalized_request. Reusing the same key/digest
+	// with a different project, owner or profile must not return another
+	// principal's Workload as though it were an exact replay.
+	var sameIdentity bool
+	if err := tx.QueryRowContext(ctx, `SELECT
+		project_id=$3 AND owner_service=$4 AND owner_resource_type=$5
+		AND owner_resource_id=$6
+		AND compute_profile_id IS NOT DISTINCT FROM $7::text
+		AND compute_profile_revision IS NOT DISTINCT FROM $8::text
+		FROM compute_workloads
+		WHERE tenant_id=$1 AND idempotency_key=$2`,
+		p.TenantID, p.IdempotencyKey, p.ProjectID, p.OwnerService,
+		p.OwnerResourceType, p.OwnerResourceID,
+		nullableString(p.ComputeProfileID), nullableString(p.ComputeProfileRevision),
+	).Scan(&sameIdentity); err != nil {
+		return Workload{}, false, fmt.Errorf("verify idempotent Workload identity: %w", err)
+	}
+	if !sameIdentity {
+		return Workload{}, false, ErrIdempotencyConflict
+	}
 	if err := tx.Commit(); err != nil {
 		return Workload{}, false, fmt.Errorf("commit idempotent replay transaction: %w", err)
 	}
