@@ -186,3 +186,38 @@ func TestInspectFailureRetainsFencedReconciliationAndDoesNotDispatch(t *testing.
 		t.Fatalf("failed inspect discarded fenced recovery lease: %+v %v", after, err)
 	}
 }
+
+func TestExpiredInspectionLeaseCanReconcileWithNewFence(t *testing.T) {
+	_, repo, op := setupUnknown(t)
+	ctx := context.Background()
+	failing, err := recovery.NewWorker(repo, adapterFor(brokenInspector{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := failing.RecoverUnknown(ctx, op.TenantID, op.ID, "first-reconciler", 25*time.Millisecond); err == nil {
+		t.Fatal("expected first provider inspection to fail")
+	}
+	previous, err := repo.GetOperation(ctx, op.TenantID, op.ID)
+	if err != nil || previous.Status != operation.Reconciling {
+		t.Fatalf("lost recovery lease: %+v %v", previous, err)
+	}
+	fake := provider.NewFakeProvider()
+	req := provider.Request{
+		OperationID: op.ID, TenantID: op.TenantID, WorkloadID: op.WorkloadID,
+		ProviderID: op.ProviderID, IdempotencyKey: op.IdempotencyKey,
+		RequestDigest: op.RequestDigest, DesiredGeneration: op.Generation, Kind: op.Kind,
+	}
+	fake.LoseNextAcknowledgement()
+	if _, err := fake.Apply(ctx, req); !errors.Is(err, provider.ErrAcknowledgementLost) {
+		t.Fatalf("provider did not simulate lost ACK: %v", err)
+	}
+	time.Sleep(85 * time.Millisecond)
+	second, err := recovery.NewWorker(repo, adapterFor(inspectOnly{Adapter: fake}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := second.RecoverUnknown(ctx, op.TenantID, op.ID, "second-reconciler", time.Minute)
+	if err != nil || next.Status != operation.Succeeded || next.FenceToken <= previous.FenceToken {
+		t.Fatalf("expired recovery must fence old worker and inspect: %+v %v", next, err)
+	}
+}
