@@ -129,12 +129,19 @@ func (r *Repository) ApplyInbox(ctx context.Context, e InboxEvent, handle InboxH
 	if err := handle(ctx, tx, e); err != nil {
 		return false, fmt.Errorf("Inbox business handler: %w", err)
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE compute_inbox_events
+	receipt, err := tx.ExecContext(ctx, `UPDATE compute_inbox_events
 		SET state='APPLIED',applied_at=clock_timestamp()
 		WHERE consumer_name=$1 AND event_id=$2 AND state='RECEIVED'`,
 		e.ConsumerName, e.EventID)
 	if err != nil {
 		return false, fmt.Errorf("apply Inbox event: %w", err)
+	}
+	receiptRows, err := receipt.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("verify Inbox receipt update: %w", err)
+	}
+	if receiptRows != 1 {
+		return false, ErrInboxConflict
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE compute_inbox_cursors SET
 		last_applied_version=$5,updated_at=clock_timestamp()
