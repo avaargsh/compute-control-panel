@@ -42,7 +42,7 @@ func TestRecoveryLeaseHolderSubprocess(t *testing.T) {
 	}
 	if _, err := repo.BeginOperationReconciliation(
 		context.Background(), tenantID, operationID, current.Version, "", 0,
-		"killed-worker", 100*time.Millisecond,
+		"killed-worker", 400*time.Millisecond,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestSIGKILLRecoveryLeaseIsFencedBeforeInspection(t *testing.T) {
 	); !errors.Is(err, operation.ErrTransition) {
 		t.Fatalf("active recovery lease was stolen: %v", err)
 	}
-	time.Sleep(220 * time.Millisecond)
+	time.Sleep(550 * time.Millisecond)
 	worker, err := recovery.NewWorker(repo, adapterFor(inspectOnly{Adapter: fake}))
 	if err != nil {
 		t.Fatal(err)
