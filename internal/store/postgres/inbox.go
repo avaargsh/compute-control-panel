@@ -152,14 +152,21 @@ func (r *Repository) ApplyInboxEvent(
 		// will see the original cursor and may safely apply the same event.
 		return false, fmt.Errorf("apply inbox event: %w", err)
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE compute_inbox_events SET
+	receipt, err := tx.ExecContext(ctx, `UPDATE compute_inbox_events SET
 		state='APPLIED',applied_at=clock_timestamp()
 		WHERE consumer_name=$1 AND event_id=$2 AND state='RECEIVED'`,
 		e.ConsumerName, e.EventID)
 	if err != nil {
 		return false, fmt.Errorf("record applied inbox receipt: %w", err)
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE compute_inbox_cursors
+	receiptRows, err := receipt.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("verify applied inbox receipt: %w", err)
+	}
+	if receiptRows != 1 {
+		return false, ErrInboxUnresolved
+	}
+	cursorUpdate, err := tx.ExecContext(ctx, `UPDATE compute_inbox_cursors
 		SET last_applied_version=$5,updated_at=clock_timestamp()
 		WHERE consumer_name=$1 AND tenant_id=$2 AND aggregate_type=$3
 		  AND aggregate_id=$4 AND last_applied_version=$6`,
@@ -167,6 +174,13 @@ func (r *Repository) ApplyInboxEvent(
 		e.AggregateVersion, lastApplied)
 	if err != nil {
 		return false, fmt.Errorf("advance inbox cursor: %w", err)
+	}
+	cursorRows, err := cursorUpdate.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("verify applied inbox cursor: %w", err)
+	}
+	if cursorRows != 1 {
+		return false, ErrInboxUnresolved
 	}
 	if err := tx.Commit(); err != nil {
 		// A lost commit ACK is ambiguous. Caller must reread durable inbox
