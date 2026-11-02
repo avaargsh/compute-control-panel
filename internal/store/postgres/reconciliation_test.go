@@ -137,8 +137,15 @@ func TestReconcileFailureRollsBackObservationAndState(t *testing.T) {
 }
 
 func TestReconcileNotAppliedFinalPreservesSameKeyRetry(t *testing.T) {
-	repo, _, ctx, o := setupReconciliation(t)
+	repo, db, ctx, o := setupReconciliation(t)
 	evidence := inspectionEvidence(o, trustedObservation(o, operation.OperationNotAppliedFinal))
+	var claimedAt time.Time
+	if err := db.QueryRowContext(ctx, "SELECT updated_at FROM compute_operations WHERE tenant_id=$1 AND compute_operation_id=$2",
+		o.TenantID, o.ID).Scan(&claimedAt); err != nil {
+		t.Fatal(err)
+	}
+	// Successful finality must be observed AFTER the current recovery lease.
+	evidence.Observation.ObservedAt = claimedAt.Add(time.Microsecond)
 	next, err := repo.ReconcileOperation(ctx, o.TenantID, o.ID, o.Version, "reconciler", o.FenceToken, evidence)
 	if err != nil || next.Status != operation.Pending || next.ID != o.ID || next.IdempotencyKey != o.IdempotencyKey || next.RequestDigest != o.RequestDigest {
 		t.Fatalf("safe retry changed immutable identity: %+v %v", next, err)
