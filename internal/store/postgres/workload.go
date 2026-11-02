@@ -15,8 +15,8 @@ import (
 )
 
 var (
-	ErrInvalidRequest       = errors.New("invalid workload create request")
-	ErrIdempotencyConflict  = errors.New("idempotency key reused with a different request digest")
+	ErrInvalidRequest      = errors.New("invalid workload create request")
+	ErrIdempotencyConflict = errors.New("idempotency key reused with a different request digest")
 )
 
 const (
@@ -36,35 +36,35 @@ func NewRepository(db *sql.DB) (*Repository, error) {
 }
 
 type CreateWorkloadParams struct {
-	WorkloadID string
-	TenantID string
-	ProjectID string
-	OwnerService string
-	OwnerResourceType string
-	OwnerResourceID string
-	ComputeProfileID string
+	WorkloadID             string
+	TenantID               string
+	ProjectID              string
+	OwnerService           string
+	OwnerResourceType      string
+	OwnerResourceID        string
+	ComputeProfileID       string
 	ComputeProfileRevision string
-	NormalizedRequest json.RawMessage
-	RequestDigest string
-	IdempotencyKey string
-	EventID string
-	CorrelationID string
-	CausationID string
+	NormalizedRequest      json.RawMessage
+	RequestDigest          string
+	IdempotencyKey         string
+	EventID                string
+	CorrelationID          string
+	CausationID            string
 }
 
 type Workload struct {
-	WorkloadID string
-	TenantID string
-	ProjectID string
-	RequestDigest string
-	IdempotencyKey string
-	DesiredGeneration int64
-	Version int64
-	DesiredState string
-	ObservedPhase string
+	WorkloadID         string
+	TenantID           string
+	ProjectID          string
+	RequestDigest      string
+	IdempotencyKey     string
+	DesiredGeneration  int64
+	Version            int64
+	DesiredState       string
+	ObservedPhase      string
 	LatestAllocationID sql.NullString
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 // CreateWorkload commits the idempotency claim, workload and accepted event in
@@ -98,9 +98,9 @@ func (r *Repository) CreateWorkload(ctx context.Context, p CreateWorkloadParams)
 		[]byte(p.NormalizedRequest), p.RequestDigest, p.IdempotencyKey))
 	if err == nil {
 		payload, marshalErr := json.Marshal(struct {
-			WorkloadID string `json:"workload_id"`
-			DesiredGeneration int64 `json:"desired_generation"`
-			RequestDigest string `json:"request_digest"`
+			WorkloadID        string `json:"workload_id"`
+			DesiredGeneration int64  `json:"desired_generation"`
+			RequestDigest     string `json:"request_digest"`
 		}{WorkloadID: workload.WorkloadID, DesiredGeneration: workload.DesiredGeneration, RequestDigest: workload.RequestDigest})
 		if marshalErr != nil {
 			return Workload{}, false, fmt.Errorf("marshal workload accepted event: %w", marshalErr)

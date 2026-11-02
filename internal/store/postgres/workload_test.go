@@ -105,7 +105,7 @@ func TestCreateWorkloadRejectsInvalidParams(t *testing.T) {
 	valid := createParams("tenant-1", "idem-1", testDigest(request), request, "workload-1", "event-1")
 	differentDigest := testDigest(json.RawMessage(`{"project_id":"other-project"}`))
 	cases := []struct {
-		name string
+		name   string
 		mutate func(*CreateWorkloadParams)
 	}{
 		{name: "missing tenant", mutate: func(p *CreateWorkloadParams) { p.TenantID = "" }},
@@ -150,17 +150,17 @@ func openIntegrationDB(t *testing.T) *sql.DB {
 
 func createParams(tenantID, idempotencyKey, digest string, request json.RawMessage, workloadID, eventID string) CreateWorkloadParams {
 	return CreateWorkloadParams{
-		WorkloadID: workloadID,
-		TenantID: tenantID,
-		ProjectID: "project-int-1",
-		OwnerService: "agent-runtime",
+		WorkloadID:        workloadID,
+		TenantID:          tenantID,
+		ProjectID:         "project-int-1",
+		OwnerService:      "agent-runtime",
 		OwnerResourceType: "run",
-		OwnerResourceID: "run-int-1",
+		OwnerResourceID:   "run-int-1",
 		NormalizedRequest: request,
-		RequestDigest: digest,
-		IdempotencyKey: idempotencyKey,
-		EventID: eventID,
-		CorrelationID: "corr-int-1",
+		RequestDigest:     digest,
+		IdempotencyKey:    idempotencyKey,
+		EventID:           eventID,
+		CorrelationID:     "corr-int-1",
 	}
 }
 
