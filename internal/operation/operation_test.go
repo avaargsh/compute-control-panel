@@ -33,7 +33,13 @@ func claimAndStart(t *testing.T, op Operation, now time.Time) Operation {
 
 func reconcile(t *testing.T, op Operation, now time.Time) Operation {
     t.Helper()
-    got, err := op.BeginReconciliation(op.Version, "reconciler-1", now, time.Minute)
+    var got Operation
+    var err error
+    if op.Status == InFlight {
+        got, err = op.BeginReconciliation(op.Version, op.LeaseOwner, op.FenceToken, "reconciler-1", now, time.Minute)
+    } else {
+        got, err = op.BeginReconciliation(op.Version, "", 0, "reconciler-1", now, time.Minute)
+    }
     if err != nil { t.Fatal(err) }
     return got
 }
@@ -101,7 +107,7 @@ func TestLeaseExpiryAndFencingRejectStaleController(t *testing.T) {
     if err != nil { t.Fatal(err) }
     expired, err := op.ExpireLease(2, now.Add(2*time.Second))
     if err != nil || expired.Status != Unknown { t.Fatalf("expiry: %+v %v", expired, err) }
-    reconciling, err := expired.BeginReconciliation(3, "controller-2", now.Add(3*time.Second), time.Minute)
+    reconciling, err := expired.BeginReconciliation(3, "", 0, "controller-2", now.Add(3*time.Second), time.Minute)
     if err != nil { t.Fatal(err) }
     if _, err := reconciling.ApplyObservation(4, "controller-1", op.FenceToken, now.Add(4*time.Second), 7, Observation{}); !errors.Is(err, ErrStaleLease) {
         t.Fatalf("stale fence committed: %v", err)
