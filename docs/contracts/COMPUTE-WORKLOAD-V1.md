@@ -22,7 +22,7 @@ Request:
 
 ~~~http
 POST /api/v1/compute-workloads
-Idempotency-Key: cw-create:ri-001:profile-v3
+Idempotency-Key: cw-create:ri-001:runtime-primary
 Content-Type: application/json
 ~~~
 

@@ -38,7 +38,7 @@ RELEASED
 
 Pre-side-effect rejection: REQUESTED -> REJECTED.  
 Confirmed provisioning failure: PROVISIONING -> FAILED_CONFIRMED.  
-A request may be rejected only before a provider side effect has an ambiguous outcome. A provider timeout after dispatch does not justify FAILED_CONFIRMED.
+REJECTED is reserved for validation/policy rejection before any external dispatch. If a Kubernetes Job or other control object was created and Kueue/provider later gives a definitive negative outcome, use FAILED_CONFIRMED only after all objects created for that attempt and any queue reservation are cleaned up or authoritatively absent. A provider timeout after dispatch does not justify FAILED_CONFIRMED.
 
 Definitions:
 
@@ -51,7 +51,7 @@ Definitions:
 | RELEASING | Desired absence is durable; deletion/cleanup is being reconciled | No |
 | RELEASED | Provider resource absence and applicable queue/quota release are verified | Yes |
 | REJECTED | Request failed validation/policy/admission before any ambiguous side effect | Yes |
-| FAILED_CONFIRMED | Provider confirms the requested provisioning did not take effect and no resource remains | Yes |
+| FAILED_CONFIRMED | Provider/Kueue evidence confirms the requested allocation did not materialize and all objects/reservations created for that attempt are cleaned up or authoritatively absent | Yes |
 
 There is no workload-level UNKNOWN terminal state. UNKNOWN belongs to ComputeOperation and ResourceObservation. While a create operation is UNKNOWN, the workload remains PROVISIONING. While a delete operation is UNKNOWN, it remains RELEASING. This prevents an ambiguous external effect from being mislabeled as failure or success.
 
@@ -61,15 +61,18 @@ An Allocation is the durable binding for one workload generation:
 
 ~~~text
 PENDING -> BOUND -> RELEASING -> RELEASED
-    |                         |
-    +-> REJECTED              +-> remains RELEASING while outcome is UNKNOWN
+    |          |
+    |          +-> RELEASING while release is UNKNOWN
+    |
+    +-> REJECTED (no external dispatch)
+    +-> FAILED_CONFIRMED (definitive negative outcome + cleanup verified)
 ~~~
 
 - PENDING: Allocation identity exists, but no verified provider binding exists.
 - BOUND: provider_id and the required provider resource reference set are verified.
 - RELEASING: release intent is durable; the external resource may still exist.
 - RELEASED: all required provider resources are authoritatively absent and relevant queue reservation is no longer held.
-- REJECTED: no provider resource was created and the request was rejected before an ambiguous side effect.
+- REJECTED: validation/policy rejection before any external dispatch.
 
 A new placement/reallocation creates a new allocation_id. Do not mutate an old Allocation to point at a different provider resource.
 
@@ -87,7 +90,7 @@ INTENT_RECORDED
       +---------------------> ACKNOWLEDGED
       |                            |
       |                            v
-      |                         INSPECT
+      |                       RECONCILING
       |                            |
       |                            v
       |                         SUCCEEDED
@@ -120,6 +123,7 @@ CANCELLED_BEFORE_DISPATCH is allowed only while no external request could have b
 | SUCCEEDED | The intended effect is confirmed by provider receipt plus required observation |
 | FAILED_CONFIRMED | Provider evidence confirms the effect did not occur and no target resource exists |
 | MANUAL_REVIEW | Automated resolution is unsafe or provider evidence is insufficient |
+| CANCELLED_BEFORE_DISPATCH | Operation was cancelled while it was provable that no external request had been sent |
 
 ## 5. Resource observations
 
