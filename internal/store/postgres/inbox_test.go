@@ -166,3 +166,36 @@ func TestInboxRejectsInvalidInput(t *testing.T) {
 		t.Fatalf("nil business handler accepted: %v", err)
 	}
 }
+
+func TestInboxMissingAppliedReceiptRollsBackBusinessEffect(t *testing.T) {
+	db := openIntegrationDB(t)
+	repo, _ := NewRepository(db)
+	ctx := context.Background()
+	e := inboxFixture(t, "tenant-receipt-"+randomSuffix(t), "aggregate-"+randomSuffix(t), 1)
+	applied, err := repo.ApplyInbox(ctx, e, func(ctx context.Context, tx *sql.Tx, e InboxEvent) error {
+		if err := inboxEffect(ctx, tx, e); err != nil {
+			return err
+		}
+		// Simulate an internal business callback accidentally removing the
+		// RECEIVED row before the repository records its APPLIED receipt.
+		_, err := tx.ExecContext(ctx,
+			"DELETE FROM compute_inbox_events WHERE consumer_name=$1 AND event_id=$2",
+			e.ConsumerName, e.EventID)
+		return err
+	})
+	if applied || !errors.Is(err, ErrInboxConflict) {
+		t.Fatalf("missing Inbox APPLIED row was acknowledged: applied=%t err=%v", applied, err)
+	}
+	var count int
+	if err := db.QueryRowContext(ctx,
+		"SELECT count(*) FROM compute_outbox_events WHERE aggregate_type='inbox_effect' AND aggregate_id=$1",
+		e.EventID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("business Outbox effect committed despite absent Inbox receipt: %d", count)
+	}
+	if applied, err := repo.ApplyInbox(ctx, e, inboxEffect); err != nil || !applied {
+		t.Fatalf("retry after complete rollback: applied=%t err=%v", applied, err)
+	}
+}
