@@ -1,0 +1,35 @@
+name: One-time Go normalization (remove after completion)
+
+on:
+  push:
+    branches: ["feat/go-foundation"]
+    paths: [".github/workflows/format-once.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    if: github.repository == 'avaargsh/compute-control-panel' && github.ref == 'refs/heads/feat/go-foundation'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # pinned v6
+        with:
+          ref: feat/go-foundation
+          persist-credentials: true
+      - name: Apply gofmt and commit only tracked Go sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git ls-files -z '*.go' | xargs -0 -r gofmt -w
+          if git diff --quiet -- '*.go'; then
+            echo "Go files already formatted"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- '*.go'
+          git commit -m "style(compute): format recovery worker and integration tests"
+          git push origin HEAD:feat/go-foundation
