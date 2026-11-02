@@ -103,6 +103,7 @@ func TestCreateWorkloadConcurrentIdempotentAndOutboxAtomic(t *testing.T) {
 func TestCreateWorkloadRejectsInvalidParams(t *testing.T) {
 	request := json.RawMessage(`{"project_id":"project-1"}`)
 	valid := createParams("tenant-1", "idem-1", testDigest(request), request, "workload-1", "event-1")
+	differentDigest := testDigest(json.RawMessage(`{"project_id":"other-project"}`))
 	cases := []struct {
 		name string
 		mutate func(*CreateWorkloadParams)
@@ -112,6 +113,7 @@ func TestCreateWorkloadRejectsInvalidParams(t *testing.T) {
 		{name: "invalid JSON", mutate: func(p *CreateWorkloadParams) { p.NormalizedRequest = json.RawMessage(`{"broken"`) }},
 		{name: "non-object JSON", mutate: func(p *CreateWorkloadParams) { p.NormalizedRequest = json.RawMessage(`[]`) }},
 		{name: "invalid digest", mutate: func(p *CreateWorkloadParams) { p.RequestDigest = "sha256:BAD" }},
+		{name: "digest does not bind request bytes", mutate: func(p *CreateWorkloadParams) { p.RequestDigest = differentDigest }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
