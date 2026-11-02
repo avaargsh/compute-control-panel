@@ -58,6 +58,7 @@ CREATE TABLE compute_allocations (
     UNIQUE (workload_id, desired_generation),
     UNIQUE (allocation_id, tenant_id),
     UNIQUE (allocation_id, workload_id, tenant_id),
+    UNIQUE (allocation_id, workload_id, tenant_id, provider_id, desired_generation),
     FOREIGN KEY (workload_id, tenant_id) REFERENCES compute_workloads(workload_id, tenant_id)
 );
 
@@ -102,6 +103,7 @@ CREATE TABLE compute_operations (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, idempotency_key),
     UNIQUE (compute_operation_id, tenant_id),
+    UNIQUE (compute_operation_id, workload_id, tenant_id, provider_id, desired_generation),
     UNIQUE (workload_id, desired_generation, operation_kind, provider_request_digest),
     FOREIGN KEY (workload_id, tenant_id) REFERENCES compute_workloads(workload_id, tenant_id),
     FOREIGN KEY (allocation_id, workload_id, tenant_id) REFERENCES compute_allocations(allocation_id, workload_id, tenant_id),
@@ -180,8 +182,12 @@ CREATE TABLE compute_resource_observations (
     freshness_expires_at TIMESTAMPTZ,
     details JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(details) = 'object'),
     FOREIGN KEY (workload_id, tenant_id) REFERENCES compute_workloads(workload_id, tenant_id),
-    FOREIGN KEY (allocation_id, tenant_id) REFERENCES compute_allocations(allocation_id, tenant_id),
-    FOREIGN KEY (compute_operation_id, tenant_id) REFERENCES compute_operations(compute_operation_id, tenant_id)
+    -- Match all identity dimensions, not only the tenant. Otherwise evidence
+    -- from another workload/provider/generation can be attributed to this one.
+    FOREIGN KEY (allocation_id, workload_id, tenant_id, provider_id, desired_generation)
+        REFERENCES compute_allocations(allocation_id, workload_id, tenant_id, provider_id, desired_generation),
+    FOREIGN KEY (compute_operation_id, workload_id, tenant_id, provider_id, desired_generation)
+        REFERENCES compute_operations(compute_operation_id, workload_id, tenant_id, provider_id, desired_generation)
 );
 CREATE INDEX compute_resource_observations_latest
     ON compute_resource_observations (tenant_id, workload_id, provider_id, observed_at DESC);
@@ -241,9 +247,10 @@ CREATE TABLE compute_inbox_events (
 
 CREATE TABLE compute_inbox_cursors (
     consumer_name TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
     aggregate_type TEXT NOT NULL,
     aggregate_id TEXT NOT NULL,
     last_applied_version BIGINT NOT NULL DEFAULT 0 CHECK (last_applied_version >= 0),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (consumer_name, aggregate_type, aggregate_id)
+    PRIMARY KEY (consumer_name, tenant_id, aggregate_type, aggregate_id)
 );
