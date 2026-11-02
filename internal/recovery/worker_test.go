@@ -96,6 +96,14 @@ func adapterFor(fake provider.Adapter) map[string]recovery.RegisteredProvider {
 	}
 }
 
+type inspectOnly struct {
+	provider.Adapter
+}
+
+func (inspectOnly) Apply(context.Context, provider.Request) (provider.Acknowledgement, error) {
+	panic("Recovery Worker must never call Provider.Apply")
+}
+
 func TestRecoverUnknownInspectsWithoutDispatchAndCommitsEvidence(t *testing.T) {
 	db, repo, op := setupUnknown(t)
 	fake := provider.NewFakeProvider()
@@ -114,7 +122,7 @@ func TestRecoverUnknownInspectsWithoutDispatchAndCommitsEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker, err := recovery.NewWorker(restarted, adapterFor(fake))
+	worker, err := recovery.NewWorker(restarted, adapterFor(inspectOnly{Adapter: fake}))
 	if err != nil {
 		t.Fatal(err)
 	}
