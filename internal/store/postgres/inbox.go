@@ -9,25 +9,25 @@ import (
 )
 
 var (
-	ErrInboxInvalid = errors.New("invalid compute Inbox event or handler")
+	ErrInboxInvalid  = errors.New("invalid compute Inbox event or handler")
 	ErrInboxConflict = errors.New("conflicting compute Inbox event identity or version")
-	ErrInboxGap = errors.New("compute Inbox event has a missing preceding version")
+	ErrInboxGap      = errors.New("compute Inbox event has a missing preceding version")
 )
 
 // InboxEvent is a trusted, already-authenticated broker event. This type is
 // deliberately not an HTTP request DTO. A producer must never be inferred
 // from user-controlled JSON fields.
 type InboxEvent struct {
-	ConsumerName string
-	EventID string
-	Producer string
-	EventType string
-	SchemaVersion int
-	TenantID string
-	AggregateType string
-	AggregateID string
+	ConsumerName     string
+	EventID          string
+	Producer         string
+	EventType        string
+	SchemaVersion    int
+	TenantID         string
+	AggregateType    string
+	AggregateID      string
 	AggregateVersion int64
-	Payload json.RawMessage
+	Payload          json.RawMessage
 }
 
 // InboxHandler is only allowed to make transactional changes via tx. The
