@@ -58,6 +58,7 @@ An UNKNOWN operation enters RECONCILING. It is never blindly reissued. A retry r
 
 - [Architecture baseline](docs/architecture/BASELINE.md)
 - [Workload and operation contract v1](docs/architecture/WORKLOAD-OPERATION-V1.md)
+- [Architecture review disposition](docs/architecture/REVIEW-DISPOSITION-2026-11-02.md)
 - [Implementation plan](tasks/plan.md)
 
 No custom scheduler or provider-specific API leaks into the public Workload contract.
