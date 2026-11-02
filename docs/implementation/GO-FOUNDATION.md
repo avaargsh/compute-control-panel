@@ -21,7 +21,10 @@ Status: **non-production foundation; Compute Golden Path not yet complete**.
 - `Repository.CreateOperation` atomically commits an immutable operation and an Outbox event; operation row locks, expected-version CAS, PostgreSQL-clock lease expiry and monotonic fencing survive repository reconstruction.
 - Concurrent claim, ACK-loss UNKNOWN recovery, stale worker rejection and historical idempotency replay across workload generation changes have PostgreSQL-backed integration tests.
 - `internal/provider.Adapter` + non-production `FakeProvider` test the inspect-first lost-ACK, duplicate request, fingerprint conflict and authoritative no-effect finality protocol.
-- CI currently runs `gofmt -w .` to normalize the checkout before tests; a non-mutating formatting enforcement gate remains a governance follow-up after a dedicated formatting-only normalization commit.
+- Migration `0002_operation_inspection.sql` introduces typed `operation_result` evidence distinct from Kubernetes resource phase and a database trigger forbidding modification/deletion of stored observations.
+- `Repository.ReconcileOperation` atomically writes the append-only inspected evidence, fenced operation outcome and a contiguous Outbox event sequence. Inconclusive inspections preserve UNKNOWN, authoritative no-effect can enable same-key retry, and stale CREATE produces a compensation requirement.
+- The Outbox `aggregate_version` is a contiguous published-event sequence. The payload separately carries `operation_version`, which includes lease and other private CAS transitions.
+- CI enforces formatting without editing checkout sources (`gofmt -l .`), then validates both PostgreSQL migrations, schema constraints, `go vet` and race-enabled integration tests.
 - Consolidation scope and evidence limits: [GPU-COMPUTE-PLATFORM-CONSOLIDATION.md](../migration/GPU-COMPUTE-PLATFORM-CONSOLIDATION.md).
 
 ## Boundaries and caveats
@@ -31,7 +34,7 @@ scheduling, running, and resource existence. `Operation.ApplyObservation` is onl
 a pure rule; an authenticated Provider adapter must supply observations
 from its own inspect call, never untrusted user JSON.
 
-The repository includes Workload/Operation create + transactional Outbox, PostgreSQL operation CAS/lease state, and a pure FakeProvider contract. The fake adapter is process-local only: production-authenticated Inspect, durable post-observation commits, outbox delivery workers, migration runner, read/list/delete API, tenant AuthN/AuthZ/RLS, quota and Kubernetes/Kueue/DRA adapters remain absent. PostgreSQL 16 integration tests do not establish production restore or multi-process crash recovery. A successful mutation acknowledgement does not prove release or execution completion. Readiness indicates process admission, not dependency health.
+The repository includes Workload/Operation create + transactional Outbox, PostgreSQL operation CAS/lease state, typed append-only inspection persistence, and a pure FakeProvider contract. The fake adapter is process-local only. The database reconciliation method accepts trusted adapter data from internal callers but **does not authenticate its source**. A production Provider Inspect adapter, Allocation projection under capacity/admission evidence, Outbox delivery workers, migration runner, read/list/delete API, tenant AuthN/AuthZ/RLS, quota and Kubernetes/Kueue/DRA adapters remain absent. PostgreSQL 16 integration tests do not establish production restore or multi-process crash recovery. A successful mutation acknowledgement does not prove release or execution completion. Readiness indicates process admission, not dependency health.
 
 ## Local
 
@@ -46,9 +49,9 @@ cluster ingress/network policy.
 
 ## Next P0 slice
 
-1. Wire provider-authenticated Inspect into a durable reconcile + immutable observation + outbox transaction; verify UNKNOWN outcomes across real process termination.
-2. Complete Workload/Allocation API, generation CAS, tenant AuthN/AuthZ and quota policy; keep Kueue as the admission authority.
-3. Add schema migration/rollback testing, backup/restore, unique operation event delivery and operational metrics.
+1. Wrap the durable reconciliation repository in a trusted Provider Inspect worker and verify real process termination, ambiguous commit acknowledgements and fencing recovery.
+2. Complete Workload/Allocation API and admission-derived Allocation projection, tenant AuthN/AuthZ and quota policy; keep Kueue as the admission authority.
+3. Add versioned/checksummed migration runner and restore testing, durable Outbox publisher, unique event delivery and operational metrics.
 4. Implement Kubernetes Job + Kueue + DRA adapter with exact-UID deletion finality, then migrate GHCR/distroless, cosign, Trivy and release acceptance gates.
 
 No custom GPU scheduler is part of this plan.
