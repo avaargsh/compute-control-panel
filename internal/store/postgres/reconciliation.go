@@ -188,7 +188,7 @@ func (r *Repository) ReconcileOperation(
 		OperationID: next.ID, WorkloadID: next.WorkloadID,
 		ObservationID: evidence.ObservationID, Status: next.Status,
 		DesiredGeneration: next.Generation, OperationVersion: next.Version,
-		CleanupRequired: next.CleanupRequired,
+		CleanupRequired:   next.CleanupRequired,
 		ReconcileRequired: next.ReconcileRequired,
 	})
 	if err != nil {
