@@ -86,6 +86,19 @@ func (r *Repository) CreateOperation(ctx context.Context, o operation.Operation,
     if err!=nil { return operation.Operation{},false,fmt.Errorf("begin create operation: %w",err) }
     defer func(){ _=tx.Rollback() }()
 
+    // Existing idempotency history remains replayable even when the parent
+    // workload has since advanced to a newer desired generation. Replay
+    // creates no new side effect and does not claim dispatch authority.
+    historical,historyErr:=scanOperation(tx.QueryRowContext(ctx,
+        "SELECT "+operationColumns+" FROM compute_operations WHERE tenant_id=$1 AND idempotency_key=$2",
+        o.TenantID,o.IdempotencyKey))
+    if historyErr==nil {
+        if !sameOperationIntent(historical,o) { return operation.Operation{},false,ErrIdempotencyConflict }
+        if err:=tx.Commit(); err!=nil { return operation.Operation{},false,fmt.Errorf("commit historical replay: %w",err) }
+        return historical,false,nil
+    }
+    if !errors.Is(historyErr,sql.ErrNoRows) { return operation.Operation{},false,historyErr }
+
     // Ensure the intent belongs to the current workload generation. The
     // workload lock excludes concurrent generation advances until commit.
     var currentGeneration int64
@@ -161,6 +174,15 @@ func (r *Repository) mutateOperation(ctx context.Context, tenantID, operationID 
         return operation.Operation{},operation.ErrInvalid
     }
     if err:=next.Validate(); err!=nil { return operation.Operation{},err }
+    // Claim and Start must not dispatch an operation whose workload has
+    // advanced. FOR SHARE stabilizes the generation until this CAS commits.
+    if next.Status==operation.Leased || next.Status==operation.InFlight {
+        var generation int64
+        err:=tx.QueryRowContext(ctx,`SELECT desired_generation FROM compute_workloads
+            WHERE tenant_id=$1 AND workload_id=$2 FOR SHARE`,tenantID,current.WorkloadID).Scan(&generation)
+        if err!=nil { return operation.Operation{},fmt.Errorf("check workload generation: %w",err) }
+        if uint64(generation)!=current.Generation { return operation.Operation{},operation.ErrStale }
+    }
     const update = `UPDATE compute_operations SET
         version=$4,fence_token=$5,status=$6,lease_owner=$7,lease_expires_at=$8,
         provider_resource_id=$9,provider_resource_uid=$10,
