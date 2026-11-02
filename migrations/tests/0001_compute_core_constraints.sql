@@ -222,3 +222,22 @@ BEGIN
         RAISE EXCEPTION 'inbox cursor did not distinguish tenants';
     END IF;
 END $cursor_isolation$;
+
+-- Aggregate sequence uniqueness is tenant-scoped, not global. A second tenant
+-- may emit and consume the same aggregate identity/version independently.
+INSERT INTO compute_outbox_events (
+    event_id, producer, event_type, schema_version, tenant_id, aggregate_type,
+    aggregate_id, aggregate_version, occurred_at, correlation_id, payload
+) VALUES (
+    'event-ci-other-tenant', 'compute-control-panel', 'compute.workload.accepted.v1', 1,
+    'tenant-ci-other', 'compute_workload', 'workload-ci-1', 1, now(),
+    'corr-ci-other-tenant', '{}'::jsonb
+);
+INSERT INTO compute_inbox_events (
+    consumer_name, event_id, producer, event_type, schema_version, tenant_id,
+    aggregate_type, aggregate_id, aggregate_version, payload
+) VALUES (
+    'consumer-ci-1', 'event-ci-other-tenant', 'compute-control-panel',
+    'compute.workload.accepted.v1', 1, 'tenant-ci-other',
+    'compute_workload', 'workload-ci-1', 1, '{}'::jsonb
+);
