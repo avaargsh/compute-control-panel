@@ -312,7 +312,7 @@ func (o Operation) ApplyObservation(expectedVersion uint64, owner string, token 
     if currentDesiredGeneration == 0 || obs.OperationID != o.ID ||
         obs.TenantID != o.TenantID || obs.WorkloadID != o.WorkloadID ||
         obs.ProviderID != o.ProviderID || obs.DesiredGeneration != o.Generation ||
-        obs.ResourceVersion == "" || obs.ObservedAt.IsZero() {
+        obs.ResourceVersion == "" || obs.ObservedAt.IsZero() || obs.ObservedAt.After(now) {
         return o, ErrObservation
     }
 
