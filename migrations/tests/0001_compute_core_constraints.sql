@@ -241,3 +241,47 @@ INSERT INTO compute_inbox_events (
     'compute.workload.accepted.v1', 1, 'tenant-ci-other',
     'compute_workload', 'workload-ci-1', 1, '{}'::jsonb
 );
+
+-- Version 0002: inspection outcome is separate from resource phase and
+-- authenticated operation evidence must be append-only after commit.
+INSERT INTO compute_resource_observations (
+    observation_id, tenant_id, workload_id, compute_operation_id,
+    provider_id, desired_generation, resource_kind, result, operation_result,
+    source, adapter_version, observed_at
+) VALUES (
+    'inspection-ci-v2', 'tenant-ci-1', 'workload-ci-1', 'operation-ci-1',
+    'provider-ci-1', 1, 'provider.operation', 'UNKNOWN', 'RESOURCE_PRESENT',
+    'trusted-test-adapter', 'v2', now()
+);
+
+DO $observation_immutable$
+BEGIN
+    BEGIN
+        UPDATE compute_resource_observations
+            SET source = 'tampered' WHERE observation_id = 'inspection-ci-v2';
+        RAISE EXCEPTION 'committed provider inspection was mutable';
+    EXCEPTION WHEN SQLSTATE '55000' THEN NULL;
+    END;
+    BEGIN
+        DELETE FROM compute_resource_observations WHERE observation_id = 'inspection-ci-v2';
+        RAISE EXCEPTION 'committed provider inspection was deletable';
+    EXCEPTION WHEN SQLSTATE '55000' THEN NULL;
+    END;
+END $observation_immutable$;
+
+DO $no_fake_phase$
+BEGIN
+    BEGIN
+        INSERT INTO compute_resource_observations (
+            observation_id, tenant_id, workload_id, compute_operation_id,
+            provider_id, desired_generation, resource_kind, result,
+            operation_result, source, adapter_version, observed_at
+        ) VALUES (
+            'inspection-ci-invalid-phase', 'tenant-ci-1', 'workload-ci-1',
+            'operation-ci-1', 'provider-ci-1', 1, 'provider.operation',
+            'READY', 'RESOURCE_PRESENT', 'trusted-test-adapter', 'v2', now()
+        );
+        RAISE EXCEPTION 'provider resource existence falsely implied READY';
+    EXCEPTION WHEN check_violation THEN NULL;
+    END;
+END $no_fake_phase$;
