@@ -49,7 +49,7 @@ func setupUnknown(t *testing.T) (*sql.DB, *postgres.Repository, operation.Operat
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := []byte(`{"resources":{"cpu":"2"}}`)
+	request := []byte(`{"project_id":"project-1","resources":{"cpu":"2"}}`)
 	hash := sha256.Sum256(request)
 	digest := "sha256:" + hex.EncodeToString(hash[:])
 	tenant := "tenant-recovery-" + uniqueID(t)

@@ -17,6 +17,8 @@ Status: **non-production foundation; Compute Golden Path not yet complete**.
   append-only ResourceObservation, Outbox, Inbox and aggregate cursors; PostgreSQL 16 CI applies it and executes constraint smoke tests.
 - `internal/store/postgres.Repository.CreateWorkload` atomically commits tenant-scoped idempotency claim, Workload and accepted Outbox event.
 - Concurrent same-key/same-digest requests replay the stable Workload identity; same-key/different-digest returns `ErrIdempotencyConflict`.
+- The idempotent replay path rejects changes in immutable `project_id`, owner service/type/resource or compute profile/revision **even if the caller reuses the same digest**. Normalized resource JSON need not carry a `project_id`; authenticated project scope and request-level duplication must be checked at the API boundary. PostgreSQL regression tests cover metadata-confusion replays.
+- The current `DigestRequest` hashes provided normalized bytes; it does not independently prove RFC 8785 canonicalization or bind an authenticated principal. Canonicalization conformance, identity-derived requester scope and API AuthZ remain production-blocking acceptance gates.
 - PostgreSQL integration tests exercise concurrent callers, one Workload/Outbox row, changed-digest rejection, request digest binding and input validation.
 - `Repository.CreateOperation` atomically commits an immutable operation and an Outbox event; operation row locks, expected-version CAS, PostgreSQL-clock lease expiry and monotonic fencing survive repository reconstruction.
 - Concurrent claim, ACK-loss UNKNOWN recovery, stale worker rejection and historical idempotency replay across workload generation changes have PostgreSQL-backed integration tests.
@@ -87,3 +89,34 @@ exactly-once broker abstraction:
   tests verify publisher ACK sequencing, ambiguous failure and persistence
   failure visibility. CI provides PostgreSQL integration and Go Race evidence
   only, not broker end-to-end acceptance.
+
+
+## P0 Inbox deterministic apply slice
+
+`Repository.ApplyInbox` is the PostgreSQL-only, bounded consumer transaction
+for a **trusted, already authenticated** broker event. It neither polls a broker
+nor accepts tenant-supplied HTTP payloads.
+
+- The cursor primary key is `(consumer_name, tenant_id, aggregate_type,
+  aggregate_id)`; `FOR UPDATE` serializes concurrent deliveries for that
+  aggregate. The first accepted version is 1 and the next must be exactly
+  `last_applied_version+1`. Gaps and conflicting aggregate versions fail
+  closed without advancing the cursor.
+- A replayed `(consumer_name,event_id)` is a no-op **only if** producer, event
+  type, schema, tenant, aggregate identity, version and JSONB payload all match
+  the previously `APPLIED` event. Changed fingerprints, reused cross-tenant
+  event IDs and any other non-applied state are rejected.
+- One PostgreSQL transaction inserts the Inbox record, calls a trusted
+  `InboxHandler` with the same `*sql.Tx`, marks the event APPLIED and updates
+  the aggregate cursor. Handler failure rolls back the record, business
+  mutations and cursor together. The callback **must not** perform external
+  side effects or independently commit another transaction.
+- Integration tests cover 12 concurrent duplicates, strict version order,
+  payload/identity conflict, tenant and consumer cursor isolation, and
+  transactional business failure followed by a safe retry.
+
+**Not covered:** authenticated broker consumer, dead-letter/quarantine policy,
+out-of-order event buffering, published-message end-to-end verification,
+operational backpressure, independent databases/cross-service atomicity or
+production AuthZ. Version gaps require a later replay of the missing event,
+not an unsafe cursor skip.

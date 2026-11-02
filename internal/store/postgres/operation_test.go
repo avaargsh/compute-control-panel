@@ -16,7 +16,7 @@ import (
 // must reside in PostgreSQL, not in the worker that last held the lease.
 func operationFixture(t *testing.T, repo *Repository, ctx context.Context, tenant string) operation.Operation {
 	t.Helper()
-	payload := []byte(`{"resources":{"cpu":"2"},"api_version":"compute.platform/v1"}`)
+	payload := []byte(`{"resources":{"cpu":"2"},"api_version":"compute.platform/v1","project_id":"project-int-1"}`)
 	wID := "workload-op-" + randomSuffix(t)
 	_, created, err := repo.CreateWorkload(ctx, createParams(
 		tenant, "workload-key-"+randomSuffix(t), testDigest(payload), payload,
