@@ -26,6 +26,7 @@ CREATE TABLE compute_workloads (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, idempotency_key),
+    UNIQUE (workload_id, tenant_id),
     CHECK ((compute_profile_id IS NULL) = (compute_profile_revision IS NULL))
 );
 
@@ -38,7 +39,7 @@ CREATE INDEX compute_workloads_reconcile
 CREATE TABLE compute_allocations (
     allocation_id TEXT PRIMARY KEY,
     tenant_id TEXT NOT NULL,
-    workload_id TEXT NOT NULL REFERENCES compute_workloads(workload_id),
+    workload_id TEXT NOT NULL,
     provider_id TEXT NOT NULL,
     pool_id TEXT NOT NULL,
     desired_generation BIGINT NOT NULL CHECK (desired_generation > 0),
@@ -55,7 +56,8 @@ CREATE TABLE compute_allocations (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (workload_id, desired_generation),
-    UNIQUE (allocation_id, tenant_id)
+    UNIQUE (allocation_id, tenant_id),
+    FOREIGN KEY (workload_id, tenant_id) REFERENCES compute_workloads(workload_id, tenant_id)
 );
 
 CREATE UNIQUE INDEX compute_allocations_one_active_per_workload
@@ -67,7 +69,7 @@ CREATE INDEX compute_allocations_tenant_workload
 CREATE TABLE compute_operations (
     compute_operation_id TEXT PRIMARY KEY,
     tenant_id TEXT NOT NULL,
-    workload_id TEXT NOT NULL REFERENCES compute_workloads(workload_id),
+    workload_id TEXT NOT NULL,
     allocation_id TEXT,
     provider_id TEXT NOT NULL,
     operation_kind TEXT NOT NULL CHECK (operation_kind IN ('CREATE', 'UPDATE', 'DELETE')),
@@ -93,7 +95,10 @@ CREATE TABLE compute_operations (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, idempotency_key),
+    UNIQUE (compute_operation_id, tenant_id),
     UNIQUE (workload_id, desired_generation, operation_kind, provider_request_digest),
+    FOREIGN KEY (workload_id, tenant_id) REFERENCES compute_workloads(workload_id, tenant_id),
+    FOREIGN KEY (allocation_id, tenant_id) REFERENCES compute_allocations(allocation_id, tenant_id),
     CHECK ((lease_owner IS NULL) = (lease_expires_at IS NULL)),
     CHECK (
         (status IN ('LEASED', 'IN_FLIGHT', 'RECONCILING')
@@ -111,8 +116,10 @@ CREATE TABLE compute_operations (
         (status = 'SUCCEEDED' AND error_code IS NULL AND manual_review_code IS NULL
           AND cleanup_required = FALSE AND reconcile_required = FALSE
           AND ((operation_kind = 'DELETE' AND provider_resource_id IS NULL AND provider_resource_uid IS NULL)
-            OR (operation_kind IN ('CREATE', 'UPDATE')
-              AND provider_resource_id IS NOT NULL AND provider_resource_uid IS NOT NULL)))
+            OR (operation_kind = 'CREATE'
+              AND provider_resource_id IS NOT NULL AND provider_resource_uid IS NOT NULL)
+            OR (operation_kind = 'UPDATE'
+              AND provider_resource_id = target_resource_id AND provider_resource_uid = target_resource_uid)))
         OR
         (status = 'FAILED' AND error_code IS NOT NULL AND manual_review_code IS NULL
           AND provider_resource_id IS NULL AND provider_resource_uid IS NULL
@@ -124,7 +131,9 @@ CREATE TABLE compute_operations (
         OR
         (status = 'SUPERSEDED' AND reconcile_required = TRUE
           AND error_code IS NULL AND manual_review_code IS NULL
-          AND (NOT cleanup_required OR (provider_resource_id IS NOT NULL AND provider_resource_uid IS NOT NULL)))
+          AND ((cleanup_required = TRUE AND provider_resource_id IS NOT NULL AND provider_resource_uid IS NOT NULL)
+            OR (cleanup_required = FALSE AND ((provider_resource_id IS NULL AND provider_resource_uid IS NULL)
+              OR (provider_resource_id IS NOT NULL AND provider_resource_uid IS NOT NULL)))))
     ),
     CHECK (
         (operation_kind IN ('UPDATE', 'DELETE') AND target_resource_id IS NOT NULL AND target_resource_uid IS NOT NULL)
@@ -143,9 +152,9 @@ CREATE INDEX compute_operations_expired_lease
 CREATE TABLE compute_resource_observations (
     observation_id TEXT PRIMARY KEY,
     tenant_id TEXT NOT NULL,
-    workload_id TEXT NOT NULL REFERENCES compute_workloads(workload_id),
+    workload_id TEXT NOT NULL,
     allocation_id TEXT,
-    compute_operation_id TEXT REFERENCES compute_operations(compute_operation_id),
+    compute_operation_id TEXT,
     provider_id TEXT NOT NULL,
     desired_generation BIGINT NOT NULL CHECK (desired_generation > 0),
     resource_kind TEXT NOT NULL,
@@ -163,7 +172,10 @@ CREATE TABLE compute_resource_observations (
     response_digest TEXT CHECK (response_digest IS NULL OR response_digest ~ '^sha256:[a-f0-9]{64}$'),
     evidence_ref TEXT,
     freshness_expires_at TIMESTAMPTZ,
-    details JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(details) = 'object')
+    details JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(details) = 'object'),
+    FOREIGN KEY (workload_id, tenant_id) REFERENCES compute_workloads(workload_id, tenant_id),
+    FOREIGN KEY (allocation_id, tenant_id) REFERENCES compute_allocations(allocation_id, tenant_id),
+    FOREIGN KEY (compute_operation_id, tenant_id) REFERENCES compute_operations(compute_operation_id, tenant_id)
 );
 CREATE INDEX compute_resource_observations_latest
     ON compute_resource_observations (tenant_id, workload_id, provider_id, observed_at DESC);
