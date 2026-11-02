@@ -255,15 +255,15 @@ func TestCreateWorkloadRejectsNormalizedRequestProjectMismatch(t *testing.T) {
 
 func TestCreateWorkloadRejectsDuplicateNormalizedJSONKeys(t *testing.T) {
 	cases := []struct {
-		name string
+		name    string
 		request json.RawMessage
 	}{
 		{
-			name: "duplicate project id",
+			name:    "duplicate project id",
 			request: json.RawMessage(`{"api_version":"compute.platform/v1","project_id":"project-a","project_id":"project-b","resources":{"cpu":"2"}}`),
 		},
 		{
-			name: "nested duplicate resource key",
+			name:    "nested duplicate resource key",
 			request: json.RawMessage(`{"api_version":"compute.platform/v1","project_id":"project-a","resources":{"cpu":"2","cpu":"8"}}`),
 		},
 	}
