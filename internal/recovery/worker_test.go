@@ -105,7 +105,7 @@ func (inspectOnly) Apply(context.Context, provider.Request) (provider.Acknowledg
 }
 
 func TestRecoverUnknownInspectsWithoutDispatchAndCommitsEvidence(t *testing.T) {
-	db, repo, op := setupUnknown(t)
+	db, _, op := setupUnknown(t)
 	fake := provider.NewFakeProvider()
 	ctx := context.Background()
 	req := provider.Request{
