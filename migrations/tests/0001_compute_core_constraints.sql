@@ -23,6 +23,33 @@ UPDATE compute_workloads
 SET latest_allocation_id = 'allocation-ci-1'
 WHERE workload_id = 'workload-ci-1' AND tenant_id = 'tenant-ci-1';
 
+INSERT INTO compute_workloads (
+    workload_id, tenant_id, project_id, owner_service, owner_resource_type,
+    owner_resource_id, normalized_request, request_digest, idempotency_key,
+    desired_state, observed_phase
+) VALUES (
+    'workload-ci-2', 'tenant-ci-1', 'project-ci-1', 'agent-runtime', 'run',
+    'run-ci-2', '{}'::jsonb, 'sha256:' || repeat('e', 64), 'idem-ci-2',
+    'ACTIVE', 'ACCEPTED'
+);
+INSERT INTO compute_allocations (
+    allocation_id, tenant_id, workload_id, provider_id, pool_id, desired_generation, phase
+) VALUES (
+    'allocation-ci-2', 'tenant-ci-1', 'workload-ci-2', 'provider-ci-1', 'pool-ci-1', 1, 'PENDING'
+);
+
+DO $
+BEGIN
+    BEGIN
+        UPDATE compute_workloads
+        SET latest_allocation_id = 'allocation-ci-2'
+        WHERE workload_id = 'workload-ci-1' AND tenant_id = 'tenant-ci-1';
+        RAISE EXCEPTION 'workload accepted another workload allocation reference';
+    EXCEPTION
+        WHEN foreign_key_violation THEN NULL;
+    END;
+END $;
+
 INSERT INTO compute_operations (
     compute_operation_id, tenant_id, workload_id, allocation_id, provider_id,
     operation_kind, desired_generation, provider_request_digest, idempotency_key, status
