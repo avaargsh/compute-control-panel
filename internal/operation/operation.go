@@ -77,8 +77,9 @@ type Operation struct {
     ProviderResourceID  string
     ProviderResourceUID string
     ErrorCode           string
-    ManualReviewCode    string
-    CompensationRequired bool
+    ManualReviewCode     string
+    CleanupRequired      bool
+    ReconcileRequired    bool
 }
 
 // Observation is created by a trusted provider adapter after inspect/lookup.
@@ -131,7 +132,11 @@ func (o Operation) Validate() error {
     if o.Kind != Create && o.Kind != Update && o.Kind != Delete {
         return ErrInvalid
     }
-    if o.Kind == Delete && (o.TargetResourceID == "" || o.TargetResourceUID == "") {
+    if (o.Kind == Update || o.Kind == Delete) &&
+        (o.TargetResourceID == "" || o.TargetResourceUID == "") {
+        return ErrInvalid
+    }
+    if o.Kind == Create && (o.TargetResourceID != "" || o.TargetResourceUID != "") {
         return ErrInvalid
     }
 
@@ -147,33 +152,47 @@ func (o Operation) Validate() error {
     switch o.Status {
     case Pending, Leased, InFlight, Unknown, Reconciling:
         if o.ProviderResourceID != "" || o.ProviderResourceUID != "" ||
-            o.ErrorCode != "" || o.ManualReviewCode != "" || o.CompensationRequired {
+            o.ErrorCode != "" || o.ManualReviewCode != "" ||
+            o.CleanupRequired || o.ReconcileRequired {
             return ErrInvalid
         }
     case Succeeded:
-        if o.ErrorCode != "" || o.ManualReviewCode != "" || o.CompensationRequired {
+        if o.ErrorCode != "" || o.ManualReviewCode != "" ||
+            o.CleanupRequired || o.ReconcileRequired {
             return ErrInvalid
         }
         if o.Kind == Delete {
-            if o.TargetResourceID == "" || o.TargetResourceUID == "" {
+            if o.TargetResourceID == "" || o.TargetResourceUID == "" ||
+                o.ProviderResourceID != "" || o.ProviderResourceUID != "" {
                 return ErrInvalid
             }
         } else if o.ProviderResourceID == "" || o.ProviderResourceUID == "" {
             return ErrInvalid
+        } else if o.Kind == Update &&
+            (o.ProviderResourceID != o.TargetResourceID || o.ProviderResourceUID != o.TargetResourceUID) {
+            return ErrInvalid
         }
     case Failed:
-        if o.ErrorCode == "" || o.ManualReviewCode != "" || o.CompensationRequired {
+        if o.ErrorCode == "" || o.ManualReviewCode != "" ||
+            o.ProviderResourceID != "" || o.ProviderResourceUID != "" ||
+            o.CleanupRequired || o.ReconcileRequired {
             return ErrInvalid
         }
     case ManualReview:
-        if o.ManualReviewCode == "" || o.ErrorCode != "" || o.CompensationRequired {
+        if o.ManualReviewCode == "" || o.ErrorCode != "" ||
+            o.ProviderResourceID != "" || o.ProviderResourceUID != "" ||
+            o.CleanupRequired || o.ReconcileRequired {
             return ErrInvalid
         }
     case Superseded:
-        if o.ErrorCode != "" || o.ManualReviewCode != "" {
+        if o.ErrorCode != "" || o.ManualReviewCode != "" || !o.ReconcileRequired {
             return ErrInvalid
         }
-        if o.CompensationRequired && (o.ProviderResourceID == "" || o.ProviderResourceUID == "") {
+        if o.CleanupRequired && (o.ProviderResourceID == "" || o.ProviderResourceUID == "") {
+            return ErrInvalid
+        }
+        if !o.CleanupRequired &&
+            ((o.ProviderResourceID == "") != (o.ProviderResourceUID == "")) {
             return ErrInvalid
         }
     default:
@@ -300,20 +319,35 @@ func (o Operation) ApplyObservation(expectedVersion uint64, owner string, token 
     switch obs.Result {
     case ResourcePresent:
         if o.Kind == Delete || obs.ResourceID == "" || obs.ResourceUID == "" ||
-            obs.ResourceOperationID != o.ID || obs.ResourceGeneration != o.Generation {
+            obs.ResourceOperationID != o.ID || obs.ResourceGeneration != o.Generation ||
+            obs.TargetResourceID != "" || obs.TargetResourceUID != "" ||
+            obs.ErrorCode != "" || obs.ReasonCode != "" {
+            return o, ErrObservation
+        }
+        if o.Kind == Update &&
+            (obs.ResourceID != o.TargetResourceID || obs.ResourceUID != o.TargetResourceUID) {
             return o, ErrObservation
         }
     case TargetAbsent:
         if o.Kind != Delete || obs.TargetResourceID != o.TargetResourceID ||
-            obs.TargetResourceUID != o.TargetResourceUID {
+            obs.TargetResourceUID != o.TargetResourceUID ||
+            obs.ResourceID != "" || obs.ResourceUID != "" ||
+            obs.ResourceOperationID != "" || obs.ResourceGeneration != 0 ||
+            obs.ErrorCode != "" || obs.ReasonCode != "" {
             return o, ErrObservation
         }
     case OperationNotAppliedFinal, OperationInProgress:
-        if obs.ResourceID != "" || obs.ResourceUID != "" || obs.ErrorCode != "" {
+        if obs.ResourceID != "" || obs.ResourceUID != "" ||
+            obs.ResourceOperationID != "" || obs.ResourceGeneration != 0 ||
+            obs.TargetResourceID != "" || obs.TargetResourceUID != "" ||
+            obs.ErrorCode != "" || obs.ReasonCode != "" {
             return o, ErrObservation
         }
     case OperationFailedFinal:
-        if obs.ErrorCode == "" || obs.ResourceID != "" || obs.ResourceUID != "" {
+        if obs.ErrorCode == "" || obs.ResourceID != "" || obs.ResourceUID != "" ||
+            obs.ResourceOperationID != "" || obs.ResourceGeneration != 0 ||
+            obs.TargetResourceID != "" || obs.TargetResourceUID != "" ||
+            obs.ReasonCode != "" {
             return o, ErrObservation
         }
     case ObservationConflict:
@@ -327,9 +361,11 @@ func (o Operation) ApplyObservation(expectedVersion uint64, owner string, token 
         case ResourcePresent:
             o.ProviderResourceID = obs.ResourceID
             o.ProviderResourceUID = obs.ResourceUID
-            o.CompensationRequired = o.Kind != Delete
+            o.CleanupRequired = o.Kind == Create
+            o.ReconcileRequired = true
             o.Status = Superseded
         case TargetAbsent, OperationNotAppliedFinal, OperationFailedFinal:
+            o.ReconcileRequired = true
             o.Status = Superseded
         default:
             return o.toManualReview("STALE_GENERATION_OUTCOME_AMBIGUOUS"), nil
