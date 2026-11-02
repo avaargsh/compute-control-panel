@@ -200,7 +200,11 @@ func TestCreateWorkloadIdempotencyRejectsChangedOwnership(t *testing.T) {
 		name   string
 		mutate func(*CreateWorkloadParams)
 	}{
-		{"project", func(p *CreateWorkloadParams) { p.ProjectID = "project-foreign" }},
+		{"project", func(p *CreateWorkloadParams) {
+			p.ProjectID = "project-foreign"
+			p.NormalizedRequest = json.RawMessage(`{"api_version":"compute.platform/v1","project_id":"project-foreign","resources":{"cpu":"2"}}`)
+			p.RequestDigest = testDigest(p.NormalizedRequest)
+		}},
 		{"owner service", func(p *CreateWorkloadParams) { p.OwnerService = "sandbox-provider" }},
 		{"owner resource type", func(p *CreateWorkloadParams) { p.OwnerResourceType = "sandbox" }},
 		{"owner resource id", func(p *CreateWorkloadParams) { p.OwnerResourceID = "run-foreign" }},
