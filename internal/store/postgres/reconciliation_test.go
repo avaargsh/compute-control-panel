@@ -163,3 +163,23 @@ func TestReconcileRejectsOldFenceAndForeignEvidence(t *testing.T) {
 		t.Fatalf("invalid evidence persisted: count=%d err=%v", count, err)
 	}
 }
+
+
+func TestReconcileRejectsPreLeaseNoEffectFinality(t *testing.T) {
+	repo, db, ctx, o := setupReconciliation(t)
+	evidence := inspectionEvidence(o, trustedObservation(o, operation.OperationNotAppliedFinal))
+	// A final no-effect record from before this reconciliation lease
+	// cannot prove that a more recent provider attempt did nothing.
+	evidence.Observation.ObservedAt = time.Now().Add(-time.Hour)
+	if _, err := repo.ReconcileOperation(ctx, o.TenantID, o.ID, o.Version, "reconciler", o.FenceToken, evidence); !errors.Is(err, operation.ErrObservation) {
+		t.Fatalf("stale final no-effect evidence authorized a retry: %v", err)
+	}
+	persisted, err := repo.GetOperation(ctx, o.TenantID, o.ID)
+	if err != nil || persisted.Status != operation.Reconciling || persisted.Version != o.Version {
+		t.Fatalf("rejection changed durable operation: %+v %v", persisted, err)
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM compute_resource_observations WHERE observation_id=$1", evidence.ObservationID).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("stale evidence was appended: count=%d err=%v", count, err)
+	}
+}
