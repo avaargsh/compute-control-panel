@@ -152,10 +152,10 @@ NOT_FOUND is a point-in-time observation, not automatically a release decision. 
 ### Create
 
 1. Persist ComputeOperation and Allocation identity before dispatch.
-2. Dispatch using the stable operation_id as the provider idempotency/client token when supported.
+2. Dispatch using the stable compute_compute_operation_id as the provider idempotency/client token when supported.
 3. If the response is lost, set operation UNKNOWN and keep workload PROVISIONING / allocation PENDING.
 4. Inspect by the provider token or deterministic external reference.
-5. If the resource exists and matches the immutable action hash, bind its provider_resource_id and resolve SUCCEEDED.
+5. If the resource exists and matches the immutable provider_request_digest, bind its provider_resource_id and resolve SUCCEEDED.
 6. If the provider proves no resource was created, resolve FAILED_CONFIRMED or safely re-dispatch the same operation.
 7. If the provider cannot prove either outcome, keep UNKNOWN or move to MANUAL_REVIEW. Never create a new operation merely to escape uncertainty.
 
@@ -164,7 +164,7 @@ NOT_FOUND is a point-in-time observation, not automatically a release decision. 
 1. Persist desired absence and a new delete operation before dispatch.
 2. Set workload/allocation to RELEASING.
 3. If ACK is lost, set operation UNKNOWN and inspect the same provider resource.
-4. If it exists, continue deletion/reconciliation using the same operation identity and provider idempotency semantics.
+4. If it exists, continue deletion/reconciliation using the same compute_operation_id and provider idempotency semantics.
 5. If it is authoritatively absent, verify any Kueue reservation/associated resources have been released, then resolve SUCCEEDED and mark RELEASED.
 6. If the provider is unreachable or absence is not authoritative, retain RELEASING/UNKNOWN and retain accounting/quota conservatively.
 
@@ -172,13 +172,13 @@ Delete ACK, HTTP 202, Kubernetes deletionTimestamp or a local timeout is not rel
 
 ## 7. Concurrency and generation fencing
 
-Every desired-state mutation increments desired_generation. Every operation stores the generation and immutable action_hash it was created for.
+Every desired-state mutation increments desired_generation. Every operation stores the generation and immutable provider_request_digest it was created for.
 
 - A worker claims an operation with a monotonically increasing lease_epoch/fencing token.
 - A worker must re-check the current generation and claim before committing a state transition.
 - A stale worker may append its provider receipt/observation as evidence, but cannot overwrite the current workload/allocation projection.
 - A newer generation does not erase an older UNKNOWN operation. The old operation must be reconciled before a conflicting external mutation is dispatched.
-- A payload change creates a new operation_id and action_hash. A retry of the same payload reuses them.
+- A payload change creates a new compute_operation_id and provider_request_digest. A retry of the same payload reuses them.
 - Database uniqueness constraints, not read-then-write checks, enforce idempotency and one active Allocation per Workload.
 
 Provider APIs that do not support idempotency or conditional writes require stricter serialization. If the result of a non-idempotent call is ambiguous, do not dispatch a second call until authoritative inspection or manual resolution.

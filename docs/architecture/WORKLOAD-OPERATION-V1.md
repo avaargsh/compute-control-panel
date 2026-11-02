@@ -28,7 +28,7 @@ The caller's tenant/principal is taken from verified service identity; body fiel
 The selected provider/pool and provider resource mapping for a Workload. It is owned by Compute Control Plane. It does not become the canonical Run or Sandbox identity.
 
 ### ComputeOperation
-A single provider mutation. Its operation_id is stable for the logical mutation and is also passed as provider idempotency/correlation metadata when supported. It stores tenant/workload/provider, operation kind, desired_generation, request digest, target resource ID/UID, lease/fencing, outcome and evidence.
+A single provider mutation. Its compute_operation_id is stable for the logical mutation and is passed as provider idempotency/correlation metadata when supported. It stores tenant/workload/provider, operation kind, desired_generation, provider_request_digest, target resource ID/UID, lease/fencing, outcome and evidence, plus an optional Guard operation reference.
 
 ### ResourceObservation
 An append-only provider observation with observed_at, provider ID, workload/operation correlation, generation, provider resource ID/UID, provider resourceVersion/sequence, result and provenance. It is not an operation status.
@@ -61,21 +61,21 @@ LEASED / IN_FLIGHT / RECONCILING -- lease expiry --> UNKNOWN
 - A worker must present owner + fencing token + expected version to commit an outcome.
 - A stale token or expired lease is rejected.
 - UNKNOWN can only enter RECONCILING; it cannot be directly re-issued.
-- RECONCILING → PENDING is allowed only after provider operation lookup authoritatively proves no effect was applied. The exact operation_id, idempotency key and digest are reused.
+- RECONCILING → PENDING is allowed only after provider operation lookup authoritatively proves no effect was applied. The exact compute_operation_id, provider idempotency token and provider_request_digest are reused.
 - A contradictory observation, identity mismatch, unsupported provider ambiguity or partial side effect enters MANUAL_REVIEW.
 - A stale-generation CREATE that created a resource is marked SUPERSEDED and emits a compensating delete intent; it must not update the current Workload projection.
 
 ## 4. Provider observation requirements
 
 Every inspection result is correlated to:
-- exact operation_id;
+- exact compute_operation_id;
 - exact provider_id;
 - tenant_id and workload_id;
 - desired_generation;
 - target provider_resource_id and UID for DELETE;
 - provider resourceVersion/sequence and observed_at.
 
-CREATE/UPDATE is verified only when the provider resource identity is present and provider metadata correlates to operation_id + desired_generation. A name match alone is insufficient.
+CREATE/UPDATE is verified only when the provider resource identity is present and provider metadata correlates to compute_operation_id + desired_generation. A name match alone is insufficient.
 
 DELETE is verified only when the exact target resource UID is absent. A successful delete response, a missing resource by reused name, or a generic empty list is not release evidence.
 
@@ -90,7 +90,7 @@ If a provider cannot supply an authoritative operation lookup, idempotency guara
 | GET | /api/v1/workloads | Cursor pagination, bounded page size |
 | DELETE | /api/v1/workloads/{id} | Set DELETE_REQUESTED and return 202; not a release acknowledgement |
 
-All mutating requests require Idempotency-Key. The server computes a canonical digest. Same key + same digest returns the original Workload; same key + different digest returns 409. No provider call runs inside the HTTP request transaction.
+All mutating requests require Idempotency-Key. The server computes a canonical request digest. Same key + same digest returns the original Workload; same key + different digest returns 409. No provider call runs inside the HTTP request transaction. Compute CP separately creates compute_operation_id for each immutable provider mutation.
 
 ## 6. Kueue and Kubernetes boundary
 
@@ -120,3 +120,12 @@ Kueue is not the Pod scheduler. Compute Control Plane selects provider/pool and 
 - Stale generation cannot update current Workload; stale CREATE schedules cleanup.
 - Restart after mutation-before-ACK recovers by inspect, not blind create.
 - Tenant and project boundary tests cover every read/write.
+
+
+## 8. Agent and Guard integration
+
+- For non-sandbox Run capacity, Runtime is the sole Compute API caller and owner_ref references agent-runtime/run/<run_id>.
+- For sandbox capacity, Runtime calls SandboxProvider Claim; SandboxProvider is the sole Compute API caller for that claim and owner_ref references sandbox-provider/sandbox-claim/<claim_id>.
+- A protected Agent-originated compute action is authorized by EngageGuard. Compute CP validates a Permit for its audience and the exact normalized Compute request digest before accepting the provider mutation. Caller-supplied action_hash is opaque and is never recomputed by Compute CP.
+- EngageGuard Action Operation ID and Compute compute_operation_id are distinct. Guard owns authorization/action receipt; Compute CP owns provider dispatch and UNKNOWN reconciliation.
+- A platform-internal Runtime capacity request is authorized by workload identity and Compute policy; it does not create a duplicate Guard Operation.
