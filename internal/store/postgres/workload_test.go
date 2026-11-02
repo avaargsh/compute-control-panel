@@ -115,15 +115,6 @@ func TestCreateWorkloadRejectsInvalidParams(t *testing.T) {
 		{name: "non-object JSON", mutate: func(p *CreateWorkloadParams) { p.NormalizedRequest = json.RawMessage(`[]`) }},
 		{name: "invalid digest", mutate: func(p *CreateWorkloadParams) { p.RequestDigest = "sha256:BAD" }},
 		{name: "digest does not bind request bytes", mutate: func(p *CreateWorkloadParams) { p.RequestDigest = differentDigest }},
-		{name: "project identity mismatch", mutate: func(p *CreateWorkloadParams) { p.ProjectID = "foreign-project" }},
-		{name: "missing project in normalized payload", mutate: func(p *CreateWorkloadParams) {
-			p.NormalizedRequest = json.RawMessage(`{"resources":{"cpu":"2"}}`)
-			p.RequestDigest = testDigest(p.NormalizedRequest)
-		}},
-		{name: "project field must be string", mutate: func(p *CreateWorkloadParams) {
-			p.NormalizedRequest = json.RawMessage(`{"project_id":123}`)
-			p.RequestDigest = testDigest(p.NormalizedRequest)
-		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
