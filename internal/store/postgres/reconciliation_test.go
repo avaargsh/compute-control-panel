@@ -175,7 +175,6 @@ func TestReconcileRejectsOldFenceAndForeignEvidence(t *testing.T) {
 	}
 }
 
-
 func TestReconcileRejectsPreLeaseNoEffectFinality(t *testing.T) {
 	repo, db, ctx, o := setupReconciliation(t)
 	evidence := inspectionEvidence(o, trustedObservation(o, operation.OperationNotAppliedFinal))
