@@ -44,8 +44,7 @@ func validateInbox(e InboxEvent, handle InboxHandler) error {
 			return ErrInboxInvalid
 		}
 	}
-	var object map[string]json.RawMessage
-	if err := json.Unmarshal(e.Payload, &object); err != nil || object == nil {
+	if _, err := strictJSONObject(e.Payload); err != nil {
 		return ErrInboxInvalid
 	}
 	return nil
