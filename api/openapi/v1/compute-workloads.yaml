@@ -1,0 +1,274 @@
+openapi: 3.1.0
+info:
+  title: Compute Control Panel API
+  version: 1.0.0
+  description: Proposed contract. Implementations must enforce tenant scope from authenticated identity.
+servers:
+  - url: /
+security:
+  - workloadIdentity: []
+paths:
+  /api/v1/workloads:
+    post:
+      operationId: createWorkload
+      summary: Accept an idempotent compute workload intent
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWorkloadRequest'
+      responses:
+        '202':
+          description: Workload and accepted event are durably committed; provider execution is asynchronous.
+          headers:
+            Location:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkloadAccepted' }
+        '401': { description: Unauthenticated }
+        '403': { description: Tenant or project authorization denied }
+        '409': { description: Idempotency key reused with a different canonical digest }
+        '422': { description: Invalid request or unsupported capability }
+    get:
+      operationId: listWorkloads
+      summary: List workloads in authenticated tenant/project scope
+      parameters:
+        - name: project_id
+          in: query
+          schema: { type: string, minLength: 1 }
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: Tenant-scoped page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkloadPage' }
+        '401': { description: Unauthenticated }
+  /api/v1/workloads/{workload_id}:
+    parameters:
+      - $ref: '#/components/parameters/WorkloadId'
+    get:
+      operationId: getWorkload
+      responses:
+        '200':
+          description: Desired state, observed projection and durable references
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Workload' }
+        '404': { description: Not found in caller scope }
+        '401': { description: Unauthenticated }
+    delete:
+      operationId: requestWorkloadRelease
+      summary: Record deletion intent; does not assert provider absence
+      responses:
+        '202':
+          description: Delete intent durably accepted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkloadAccepted' }
+        '404': { description: Not found in caller scope }
+        '409': { description: Stale generation or conflicting intent }
+  /api/v1/workloads/{workload_id}/allocations:
+    parameters:
+      - $ref: '#/components/parameters/WorkloadId'
+    get:
+      operationId: listAllocations
+      responses:
+        '200':
+          description: Tenant-scoped allocation references
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Allocation' }
+        '404': { description: Not found in caller scope }
+  /api/v1/compute-operations/{compute_operation_id}:
+    parameters:
+      - name: compute_operation_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    get:
+      operationId: getComputeOperation
+      responses:
+        '200':
+          description: Durable operation state and reconciliation evidence references
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ComputeOperation' }
+        '404': { description: Not found in caller scope }
+components:
+  securitySchemes:
+    workloadIdentity:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 200 }
+    WorkloadId:
+      name: workload_id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1 }
+  schemas:
+    CreateWorkloadRequest:
+      type: object
+      additionalProperties: false
+      required: [api_version, project_id, owner_ref]
+      properties:
+        api_version: { const: compute.platform/v1 }
+        project_id: { type: string, minLength: 1 }
+        owner_ref: { $ref: '#/components/schemas/OwnerRef' }
+        compute_profile_ref: { $ref: '#/components/schemas/ComputeProfileRef' }
+        resources: { $ref: '#/components/schemas/Resources' }
+        constraints:
+          type: object
+          additionalProperties: false
+          properties:
+            pool_selector: { type: object, additionalProperties: { type: string } }
+            max_duration_seconds: { type: integer, minimum: 1 }
+        authorization:
+          type: object
+          additionalProperties: false
+          required: [guard_operation_id, permit_ref, action_hash, audience]
+          properties:
+            guard_operation_id: { type: string, minLength: 1 }
+            permit_ref: { type: string, minLength: 1 }
+            action_hash: { type: string, pattern: '^sha256:[a-f0-9]{64}$' }
+            audience: { const: compute-control-panel }
+      oneOf:
+        - required: [compute_profile_ref]
+          not: { required: [resources] }
+        - required: [resources]
+          not: { required: [compute_profile_ref] }
+    OwnerRef:
+      type: object
+      additionalProperties: false
+      required: [service, resource_type, resource_id]
+      properties:
+        service: { enum: [agent-runtime, sandbox-provider] }
+        resource_type: { enum: [run, sandbox-claim] }
+        resource_id: { type: string, minLength: 1 }
+    ComputeProfileRef:
+      type: object
+      additionalProperties: false
+      required: [id, revision]
+      properties:
+        id: { type: string, minLength: 1 }
+        revision: { type: string, minLength: 1 }
+    Resources:
+      type: object
+      additionalProperties: false
+      required: [cpu, memory]
+      properties:
+        cpu: { type: string, minLength: 1 }
+        memory: { type: string, minLength: 1 }
+        accelerators:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [vendor, model, count]
+            properties:
+              vendor: { type: string, minLength: 1 }
+              model: { type: string, minLength: 1 }
+              count: { type: integer, minimum: 1 }
+    WorkloadAccepted:
+      type: object
+      additionalProperties: false
+      required: [workload_id, desired_generation, desired_state, observed_phase, compute_operation_id, status_url]
+      properties:
+        workload_id: { type: string, minLength: 1 }
+        desired_generation: { type: integer, minimum: 1 }
+        desired_state: { enum: [ACTIVE, DELETE_REQUESTED] }
+        observed_phase: { enum: [PENDING, ADMISSION_PENDING, ADMITTED, RUNNING, SUCCEEDED, FAILED, TERMINATING, RELEASED, UNKNOWN] }
+        compute_operation_id: { type: string, minLength: 1 }
+        status_url: { type: string, minLength: 1 }
+    Workload:
+      allOf:
+        - $ref: '#/components/schemas/WorkloadAccepted'
+        - type: object
+          properties:
+            project_id: { type: string }
+            owner_ref: { $ref: '#/components/schemas/OwnerRef' }
+            allocation_id: { type: [string, 'null'] }
+            version: { type: integer, minimum: 1 }
+    WorkloadPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Workload' } }
+        next_cursor: { type: [string, 'null'] }
+    Allocation:
+      type: object
+      additionalProperties: false
+      required: [allocation_id, workload_id, provider_id, pool_id, desired_generation, phase]
+      properties:
+        allocation_id: { type: string, minLength: 1 }
+        workload_id: { type: string, minLength: 1 }
+        provider_id: { type: string, minLength: 1 }
+        pool_id: { type: string, minLength: 1 }
+        desired_generation: { type: integer, minimum: 1 }
+        phase: { enum: [PENDING, BOUND, RELEASING, RELEASED, UNKNOWN, MANUAL_REVIEW] }
+        provider_resource_refs:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [resource_kind, provider_resource_id]
+            properties:
+              resource_kind: { type: string, minLength: 1 }
+              provider_resource_id: { type: string, minLength: 1 }
+              namespace: { type: string }
+              name: { type: string }
+    ComputeOperation:
+      type: object
+      additionalProperties: false
+      required: [compute_operation_id, workload_id, provider_id, operation_kind, desired_generation, status, version, fence_token]
+      properties:
+        compute_operation_id: { type: string, minLength: 1 }
+        workload_id: { type: string, minLength: 1 }
+        provider_id: { type: string, minLength: 1 }
+        operation_kind: { enum: [CREATE, UPDATE, DELETE] }
+        desired_generation: { type: integer, minimum: 1 }
+        status: { enum: [PENDING, LEASED, IN_FLIGHT, UNKNOWN, RECONCILING, SUCCEEDED, FAILED, MANUAL_REVIEW] }
+        version: { type: integer, minimum: 1 }
+        fence_token: { type: integer, minimum: 0 }
+        provider_resource_id: { type: [string, 'null'] }
+        provider_resource_uid: { type: [string, 'null'] }
+        error_code: { type: [string, 'null'] }
+    EventEnvelope:
+      type: object
+      additionalProperties: false
+      required: [event_id, event_type, schema_version, producer, tenant_id, aggregate_type, aggregate_id, aggregate_version, occurred_at, correlation_id, data]
+      properties:
+        event_id: { type: string, minLength: 1 }
+        event_type: { type: string, minLength: 1 }
+        schema_version: { type: integer, minimum: 1 }
+        producer: { const: compute-control-panel }
+        tenant_id: { type: string, minLength: 1 }
+        aggregate_type: { const: compute_workload }
+        aggregate_id: { type: string, minLength: 1 }
+        aggregate_version: { type: integer, minimum: 1 }
+        occurred_at: { type: string, format: date-time }
+        correlation_id: { type: string, minLength: 1 }
+        causation_id: { type: [string, 'null'] }
+        traceparent: { type: [string, 'null'] }
+        data: { type: object }
