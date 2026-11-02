@@ -28,7 +28,8 @@ func TestOutboxConcurrentClaimOneWinnerAndTenantIdentity(t *testing.T) {
 	repo, _ := NewRepository(db)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	id := insertOutboxFixture(t, db, "tenant-outbox-"+randomSuffix(t), "aggregate-"+randomSuffix(t), 1)
+	tenant := "tenant-outbox-"+randomSuffix(t)
+	id := insertOutboxFixture(t, db, tenant, "aggregate-"+randomSuffix(t), 1)
 	const workers = 12
 	claimed := make([]OutboxEvent, workers)
 	errs := make([]error, workers)
@@ -37,7 +38,7 @@ func TestOutboxConcurrentClaimOneWinnerAndTenantIdentity(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			claimed[i], errs[i] = repo.ClaimOutbox(ctx, fmt.Sprintf("publisher-%d",i),time.Minute)
+			claimed[i], errs[i] = repo.ClaimOutbox(ctx, tenant, fmt.Sprintf("publisher-%d",i),time.Minute)
 		}(i)
 	}
 	wg.Wait()
@@ -57,27 +58,28 @@ func TestOutboxCrashLeaseRecoveryFencesLateACK(t *testing.T) {
 	db:=openIntegrationDB(t)
 	repo,_:=NewRepository(db)
 	ctx:=context.Background()
-	id:=insertOutboxFixture(t,db,"tenant-outbox-"+randomSuffix(t),"aggregate-"+randomSuffix(t),1)
-	first,err:=repo.ClaimOutbox(ctx,"dead-worker",40*time.Millisecond)
+	tenant:="tenant-outbox-"+randomSuffix(t)
+	id:=insertOutboxFixture(t,db,tenant,"aggregate-"+randomSuffix(t),1)
+	first,err:=repo.ClaimOutbox(ctx,tenant,"dead-worker",40*time.Millisecond)
 	if err!=nil || first.ID!=id { t.Fatalf("first claim %+v %v",first,err) }
-	if err:=repo.MarkOutboxPublished(ctx,id,"other-worker",first.Attempts); !errors.Is(err,ErrOutboxLeaseLost) {
+	if err:=repo.MarkOutboxPublished(ctx,tenant,id,"other-worker",first.Attempts); !errors.Is(err,ErrOutboxLeaseLost) {
 		t.Fatalf("wrong owner ACK accepted: %v",err)
 	}
-	if _,err:=repo.ClaimOutbox(ctx,"early-worker",time.Minute); !errors.Is(err,sql.ErrNoRows) {
+	if _,err:=repo.ClaimOutbox(ctx,tenant,"early-worker",time.Minute); !errors.Is(err,sql.ErrNoRows) {
 		t.Fatalf("active lease stolen: %v",err)
 	}
 	time.Sleep(125*time.Millisecond)
-	second,err:=repo.ClaimOutbox(ctx,"replacement",time.Minute)
+	second,err:=repo.ClaimOutbox(ctx,tenant,"replacement",time.Minute)
 	if err!=nil || second.ID!=id || second.Attempts!=first.Attempts+1 {
 		t.Fatalf("reclaim %+v %v",second,err)
 	}
-	if err:=repo.MarkOutboxPublished(ctx,id,"dead-worker",first.Attempts); !errors.Is(err,ErrOutboxLeaseLost) {
+	if err:=repo.MarkOutboxPublished(ctx,tenant,id,"dead-worker",first.Attempts); !errors.Is(err,ErrOutboxLeaseLost) {
 		t.Fatalf("late ACK accepted: %v",err)
 	}
-	if err:=repo.MarkOutboxPublished(ctx,id,"replacement",second.Attempts); err!=nil {
+	if err:=repo.MarkOutboxPublished(ctx,tenant,id,"replacement",second.Attempts); err!=nil {
 		t.Fatalf("replacement ACK rejected: %v",err)
 	}
-	if err:=repo.MarkOutboxPublished(ctx,id,"replacement",second.Attempts); !errors.Is(err,ErrOutboxLeaseLost) {
+	if err:=repo.MarkOutboxPublished(ctx,tenant,id,"replacement",second.Attempts); !errors.Is(err,ErrOutboxLeaseLost) {
 		t.Fatalf("duplicate ACK accepted: %v",err)
 	}
 	var state string
@@ -91,16 +93,16 @@ func TestOutboxBlocksLaterAggregateVersionButNotOtherTenant(t *testing.T) {
 	repo,_:=NewRepository(db)
 	ctx:=context.Background()
 	aggregate:="aggregate-"+randomSuffix(t)
-	firstID:=insertOutboxFixture(t,db,"tenant-a-"+randomSuffix(t),aggregate,1)
-	secondID:=insertOutboxFixture(t,db,"tenant-b-"+randomSuffix(t),aggregate,1)
-	laterID:=insertOutboxFixture(t,db,"tenant-b-"+randomSuffix(t),"unrelated-"+randomSuffix(t),1)
-	_ = laterID
-	first,err:=repo.ClaimOutbox(ctx,"first",time.Minute)
+	tenantA:="tenant-a-"+randomSuffix(t)
+	tenantB:="tenant-b-"+randomSuffix(t)
+	firstID:=insertOutboxFixture(t,db,tenantA,aggregate,1)
+	secondID:=insertOutboxFixture(t,db,tenantB,aggregate,1)
+	first,err:=repo.ClaimOutbox(ctx,tenantA,"first",time.Minute)
 	if err!=nil || first.ID!=firstID {t.Fatalf("first %+v %v",first,err)}
-	second,err:=repo.ClaimOutbox(ctx,"second",time.Minute)
+	second,err:=repo.ClaimOutbox(ctx,tenantB,"second",time.Minute)
 	if err!=nil || second.ID!=secondID {t.Fatalf("other tenant blocked %+v %v",second,err)}
-	if err:=repo.MarkOutboxPublished(ctx,firstID,"first",first.Attempts);err!=nil {t.Fatal(err)}
-	if err:=repo.MarkOutboxPublished(ctx,secondID,"second",second.Attempts);err!=nil {t.Fatal(err)}
+	if err:=repo.MarkOutboxPublished(ctx,tenantA,firstID,"first",first.Attempts);err!=nil {t.Fatal(err)}
+	if err:=repo.MarkOutboxPublished(ctx,tenantB,secondID,"second",second.Attempts);err!=nil {t.Fatal(err)}
 }
 
 func TestOutboxSameAggregateHasContiguousDelivery(t *testing.T) {
@@ -111,13 +113,13 @@ func TestOutboxSameAggregateHasContiguousDelivery(t *testing.T) {
 	aggregate:="aggregate-"+randomSuffix(t)
 	firstID:=insertOutboxFixture(t,db,tenant,aggregate,1)
 	secondID:=insertOutboxFixture(t,db,tenant,aggregate,2)
-	first,err:=repo.ClaimOutbox(ctx,"ordered-1",time.Minute)
+	first,err:=repo.ClaimOutbox(ctx,tenant,"ordered-1",time.Minute)
 	if err!=nil || first.ID!=firstID {t.Fatalf("first %+v %v",first,err)}
-	if _,err:=repo.ClaimOutbox(ctx,"ordered-2",time.Minute); !errors.Is(err,sql.ErrNoRows) {
+	if _,err:=repo.ClaimOutbox(ctx,tenant,"ordered-2",time.Minute); !errors.Is(err,sql.ErrNoRows) {
 		t.Fatalf("next aggregate version dispatched before first ACK: %v",err)
 	}
-	if err:=repo.MarkOutboxPublished(ctx,firstID,"ordered-1",first.Attempts);err!=nil {t.Fatal(err)}
-	second,err:=repo.ClaimOutbox(ctx,"ordered-2",time.Minute)
+	if err:=repo.MarkOutboxPublished(ctx,tenant,firstID,"ordered-1",first.Attempts);err!=nil {t.Fatal(err)}
+	second,err:=repo.ClaimOutbox(ctx,tenant,"ordered-2",time.Minute)
 	if err!=nil || second.ID!=secondID {t.Fatalf("next event %+v %v",second,err)}
 }
 
@@ -125,15 +127,16 @@ func TestOutboxRetryRetainsPayloadAndIsAtLeastOnce(t *testing.T) {
 	db:=openIntegrationDB(t)
 	repo,_:=NewRepository(db)
 	ctx:=context.Background()
-	id:=insertOutboxFixture(t,db,"tenant-retry-"+randomSuffix(t),"aggregate-"+randomSuffix(t),1)
-	event,err:=repo.ClaimOutbox(ctx,"publisher-a",time.Minute)
+	tenant:="tenant-retry-"+randomSuffix(t)
+	id:=insertOutboxFixture(t,db,tenant,"aggregate-"+randomSuffix(t),1)
+	event,err:=repo.ClaimOutbox(ctx,tenant,"publisher-a",time.Minute)
 	if err!=nil || event.ID!=id {t.Fatalf("claim %+v %v",event,err)}
-	if err:=repo.RetryOutbox(ctx,id,"publisher-a",event.Attempts,0,"TEMPORARY_BROKER_FAILURE");err!=nil {t.Fatal(err)}
-	reclaimed,err:=repo.ClaimOutbox(ctx,"publisher-b",time.Minute)
+	if err:=repo.RetryOutbox(ctx,tenant,id,"publisher-a",event.Attempts,0,"TEMPORARY_BROKER_FAILURE");err!=nil {t.Fatal(err)}
+	reclaimed,err:=repo.ClaimOutbox(ctx,tenant,"publisher-b",time.Minute)
 	if err!=nil || reclaimed.ID!=id || reclaimed.Attempts!=2 || string(reclaimed.Payload)!=string(event.Payload) {
 		t.Fatalf("retry %+v %v",reclaimed,err)
 	}
-	if err:=repo.MarkOutboxPublished(ctx,id,"publisher-a",event.Attempts); !errors.Is(err,ErrOutboxLeaseLost) {
+	if err:=repo.MarkOutboxPublished(ctx,tenant,id,"publisher-a",event.Attempts); !errors.Is(err,ErrOutboxLeaseLost) {
 		t.Fatalf("old attempt ACK accepted %v",err)
 	}
 }
