@@ -66,6 +66,11 @@ CREATE UNIQUE INDEX compute_allocations_one_active_per_workload
 CREATE INDEX compute_allocations_tenant_workload
     ON compute_allocations (tenant_id, workload_id, created_at DESC);
 
+ALTER TABLE compute_workloads
+    ADD CONSTRAINT compute_workloads_latest_allocation_tenant_fk
+    FOREIGN KEY (latest_allocation_id, tenant_id)
+    REFERENCES compute_allocations (allocation_id, tenant_id);
+
 CREATE TABLE compute_operations (
     compute_operation_id TEXT PRIMARY KEY,
     tenant_id TEXT NOT NULL,
