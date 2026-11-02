@@ -14,8 +14,10 @@ Status: **non-production foundation; Compute Golden Path not yet complete**.
 - Tests for stale version, wrong operation ID, stale generation,
   lost acknowledgement, exact target UID and deletion finality; pinned-action Go CI.
 - Initial PostgreSQL schema migration for Workload, Allocation, ComputeOperation,
-  append-only ResourceObservation, Outbox, Inbox and aggregate cursors.
-- CI applies the migration against PostgreSQL 16 before Go static analysis and race tests.
+  append-only ResourceObservation, Outbox, Inbox and aggregate cursors; PostgreSQL 16 CI applies it and executes constraint smoke tests.
+- `internal/store/postgres.Repository.CreateWorkload` atomically commits tenant-scoped idempotency claim, Workload and accepted Outbox event.
+- Concurrent same-key/same-digest requests replay the stable Workload identity; same-key/different-digest returns `ErrIdempotencyConflict`.
+- PostgreSQL integration tests exercise concurrent callers, one Workload/Outbox row, changed-digest rejection, request digest binding and input validation.
 
 ## Boundaries and caveats
 
@@ -24,10 +26,7 @@ scheduling, running, and resource existence. `Operation.Verify` is only
 a pure rule; an authenticated Provider adapter must supply observations
 from its own inspect call, never untrusted user JSON.
 
-The migration is schema groundwork only: the project does **not** yet have a
-PostgreSQL repository/transaction boundary, durable operation workers, execute
-Workloads, or integrate Kueue. The migration has not been validated as a
-production deployment or exercised through repository-level integration tests. A successful mutation acknowledgement does not prove
+The repository currently implements only Workload create + idempotency + Outbox transaction. PostgreSQL operation lease/CAS repository, migration runner, read/list/delete API, authorization/quota, durable workers, FakeProvider and Kubernetes/Kueue integration remain absent. Integration tests pass against PostgreSQL 16 CI; no production deployment or restore evidence is claimed. A successful mutation acknowledgement does not prove
 release or execution completion. The current readiness endpoint indicates
 process admission only.
 
@@ -44,8 +43,8 @@ cluster ingress/network policy.
 
 ## Next P0 slice
 
-1. PostgreSQL migration runner and tenant-scoped repository: atomic idempotency claim, Workload + Outbox transaction, version/fence CAS, and durable leases.
-2. Workload/Allocation API, quota and tenant authorization.
+1. Migration runner and PostgreSQL operation repository: expected-version CAS, durable claim/lease, monotonic fence token, expiry-to-UNKNOWN and authoritative reconcile transitions.
+2. Workload/Allocation read/list/delete API, quota and tenant authorization.
 3. FakeProvider SPI with stable operation IDs and inspect-first recovery.
 4. Kubernetes Job + Kueue adapter and deletion-finality integration tests.
 
