@@ -38,7 +38,7 @@ INSERT INTO compute_allocations (
     'allocation-ci-2', 'tenant-ci-1', 'workload-ci-2', 'provider-ci-1', 'pool-ci-1', 1, 'PENDING'
 );
 
-DO $
+DO $cross_workload$
 BEGIN
     BEGIN
         UPDATE compute_workloads
@@ -48,7 +48,7 @@ BEGIN
     EXCEPTION
         WHEN foreign_key_violation THEN NULL;
     END;
-END $;
+END $cross_workload$;
 
 INSERT INTO compute_operations (
     compute_operation_id, tenant_id, workload_id, allocation_id, provider_id,
