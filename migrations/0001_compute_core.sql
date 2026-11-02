@@ -57,6 +57,7 @@ CREATE TABLE compute_allocations (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (workload_id, desired_generation),
     UNIQUE (allocation_id, tenant_id),
+    UNIQUE (allocation_id, workload_id, tenant_id),
     FOREIGN KEY (workload_id, tenant_id) REFERENCES compute_workloads(workload_id, tenant_id)
 );
 
@@ -68,8 +69,8 @@ CREATE INDEX compute_allocations_tenant_workload
 
 ALTER TABLE compute_workloads
     ADD CONSTRAINT compute_workloads_latest_allocation_tenant_fk
-    FOREIGN KEY (latest_allocation_id, tenant_id)
-    REFERENCES compute_allocations (allocation_id, tenant_id);
+    FOREIGN KEY (latest_allocation_id, workload_id, tenant_id)
+    REFERENCES compute_allocations (allocation_id, workload_id, tenant_id);
 
 CREATE TABLE compute_operations (
     compute_operation_id TEXT PRIMARY KEY,
@@ -103,7 +104,7 @@ CREATE TABLE compute_operations (
     UNIQUE (compute_operation_id, tenant_id),
     UNIQUE (workload_id, desired_generation, operation_kind, provider_request_digest),
     FOREIGN KEY (workload_id, tenant_id) REFERENCES compute_workloads(workload_id, tenant_id),
-    FOREIGN KEY (allocation_id, tenant_id) REFERENCES compute_allocations(allocation_id, tenant_id),
+    FOREIGN KEY (allocation_id, workload_id, tenant_id) REFERENCES compute_allocations(allocation_id, workload_id, tenant_id),
     CHECK ((lease_owner IS NULL) = (lease_expires_at IS NULL)),
     CHECK (
         (status IN ('LEASED', 'IN_FLIGHT', 'RECONCILING')
