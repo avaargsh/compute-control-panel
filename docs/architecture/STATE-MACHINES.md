@@ -152,7 +152,7 @@ NOT_FOUND is a point-in-time observation, not automatically a release decision. 
 ### Create
 
 1. Persist ComputeOperation and Allocation identity before dispatch.
-2. Dispatch using the stable compute_compute_operation_id as the provider idempotency/client token when supported.
+2. Dispatch using the stable compute_operation_id as the provider idempotency/client token when supported.
 3. If the response is lost, set operation UNKNOWN and keep workload PROVISIONING / allocation PENDING.
 4. Inspect by the provider token or deterministic external reference.
 5. If the resource exists and matches the immutable provider_request_digest, bind its provider_resource_id and resolve SUCCEEDED.
