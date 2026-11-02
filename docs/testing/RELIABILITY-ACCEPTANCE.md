@@ -20,10 +20,10 @@ A passing FakeProvider test is not evidence of real provider behavior. A success
 | ID | Layer | Scenario | Required assertion |
 |---|---|---|---|
 | C01 | Schema | Valid/invalid ComputeWorkload request | Versioned schema accepts valid inputs and rejects unknown/invalid capability combinations |
-| C02 | Authorization | Missing, expired or mismatched Permit/action_hash | Protected mutation fails closed before provider dispatch |
+| C02 | Authorization | Missing, expired or mismatched Guard Permit/action_hash/request digest | Protected Agent-originated compute mutation fails closed before provider dispatch; internal Run capacity requires authenticated service identity and Compute policy |
 | C03 | Tenant isolation | Cross-tenant workload/allocation/provider reference | Denied without disclosing resource existence |
 | C04 | Idempotency | Concurrent duplicate create with same key and same body | One ComputeWorkload, one operation intent and at most one active Allocation |
-| C05 | Idempotency | Same key with different canonical request hash | 422 conflict; no second side effect |
+| C05 | Idempotency | Same key with different canonical request digest | 409 IDEMPOTENCY_KEY_REUSED; no second side effect |
 | C06 | Inbox/outbox | Duplicate event delivery and consumer restart | Event is applied once logically; stale generations are ignored |
 | C07 | Create recovery | Provider creates resource but ACK is lost | Operation becomes UNKNOWN; Inspect finds and binds the existing resource; no duplicate create |
 | C08 | Create recovery | Provider proves request did not take effect | Operation becomes FAILED_CONFIRMED or safely redispatches the same immutable operation |
@@ -38,9 +38,11 @@ A passing FakeProvider test is not evidence of real provider behavior. A success
 | C17 | Scheduler boundary | Pod placement | Kubernetes Scheduler selects Node; Compute CP does not set NodeName or implement placement |
 | C18 | Kueue release | Job deletion and queue cleanup | Associated native Workload/reservation is cleaned up by Kueue; release is not reported early |
 | C19 | Provider identity | Same provider_resource_id under two providers/scopes | References remain distinct by provider_id, resource kind and scope |
+| C23 | Journal boundary | Guard action delegates to Compute provider mutation | Guard action_operation_id and Compute compute_operation_id remain distinct; each journal reconciles only its own effect |
+| C24 | Delegated Permit | Permit valid for action but mismatched Compute request digest/audience | Compute CP rejects before provider dispatch; action_hash is not recomputed by Compute CP |
 | C20 | Cancellation race | Release arrives while create is UNKNOWN | No conflicting delete/create is dispatched until the create outcome is reconciled or safely fenced |
-| C21 | Cross-repo contract | Agent request -> ComputeWorkload -> AllocationRef -> Runtime | Stable caller reference and allocation_id survive retries/restarts; Runtime never dispatches provider mutations |
-| C22 | Sandbox boundary | Sandbox and Compute provisioning both requested | Exactly one capacity allocation path; SandboxProvider consumes Allocation rather than creating duplicate GPU/CPU resources |
+| C21 | Cross-repo contract | RunIntent -> Runtime Run -> ComputeWorkload -> AllocationRef | Runtime owner_ref uses run_id, not run_intent_id; stable mapping and allocation_id survive retries/restarts; Runtime never dispatches provider mutations |
+| C22 | Sandbox boundary | Sandbox claim and Compute capacity request retried | SandboxProvider is the sole Compute caller for a claim; exactly one Workload/Allocation exists and SandboxProvider consumes the Allocation |
 
 ## 3. FakeProvider contract
 
@@ -75,7 +77,7 @@ The test must also prove that Compute CP does not create or patch the Kueue-nati
 ## 5. Release gate
 
 The architecture may enter implementation review only when:
-- domain ownership and cross-repository identity conflict are explicitly resolved or isolated behind a stable opaque reference;
+- RunIntent/Run identity mapping is contractually aligned and its Runtime idempotency/lookup tests are implemented;
 - API/event schemas are committed and linted;
 - operation state machine and idempotency rules have contract tests;
 - FakeProvider create/inspect/delete conformance passes;
@@ -83,4 +85,4 @@ The architecture may enter implementation review only when:
 - Kubernetes Job + Kueue integration ownership is unambiguous;
 - no test claims real provider or production acceptance without corresponding evidence.
 
-The end-to-end golden path remains blocked while Agent Control Panel and Agent Runtime disagree on canonical Run identity or while SandboxProvider and Compute CP can both create the same compute resource.
+The end-to-end golden path remains blocked until Runtime's RunIntent mapping, SandboxProvider single-requester rule, and Guard Permit-to-Compute request digest attestation have executable contract evidence.

@@ -2,11 +2,13 @@
 
 ## Phase 0 — Contract freeze
 
-1. Freeze ComputeProvider, Pool, Profile, Workload, Allocation and ResourceObservation ownership.
+1. Freeze ComputeProvider, Pool, Profile, ComputeWorkload, Allocation and ResourceObservation ownership.
 2. Freeze Workload v1 OpenAPI contract and event envelope.
 3. Freeze ComputeOperation journal states, lease/fencing and provider inspect semantics.
 4. Freeze Kueue admission vs Kubernetes scheduling vs provider/device realization.
-5. Define FakeProvider contract suite before any real provider adapter.
+5. Define Run owner_ref and SandboxClaim owner_ref; enforce exactly one Compute requester per capacity claim.
+6. Define the Guard Permit-to-Compute request digest attestation; fail closed until verified.
+7. Define FakeProvider contract suite before any real provider adapter.
 
 ## Phase 1 — Go foundation and persistence
 
