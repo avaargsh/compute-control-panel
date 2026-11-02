@@ -177,3 +177,63 @@ func randomSuffix(t *testing.T) string {
 	}
 	return fmt.Sprintf("%x", bytes[:])
 }
+
+func TestCreateWorkloadIdempotencyRejectsChangedOwnership(t *testing.T) {
+	db := openIntegrationDB(t)
+	repo, err := NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	request := json.RawMessage(`{"api_version":"compute.platform/v1","project_id":"project-int-1","resources":{"cpu":"2"}}`)
+	p := createParams("tenant-ownership-"+randomSuffix(t), "idem-"+randomSuffix(t),
+		testDigest(request), request, "workload-"+randomSuffix(t), "event-"+randomSuffix(t))
+	original, created, err := repo.CreateWorkload(ctx, p)
+	if err != nil || !created {
+		t.Fatalf("initial create: %+v %v", original, err)
+	}
+
+	cases := []struct {
+		name   string
+		mutate func(*CreateWorkloadParams)
+	}{
+		{"project", func(p *CreateWorkloadParams) { p.ProjectID = "project-foreign" }},
+		{"owner service", func(p *CreateWorkloadParams) { p.OwnerService = "sandbox-provider" }},
+		{"owner resource type", func(p *CreateWorkloadParams) { p.OwnerResourceType = "sandbox" }},
+		{"owner resource id", func(p *CreateWorkloadParams) { p.OwnerResourceID = "run-foreign" }},
+		{"compute profile", func(p *CreateWorkloadParams) {
+			p.ComputeProfileID = "profile-1"
+			p.ComputeProfileRevision = "revision-1"
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			changed := p
+			tc.mutate(&changed)
+			changed.WorkloadID = "workload-replay-" + randomSuffix(t)
+			changed.EventID = "event-replay-" + randomSuffix(t)
+			if _, created, err := repo.CreateWorkload(ctx, changed); !errors.Is(err, ErrIdempotencyConflict) || created {
+				t.Fatalf("changed ownership replay: created=%t err=%v, want ErrIdempotencyConflict", created, err)
+			}
+		})
+	}
+	replay := p
+	replay.WorkloadID = "workload-replay-" + randomSuffix(t)
+	replay.EventID = "event-replay-" + randomSuffix(t)
+	got, created, err := repo.CreateWorkload(ctx, replay)
+	if err != nil || created || got.WorkloadID != original.WorkloadID {
+		t.Fatalf("exact replay mismatch: created=%t got=%+v err=%v", created, got, err)
+	}
+	var count int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM compute_outbox_events WHERE tenant_id=$1
+			AND aggregate_type='compute_workload' AND aggregate_id=$2`,
+		p.TenantID, original.WorkloadID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("changed ownership emitted %d events, want 1", count)
+	}
+}
