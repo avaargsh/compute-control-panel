@@ -63,7 +63,8 @@ func TestCreateRequiresCorrelatedProviderObservation(t *testing.T) {
 func TestLostAckRequiresReconcileAndSameKeyRetry(t *testing.T) {
     now := time.Unix(200, 0).UTC()
     op := claimAndStart(t, fixture(Create), now)
-    op, err := op.MarkUnknown(op.Version, "controller-1", op.FenceToken, now.Add(2*time.Second))
+    var err error
+    op, err = op.MarkUnknown(op.Version, "controller-1", op.FenceToken, now.Add(2*time.Second))
     if err != nil || op.Status != Unknown { t.Fatalf("lost ACK: %+v %v", op, err) }
     if _, err := op.Claim(op.Version, "controller-2", now.Add(3*time.Second), time.Minute); !errors.Is(err, ErrTransition) {
         t.Fatalf("UNKNOWN blindly retried: %v", err)
