@@ -79,52 +79,49 @@ A new placement/reallocation creates a new allocation_id. Do not mutate an old A
 
 ## 4. ComputeOperation lifecycle
 
+The persisted domain vocabulary is canonical and matches `internal/operation`:
+
 ~~~text
-INTENT_RECORDED
-      |
-      v
-   CLAIMED
-      |
-      v
-  DISPATCHED
-      |
-      +---------------------> ACKNOWLEDGED
-      |                            |
-      |                            v
-      |                       RECONCILING
-      |                            |
-      |                            v
-      |                         SUCCEEDED
-      |
-      +-> timeout / lost ACK / worker crash
-                   |
-                   v
-                UNKNOWN
-                   |
-                   v
-              RECONCILING
-                /     \
-               v       v
-     SUCCEEDED     FAILED_CONFIRMED
-               \
-                v
-          MANUAL_REVIEW
+PENDING -> LEASED -> IN_FLIGHT -> SUCCEEDED | FAILED
+                 |         |
+                 |         +-> UNKNOWN (lost ACK, timeout or worker uncertainty)
+                 |                    |
+                 +-> UNKNOWN           v
+                                  RECONCILING
+                                   /   |    \
+                                  v    v     v
+                            SUCCEEDED PENDING FAILED
+                                  \    |    /
+                                   MANUAL_REVIEW
+
+A stale desired generation may resolve to SUPERSEDED (with compensation required
+when a stale CREATE materialized a resource). Lease expiry from LEASED,
+IN_FLIGHT or RECONCILING moves to UNKNOWN and increments the version; the next
+reconciliation claim advances the fencing token.
 ~~~
 
-CANCELLED_BEFORE_DISPATCH is allowed only while no external request could have been sent. Once DISPATCHED, cancellation is a new compensating operation; it cannot erase the original operation.
+Provider acknowledgement is a receipt/evidence, not a separate persisted
+operation status in v1. A response can be recorded while the operation remains
+IN_FLIGHT; the adapter still performs authoritative inspect before committing
+SUCCEEDED or another terminal/proven outcome. An HTTP success or accepted
+provider mutation alone does not prove allocation, execution or release.
 
-| State | Meaning |
+Cancellation is represented by a new compensating operation after dispatch.
+A cancellation before dispatch may be handled by a future explicit state/API,
+but it is not part of the current Go v1 status enum and must not be persisted
+under an undocumented value.
+
+| Canonical state | Meaning |
 |---|---|
-| INTENT_RECORDED | Immutable action and request digest durably stored before external I/O |
-| CLAIMED | A worker holds a durable lease/fencing epoch |
-| DISPATCHED | External call may have been sent |
-| ACKNOWLEDGED | Provider returned a response; response is not automatically proof of final state |
-| UNKNOWN | Side effect may have occurred but no trusted outcome is available |
-| RECONCILING | Adapter is inspecting authoritative provider state or a provider idempotency token |
-| SUCCEEDED | The intended effect is confirmed by provider receipt plus required observation |
-| FAILED_CONFIRMED | Provider evidence confirms the effect did not occur and no target resource exists |
-| MANUAL_REVIEW | Automated resolution is unsafe or provider evidence is insufficient |
-| CANCELLED_BEFORE_DISPATCH | Operation was cancelled while it was provable that no external request had been sent |
+| PENDING | Immutable operation intent and request digest are recorded; eligible for a worker claim |
+| LEASED | Worker holds lease owner, expiry and monotonically increasing fencing token |
+| IN_FLIGHT | External provider call may have been sent |
+| UNKNOWN | Outcome is ambiguous; direct redispatch is forbidden |
+| RECONCILING | Worker is inspecting authoritative provider state under a fresh lease/fence |
+| SUCCEEDED | Intended effect is confirmed by correlated provider receipt and required observation |
+| FAILED | Provider evidence confirms a terminal failure; no unverified success is projected |
+| MANUAL_REVIEW | Automated resolution is unsafe or provider evidence is contradictory/insufficient |
+| SUPERSEDED | Operation generation is stale; reconcile evidence and perform required compensation without overwriting current Workload projection |
 
 ## 5. Resource observations
 
