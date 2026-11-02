@@ -31,8 +31,14 @@ jobs:
         with:
           go-version: '1.27.3'
           cache: false
-      - name: Normalize Go formatting for this build
-        run: gofmt -w .
+      - name: Check Go formatting
+        shell: bash
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [[ -n "$unformatted" ]]; then
+            printf 'The following Go files are not gofmt-formatted:\n%s\n' "$unformatted"
+            exit 1
+          fi
       - name: Verify module checksums
         run: go mod verify
       - name: Validate PostgreSQL migration
