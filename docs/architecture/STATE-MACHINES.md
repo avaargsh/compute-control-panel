@@ -50,7 +50,7 @@ Definitions:
 | ALLOCATED | A usable provider resource binding is verified | No |
 | RELEASING | Desired absence is durable; deletion/cleanup is being reconciled | No |
 | RELEASED | Provider resource absence and applicable queue/quota release are verified | Yes |
-| REJECTED | Request failed validation/policy/admission before any ambiguous side effect | Yes |
+| REJECTED | Request failed validation/policy before any external dispatch | Yes |
 | FAILED_CONFIRMED | Provider/Kueue evidence confirms the requested allocation did not materialize and all objects/reservations created for that attempt are cleaned up or authoritatively absent | Yes |
 
 There is no workload-level UNKNOWN terminal state. UNKNOWN belongs to ComputeOperation and ResourceObservation. While a create operation is UNKNOWN, the workload remains PROVISIONING. While a delete operation is UNKNOWN, it remains RELEASING. This prevents an ambiguous external effect from being mislabeled as failure or success.
@@ -73,6 +73,7 @@ PENDING -> BOUND -> RELEASING -> RELEASED
 - RELEASING: release intent is durable; the external resource may still exist.
 - RELEASED: all required provider resources are authoritatively absent and relevant queue reservation is no longer held.
 - REJECTED: validation/policy rejection before any external dispatch.
+- FAILED_CONFIRMED: a provider/Kueue attempt definitively did not materialize the requested allocation and cleanup/absence has been verified.
 
 A new placement/reallocation creates a new allocation_id. Do not mutate an old Allocation to point at a different provider resource.
 
