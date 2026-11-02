@@ -76,9 +76,9 @@ Allocation means that the resource binding is verified and usable. It does not m
 
 ### ComputeOperation
 
-A durable record for one intended external side effect, such as create, inspect, update or delete. It is the compute-side operation journal. It records a stable operation_id, workload/allocation references, generation, action hash, provider identity, request digest, dispatch attempts, authorization reference, receipts and reconciliation evidence.
+A durable record for one intended external side effect, such as create, inspect, update or delete. It is the compute-side operation journal. It records a stable compute_operation_id, workload/allocation references, desired generation, provider identity, provider_request_digest, compute_attempt_id records, optional Guard operation reference, provider receipts and reconciliation evidence.
 
-operation_id is stable across retries of the same immutable intent. attempt_id is unique for each dispatch attempt. A changed target or payload is a new operation, not a retry.
+compute_operation_id is stable across retries of the same immutable provider intent. compute_attempt_id is unique for each provider dispatch attempt. A changed target, payload or desired generation is a new operation, not a retry.
 
 ### ResourceObservation
 
@@ -94,7 +94,7 @@ A platform mapping from tenant/project/pool policy to a namespaced Kueue LocalQu
 - A ComputeWorkload may have zero or one active Allocation; historical Allocations are retained.
 - An Allocation belongs to exactly one ComputeWorkload generation and one ComputeProvider.
 - An Allocation may contain multiple typed provider-resource references, all scoped by provider_id.
-- A ComputeOperation mutates one declared target and is fenced to one desired generation and action hash.
+- A ComputeOperation mutates one declared target and is fenced to one desired generation and provider_request_digest.
 - A ResourceObservation is append-only evidence; a newer observation supersedes the current projection but does not erase history.
 - Cross-tenant references are rejected on every API read, write, event consumption and provider binding.
 
@@ -115,14 +115,14 @@ A SandboxProvider may own isolation and sandbox-session semantics. It must consu
 
 ComputeOperation is not a replacement for EngageGuard's authorization/approval evidence. For a protected mutation:
 
-1. EngageGuard decides and issues a scoped Permit.
-2. The caller passes the Permit reference and action_hash with the compute command.
-3. Compute CP verifies the Permit is valid for the exact action before dispatch.
-4. Compute CP persists and dispatches its own ComputeOperation.
-5. Provider receipt and reconciliation evidence are recorded by Compute CP.
-6. The resulting operation and allocation references are linked back to governance evidence.
+1. For a protected Agent-originated compute action, EngageGuard authorizes the exact ActionRequest and issues a scoped Permit for the Compute CP audience.
+2. The request carries guard_operation_id, permit_ref and opaque action_hash; caller-supplied fields alone are not proof of authorization.
+3. Compute CP validates the Permit through the Guard verification interface and binds it to the exact normalized Compute request digest before dispatch. Until that attestation contract exists, fail closed.
+4. Compute CP persists and dispatches its own ComputeOperation using compute_operation_id and provider_request_digest.
+5. Provider receipt and reconciliation evidence are recorded by Compute CP. EngageGuard retains the Action Operation and links the downstream compute_operation_id.
+6. Guard action_hash is not recomputed by Compute CP and is not reused as provider_request_digest.
 
-EngageGuard does not dispatch provider mutations. Compute CP does not invent or widen authorization. The canonical action-hash serialization and Permit schema are cross-repository contract dependencies and must be versioned together.
+EngageGuard owns protected-action authorization and the Action Operation Journal. Compute CP is the trusted enforcement point for provider mutations delegated to it and owns the ComputeOperation journal. Internal Run capacity requests use authenticated service identity and Compute policy. The Guard-to-Compute Permit attestation schema and action_hash binding remain versioned cross-repository dependencies.
 
 ## 7. Alternatives considered
 

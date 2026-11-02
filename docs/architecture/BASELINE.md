@@ -4,7 +4,7 @@ Status: Proposed v0.2 — implementation gate
 
 ## 1. Authority
 
-Compute Control Plane is the sole writer for ComputeProvider registration, ComputePool, ComputeProfile, Workload intent, Allocation, quota binding, ComputeOperation journal and ResourceObservation records/projections.
+Compute Control Plane is the sole writer for ComputeProvider registration, ComputePool, ComputeProfile, ComputeWorkload intent, Allocation, quota binding, compute_operation_id/provider journal and ResourceObservation records/projections.
 
 External authorities remain:
 - Kueue: queue admission and quota admission.
@@ -21,13 +21,13 @@ No custom scheduler is built in v0.1. No two components may create/delete the sa
 
 Workload is a desired compute request, not a Pod or a Run.
 
-Fields include: workload_id, tenant_id, project_id, owner_ref (opaque source service/resource), compute_profile_ref, desired_generation, desired_state, observed_generation, observed_phase, allocation_id, provider reference, timestamps and version.
+Fields include: workload_id, tenant_id, project_id, owner_ref (opaque source service/resource), compute_profile_ref, canonical request digest, desired_generation, desired_state, observed_generation, observed_phase, allocation_id, provider reference, timestamps and version.
 
 - Desired state: ACTIVE or DELETE_REQUESTED.
 - Observed phase is a projection: PENDING, ADMISSION_PENDING, ADMITTED, RUNNING, SUCCEEDED, FAILED, TERMINATING, RELEASED or UNKNOWN.
 - An observation never changes desired state.
 - A stale-generation observation may be retained as evidence but cannot overwrite the current projection.
-- Workload references Run via owner_ref; it does not own Run state.
+- Workload references Runtime Run via owner_ref=agent-runtime/run/<run_id>, or a SandboxProvider claim via owner_ref=sandbox-provider/sandbox-claim/<claim_id>; it does not own Run or Sandbox lifecycle state. RunIntent is not a Workload owner reference.
 
 ### Allocation
 
@@ -35,7 +35,7 @@ Allocation records the selected provider/pool and the capacity/resource referenc
 
 ### ComputeOperation
 
-One immutable intent to mutate a provider resource. Fields include operation_id, tenant/workload/provider IDs, kind, desired_generation, idempotency_key, canonical request_digest, target provider resource ID/UID where applicable, status, version, lease owner/expiry and fencing token.
+One immutable intent to mutate a provider resource. Fields include compute_operation_id, tenant/workload/provider IDs, kind, desired_generation, provider idempotency token, provider_request_digest, target provider resource ID/UID where applicable, status, version, lease owner/expiry and fencing token, plus optional guard_operation_ref.
 
 Operation state:
 
@@ -58,10 +58,10 @@ An append-only observation is distinct from ComputeOperation status. It records 
 
 ## 3. Provider operation semantics
 
-- Every provider mutation carries stable operation_id, idempotency key, request digest and desired_generation.
+- Every provider mutation carries stable compute_operation_id, provider idempotency token, provider_request_digest and desired_generation.
 - Persist ComputeOperation before making the provider call.
 - A lost acknowledgement transitions to UNKNOWN.
-- Inspect by operation_id and exact resource identity before retry.
+- Inspect by compute_operation_id and exact provider resource identity before retry.
 - CREATE/UPDATE success requires observed resource identity plus operation/generation correlation.
 - DELETE success requires absence of the exact target resource UID (not just a successful delete response or absence by a reused name).
 - If the provider cannot expose an authoritative operation lookup or safe idempotency, ambiguous operations stay UNKNOWN / MANUAL_REVIEW; do not invent exactly-once semantics.
@@ -78,7 +78,7 @@ Kueue admits queued workloads and enforces configured quota/borrowing/preemption
 - `GET /api/v1/workloads/{id}`: returns desired state, observed phase, generation, allocation reference and evidence links.
 - `GET /api/v1/workloads`: cursor pagination with bounded page size and tenant scope.
 - `DELETE /api/v1/workloads/{id}`: records DELETE_REQUESTED and returns 202. It does not claim the provider resource is already released.
-- Provider IDs, raw credentials and Kubernetes implementation objects are not accepted as authorization inputs from callers.
+- Provider IDs, raw credentials and Kubernetes implementation objects are not accepted as authorization inputs from callers. For protected Agent-originated compute requests, Compute CP validates a Guard Permit bound to the exact normalized request; internal Runtime/SandboxProvider requests use authenticated service identity and Compute policy.
 
 ## 6. Persistence and reconciliation
 
