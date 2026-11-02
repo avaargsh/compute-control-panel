@@ -34,5 +34,5 @@
 - [ ] Compute owner_ref uses agent-runtime/run/<run_id> for direct Run capacity, never RunIntent.
 - [ ] SandboxProvider is the sole Compute caller for a SandboxClaim; duplicate direct Runtime request is rejected.
 - [ ] EngageGuard Permit attestation binds guard_operation_id, audience and exact normalized Compute request digest.
-- [ ] Guard action_operation_id and Compute compute_operation_id are distinct and linked by references only.
+- [ ] Runtime guard_submission_key, Guard-generated operation_id and Compute compute_operation_id are distinct; Guard and Compute operation IDs are linked by references only.
 - [ ] Add consumer-driven tests for both journals independently entering UNKNOWN and reconciling.

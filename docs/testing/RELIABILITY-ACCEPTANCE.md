@@ -38,7 +38,7 @@ A passing FakeProvider test is not evidence of real provider behavior. A success
 | C17 | Scheduler boundary | Pod placement | Kubernetes Scheduler selects Node; Compute CP does not set NodeName or implement placement |
 | C18 | Kueue release | Job deletion and queue cleanup | Associated native Workload/reservation is cleaned up by Kueue; release is not reported early |
 | C19 | Provider identity | Same provider_resource_id under two providers/scopes | References remain distinct by provider_id, resource kind and scope |
-| C23 | Journal boundary | Guard action delegates to Compute provider mutation | Guard action_operation_id and Compute compute_operation_id remain distinct; each journal reconciles only its own effect |
+| C23 | Journal boundary | Guard action delegates to Compute provider mutation | Guard server-generated operation_id and Compute compute_operation_id remain distinct; each journal reconciles only its own effect |
 | C24 | Delegated Permit | Permit valid for action but mismatched Compute request digest/audience | Compute CP rejects before provider dispatch; action_hash is not recomputed by Compute CP |
 | C20 | Cancellation race | Release arrives while create is UNKNOWN | No conflicting delete/create is dispatched until the create outcome is reconciled or safely fenced |
 | C21 | Cross-repo contract | RunIntent -> Runtime Run -> ComputeWorkload -> AllocationRef | Runtime owner_ref uses run_id, not run_intent_id; stable mapping and allocation_id survive retries/restarts; Runtime never dispatches provider mutations |
