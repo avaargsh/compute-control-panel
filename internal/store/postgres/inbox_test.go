@@ -4,10 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"sync"
 	"testing"
-	"time"
 )
 
 func inboxFixture(t *testing.T, tenant, aggregate string, version int64) InboxEvent {
@@ -167,6 +165,4 @@ func TestInboxRejectsInvalidInput(t *testing.T) {
 	if _, err := repo.ApplyInbox(context.Background(), e, nil); !errors.Is(err, ErrInboxInvalid) {
 		t.Fatalf("nil business handler accepted: %v", err)
 	}
-	_ = fmt.Sprintf
-	_ = time.Second
 }
