@@ -17,6 +17,8 @@ Status: **non-production foundation; Compute Golden Path not yet complete**.
   append-only ResourceObservation, Outbox, Inbox and aggregate cursors; PostgreSQL 16 CI applies it and executes constraint smoke tests.
 - `internal/store/postgres.Repository.CreateWorkload` atomically commits tenant-scoped idempotency claim, Workload and accepted Outbox event.
 - Concurrent same-key/same-digest requests replay the stable Workload identity; same-key/different-digest returns `ErrIdempotencyConflict`.
+- The idempotent replay path now also rejects changes in immutable `project_id`, owner service/type/resource or compute profile/revision **even if the caller reuses the same digest**; the normalized request's `project_id` must match the persisted Workload scope before insert. PostgreSQL regression tests cover the metadata-confusion path.
+- The current `DigestRequest` hashes provided normalized bytes; it does not independently prove RFC 8785 canonicalization or bind an authenticated principal. Canonicalization conformance, identity-derived requester scope and API AuthZ remain production-blocking acceptance gates.
 - PostgreSQL integration tests exercise concurrent callers, one Workload/Outbox row, changed-digest rejection, request digest binding and input validation.
 - `Repository.CreateOperation` atomically commits an immutable operation and an Outbox event; operation row locks, expected-version CAS, PostgreSQL-clock lease expiry and monotonic fencing survive repository reconstruction.
 - Concurrent claim, ACK-loss UNKNOWN recovery, stale worker rejection and historical idempotency replay across workload generation changes have PostgreSQL-backed integration tests.
