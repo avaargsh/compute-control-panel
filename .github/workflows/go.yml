@@ -41,14 +41,12 @@ jobs:
           fi
       - name: Verify module checksums
         run: go mod verify
-      - name: Validate PostgreSQL migration
+      - name: Apply PostgreSQL migrations (checksummed runner, run twice for idempotency)
         env:
-          PGPASSWORD: compute-ci
-        run: psql --host=127.0.0.1 --username=postgres --dbname=postgres --set=ON_ERROR_STOP=1 --file=migrations/0001_compute_core.sql
-      - name: Apply operation inspection migration
-        env:
-          PGPASSWORD: compute-ci
-        run: psql --host=127.0.0.1 --username=postgres --dbname=postgres --set=ON_ERROR_STOP=1 --file=migrations/0002_operation_inspection.sql
+          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
+        run: |
+          go run ./cmd/migrate
+          go run ./cmd/migrate
       - name: Validate PostgreSQL schema constraints
         env:
           PGPASSWORD: compute-ci
