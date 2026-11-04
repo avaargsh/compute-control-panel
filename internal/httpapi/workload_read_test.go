@@ -287,7 +287,6 @@ func TestGetWorkloadReturnsAllocationAndOperationHistoryWithoutProviderSecrets(t
 	}
 }
 
-
 func TestGetWorkloadReportsWhenHistoryWasTruncated(t *testing.T) {
 	principal, authorizer, repository := newReadFixture()
 	repository.details.HistoryTruncated = true
