@@ -221,7 +221,9 @@ func DeriveUsageInterval(evidence AllocationUsageEvidence, policy EvidencePolicy
 		}
 	case DeviceEvidenceModeCertifiedAdapter:
 		key := device.CapabilityProfileID + "@" + device.Assignment.Source + "@" + device.Assignment.AdapterVersion
-		if !policy.CertifiedDeviceAdapters[key] {
+		if !policy.CertifiedDeviceAdapters[key] ||
+			(device.Release != nil && (device.Release.Source != device.Assignment.Source ||
+				device.Release.AdapterVersion != device.Assignment.AdapterVersion)) {
 			return incomplete(ReasonDeviceAssignmentMissing)
 		}
 	default:
