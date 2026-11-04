@@ -115,3 +115,108 @@ func TestFakeProviderObservationDrivesExistingDomainReconciliation(t *testing.T)
 		t.Fatalf("recovered provider result: %+v %v", verified, err)
 	}
 }
+
+
+func TestFakeProviderTargetBoundUpdateDeleteAndLostReleaseACK(t *testing.T) {
+	ctx := context.Background()
+	fake := NewFakeProvider()
+	create := fakeRequest()
+	if _, err := fake.Apply(ctx, create); err != nil {
+		t.Fatal(err)
+	}
+	created, err := fake.Inspect(ctx, create)
+	if err != nil || created.Result != operation.ResourcePresent {
+		t.Fatalf("CREATE inspection: %+v %v", created, err)
+	}
+
+	update := create
+	update.OperationID = "op-fake-update"
+	update.IdempotencyKey = "idempotency-update"
+	update.DesiredGeneration = 2
+	update.Kind = operation.Update
+	update.TargetResourceID = created.ResourceID
+	update.TargetResourceUID = created.ResourceUID
+	if _, err := fake.Apply(ctx, update); err != nil {
+		t.Fatalf("target-bound UPDATE: %v", err)
+	}
+	updated, err := fake.Inspect(ctx, update)
+	if err != nil || updated.Result != operation.ResourcePresent ||
+		updated.ResourceID != created.ResourceID || updated.ResourceUID != created.ResourceUID ||
+		updated.ResourceOperationID != update.OperationID ||
+		updated.ResourceGeneration != update.DesiredGeneration {
+		t.Fatalf("UPDATE lost exact target identity: %+v %v", updated, err)
+	}
+
+	remove := update
+	remove.OperationID = "op-fake-delete"
+	remove.IdempotencyKey = "idempotency-delete"
+	remove.DesiredGeneration = 3
+	remove.Kind = operation.Delete
+	fake.LoseNextAcknowledgement()
+	if _, err := fake.Apply(ctx, remove); !errors.Is(err, ErrAcknowledgementLost) {
+		t.Fatalf("DELETE lost ACK must be ambiguous: %v", err)
+	}
+	released, err := fake.Inspect(ctx, remove)
+	if err != nil || released.Result != operation.TargetAbsent ||
+		released.TargetResourceID != created.ResourceID ||
+		released.TargetResourceUID != created.ResourceUID ||
+		released.ResourceID != "" || released.ResourceUID != "" {
+		t.Fatalf("exact deleted UID must be inspectable: %+v %v", released, err)
+	}
+	if receipt, err := fake.Apply(ctx, remove); err != nil || receipt.OperationID != remove.OperationID {
+		t.Fatalf("same operation DELETE replay is not idempotent: %+v %v", receipt, err)
+	}
+	// Historical CREATE must not falsely present a released resource as live.
+	old, err := fake.Inspect(ctx, create)
+	if err != nil || old.Result == operation.ResourcePresent ||
+		old.Result == operation.OperationNotAppliedFinal {
+		t.Fatalf("stale CREATE inspection reported false live resource: %+v %v", old, err)
+	}
+}
+
+func TestFakeProviderCannotDeleteForeignStaleOrAlreadyReclaimedUID(t *testing.T) {
+	ctx := context.Background()
+	fake := NewFakeProvider()
+	create := fakeRequest()
+	if _, err := fake.Apply(ctx, create); err != nil {
+		t.Fatal(err)
+	}
+	created, err := fake.Inspect(ctx, create)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remove := create
+	remove.Kind = operation.Delete
+	remove.OperationID = "op-delete"
+	remove.IdempotencyKey = "delete-key"
+	remove.TargetResourceID = created.ResourceID
+	remove.TargetResourceUID = created.ResourceUID
+
+	for name, mutate := range map[string]func(*Request){
+		"stale uid": func(r *Request) { r.TargetResourceUID = "uid-replaced" },
+		"foreign tenant": func(r *Request) { r.TenantID = "tenant-other" },
+		"foreign workload": func(r *Request) { r.WorkloadID = "workload-other" },
+		"foreign provider": func(r *Request) { r.ProviderID = "provider-other" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			bad := remove
+			mutate(&bad)
+			if _, err := fake.Apply(ctx, bad); !errors.Is(err, ErrOperationConflict) {
+				t.Fatalf("unauthorized target mutation accepted: %v", err)
+			}
+		})
+	}
+	if _, err := fake.Apply(ctx, remove); err != nil {
+		t.Fatalf("valid delete: %v", err)
+	}
+	second := remove
+	second.OperationID = "op-other-delete"
+	second.IdempotencyKey = "another-delete-key"
+	if _, err := fake.Apply(ctx, second); !errors.Is(err, ErrOperationConflict) {
+		t.Fatalf("new DELETE operation cannot infer release from missing target: %v", err)
+	}
+	if obs, err := fake.Inspect(ctx, second); err != nil ||
+		obs.Result == operation.TargetAbsent || obs.Result == operation.OperationNotAppliedFinal {
+		t.Fatalf("unrecorded delete inferred finality: %+v %v", obs, err)
+	}
+}
