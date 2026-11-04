@@ -146,7 +146,6 @@ func TestAcceptWorkloadCommitsWorkloadAllocationOperationAndEventsAtomically(t *
 	}
 }
 
-
 func TestGetWorkloadDetailsReturnsTenantScopedConsistentHistory(t *testing.T) {
 	db := openIntegrationDB(t)
 	repo, err := NewRepository(db)
