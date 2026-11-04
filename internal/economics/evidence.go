@@ -61,15 +61,18 @@ type EvidenceRecord struct {
 }
 
 type ProviderUsageEvidence struct {
-	ResourceID         string
-	ResourceUID        string
-	PoolID             string
-	ProfileID          string
-	GPUModel           string
-	GPUCount           int64
-	Binding            EvidenceRecord
-	CostLiabilityStart EvidenceRecord
-	CostLiabilityEnd   *EvidenceRecord
+	ComputeOperationID   string
+	OperationRequestDigest string
+	OperationSucceeded   bool
+	ResourceID           string
+	ResourceUID          string
+	PoolID               string
+	ProfileID            string
+	GPUModel             string
+	GPUCount             int64
+	Binding              EvidenceRecord
+	CostLiabilityStart   EvidenceRecord
+	CostLiabilityEnd     *EvidenceRecord
 }
 
 type KueueUsageEvidence struct {
@@ -79,6 +82,7 @@ type KueueUsageEvidence struct {
 	LocalQueue       string
 	ClusterQueue     string
 	ResourceFlavor   string
+	GPUResourceName  string
 	Admitted         bool
 	AdmittedGPUCount int64
 	Admission        EvidenceRecord
@@ -166,7 +170,8 @@ func DeriveUsageInterval(evidence AllocationUsageEvidence, policy EvidencePolicy
 	}
 
 	provider := evidence.Provider
-	if !nonBlank(provider.ResourceID, provider.ResourceUID, provider.Binding.ObservationID, provider.CostLiabilityStart.ObservationID) {
+	if !nonBlank(provider.ComputeOperationID, provider.OperationRequestDigest, provider.ResourceID, provider.ResourceUID, provider.Binding.ObservationID, provider.CostLiabilityStart.ObservationID) ||
+		!isSHA256Digest(provider.OperationRequestDigest) || !provider.OperationSucceeded {
 		return incomplete(ReasonProviderBindingMissing)
 	}
 	if provider.PoolID != evidence.PoolID || provider.ProfileID != evidence.ProfileID ||
@@ -187,7 +192,7 @@ func DeriveUsageInterval(evidence AllocationUsageEvidence, policy EvidencePolicy
 	if !kueue.Admitted {
 		return incomplete(ReasonKueueNotAdmitted)
 	}
-	if !nonBlank(kueue.WorkloadUID, kueue.JobUID, kueue.LocalQueue, kueue.ClusterQueue, kueue.ResourceFlavor) ||
+	if !nonBlank(kueue.WorkloadUID, kueue.JobUID, kueue.LocalQueue, kueue.ClusterQueue, kueue.ResourceFlavor, kueue.GPUResourceName) ||
 		kueue.ProfileID != evidence.ProfileID || kueue.WorkloadUID != kueue.Admission.NativeUID ||
 		kueue.Admission.Source != "kueue" || (kueue.Release != nil && kueue.Release.Source != "kueue") {
 		return incomplete(ReasonKueueIdentityMismatch)
@@ -496,6 +501,10 @@ func allocationUsageEvidenceDigest(
 		DevicePoolID          string
 		DeviceProfileID       string
 		DeviceGPUCount        int64
+		ProviderComputeOperationID string
+		ProviderOperationRequestDigest string
+		ProviderOperationSucceeded bool
+		KueueGPUResourceName string
 		Records               []canonicalEvidenceRecord
 		CostableStart         string
 		CostableEnd           string
@@ -514,6 +523,10 @@ func allocationUsageEvidenceDigest(
 		KueueWorkloadUID: evidence.Kueue.WorkloadUID, JobUID: evidence.Kueue.JobUID,
 		PodUID: evidence.Pod.PodUID, DeviceMode: evidence.Device.Mode,
 		DeviceResourceUID: evidence.Device.ResourceUID, DeviceIDs: canonicalDevices,
+		ProviderComputeOperationID: evidence.Provider.ComputeOperationID,
+		ProviderOperationRequestDigest: evidence.Provider.OperationRequestDigest,
+		ProviderOperationSucceeded: evidence.Provider.OperationSucceeded,
+		KueueGPUResourceName: evidence.Kueue.GPUResourceName,
 		ProviderPoolID: evidence.Provider.PoolID, ProviderProfileID: evidence.Provider.ProfileID,
 		ProviderGPUModel: evidence.Provider.GPUModel, ProviderGPUCount: evidence.Provider.GPUCount,
 		KueueProfileID: evidence.Kueue.ProfileID, KueueLocalQueue: evidence.Kueue.LocalQueue,
