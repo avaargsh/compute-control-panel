@@ -20,7 +20,7 @@ const (
 )
 
 var (
-	ErrInvalidUsageEvidence = errors.New("invalid Allocation usage evidence")
+	ErrInvalidUsageEvidence  = errors.New("invalid Allocation usage evidence")
 	ErrUsageEvidenceNotReady = errors.New("Allocation usage evidence is not backed by a successful Provider operation")
 	ErrUsageEvidenceConflict = errors.New("Allocation usage evidence conflicts with an existing immutable record")
 )
