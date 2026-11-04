@@ -11,7 +11,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/avaargsh/compute-control-panel/internal/identity"
 	"github.com/avaargsh/compute-control-panel/internal/operation"
@@ -22,6 +24,8 @@ const (
 	workloadCreateAPIVersion = "compute.platform/v1"
 	maxWorkloadCreateBody    = 1 << 20
 )
+
+var workloadCPUDecimal = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?$`)
 
 type WorkloadPrincipal = identity.WorkloadPrincipal
 
@@ -89,12 +93,12 @@ type WorkloadResourcesRequest struct {
 	CPU          string                       `json:"cpu"`
 	Memory       string                       `json:"memory"`
 	Accelerators []WorkloadAcceleratorRequest `json:"accelerators,omitempty"`
-	Storage      string                       `json:"storage,omitempty"`
+	Storage      *string                      `json:"storage,omitempty"`
 }
 
 type WorkloadConstraintsRequest struct {
 	PoolSelector       map[string]string `json:"pool_selector,omitempty"`
-	MaxDurationSeconds int               `json:"max_duration_seconds,omitempty"`
+	MaxDurationSeconds *int              `json:"max_duration_seconds,omitempty"`
 }
 
 type WorkloadAuthorizationRequest struct {
@@ -423,31 +427,39 @@ func decodeWorkloadCreate(body []byte) (WorkloadCreateRequest, []byte, string, e
 
 func validateWorkloadCreateRequest(request WorkloadCreateRequest) error {
 	if request.APIVersion != workloadCreateAPIVersion ||
-		strings.TrimSpace(request.ProjectID) == "" ||
-		strings.TrimSpace(request.OwnerRef.Service) == "" ||
-		strings.TrimSpace(request.OwnerRef.ResourceType) == "" ||
-		strings.TrimSpace(request.OwnerRef.ResourceID) == "" {
-		return errors.New("missing or unsupported Workload fields")
+		strings.TrimSpace(request.ProjectID) == "" || utf8.RuneCountInString(request.ProjectID) > 256 ||
+		strings.TrimSpace(request.OwnerRef.ResourceID) == "" || utf8.RuneCountInString(request.OwnerRef.ResourceID) > 256 {
+		return errors.New("missing, oversized or unsupported Workload fields")
+	}
+	if !((request.OwnerRef.Service == "agent-runtime" && request.OwnerRef.ResourceType == "run") ||
+		(request.OwnerRef.Service == "sandbox-provider" && request.OwnerRef.ResourceType == "sandbox-claim")) {
+		return errors.New("unsupported Workload owner reference")
 	}
 	if (request.ComputeProfileRef == nil) == (request.Resources == nil) {
 		return errors.New("exactly one compute_profile_ref or resources object is required")
 	}
-	if request.ComputeProfileRef != nil &&
-		(strings.TrimSpace(request.ComputeProfileRef.ID) == "" || strings.TrimSpace(request.ComputeProfileRef.Revision) == "") {
-		return errors.New("incomplete compute profile reference")
-	}
-	if request.Resources != nil {
-		if strings.TrimSpace(request.Resources.CPU) == "" || strings.TrimSpace(request.Resources.Memory) == "" {
-			return errors.New("resources require CPU and memory")
+	if profile := request.ComputeProfileRef; profile != nil {
+		if strings.TrimSpace(profile.ID) == "" || utf8.RuneCountInString(profile.ID) > 256 ||
+			strings.TrimSpace(profile.Revision) == "" || utf8.RuneCountInString(profile.Revision) > 128 {
+			return errors.New("invalid compute profile reference")
 		}
-		for _, accelerator := range request.Resources.Accelerators {
+	}
+	if resources := request.Resources; resources != nil {
+		if !workloadCPUDecimal.MatchString(resources.CPU) ||
+			strings.TrimSpace(resources.Memory) == "" || utf8.RuneCountInString(resources.Memory) > 64 {
+			return errors.New("invalid CPU or memory resource requirement")
+		}
+		if resources.Storage != nil && strings.TrimSpace(*resources.Storage) == "" {
+			return errors.New("invalid storage resource requirement")
+		}
+		for _, accelerator := range resources.Accelerators {
 			if strings.TrimSpace(accelerator.Vendor) == "" || strings.TrimSpace(accelerator.Model) == "" || accelerator.Count <= 0 {
 				return errors.New("invalid accelerator requirement")
 			}
 		}
 	}
 	if request.Constraints != nil {
-		if request.Constraints.MaxDurationSeconds < 0 {
+		if request.Constraints.MaxDurationSeconds != nil && *request.Constraints.MaxDurationSeconds <= 0 {
 			return errors.New("invalid max duration")
 		}
 		for k, v := range request.Constraints.PoolSelector {
@@ -457,8 +469,8 @@ func validateWorkloadCreateRequest(request WorkloadCreateRequest) error {
 		}
 	}
 	if auth := request.Authorization; auth != nil {
-		if strings.TrimSpace(auth.GuardOperationID) == "" ||
-			strings.TrimSpace(auth.PermitRef) == "" ||
+		if strings.TrimSpace(auth.GuardOperationID) == "" || utf8.RuneCountInString(auth.GuardOperationID) > 256 ||
+			strings.TrimSpace(auth.PermitRef) == "" || utf8.RuneCountInString(auth.PermitRef) > 256 ||
 			!validWorkloadDigest(auth.ActionHash) ||
 			auth.Audience != "compute-control-panel" {
 			return errors.New("invalid delegated authorization reference")
