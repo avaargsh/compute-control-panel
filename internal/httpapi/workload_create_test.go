@@ -67,11 +67,11 @@ func (g *sequentialWorkloadIDs) NewID(prefix string) (string, error) {
 func newAcceptanceTestHandler(t *testing.T, auth testPrincipalAuthenticator, authorizer *testWorkloadAuthorizer, selector *testProviderSelector, repo *testAcceptanceRepository) http.Handler {
 	t.Helper()
 	handler, err := NewWorkloadCreateHandler(WorkloadCreateDependencies{
-		Authenticator:   auth,
-		Authorizer:      authorizer,
+		Authenticator:    auth,
+		Authorizer:       authorizer,
 		ProviderSelector: selector,
-		Repository:      repo,
-		IDs:             &sequentialWorkloadIDs{},
+		Repository:       repo,
+		IDs:              &sequentialWorkloadIDs{},
 	})
 	if err != nil {
 		t.Fatalf("NewWorkloadCreateHandler: %v", err)
@@ -95,9 +95,9 @@ func validCreateBody() string {
 
 func newAcceptanceFixture() (WorkloadPrincipal, *testWorkloadAuthorizer, *testProviderSelector, *testAcceptanceRepository) {
 	principal := WorkloadPrincipal{
-		TenantID:  "tenant-001",
-		Subject:   "spiffe://cluster.local/ns/agent-runtime/sa/runtime",
-		Service:   "agent-runtime",
+		TenantID:   "tenant-001",
+		Subject:    "spiffe://cluster.local/ns/agent-runtime/sa/runtime",
+		Service:    "agent-runtime",
 		ProjectIDs: []string{"project-001"},
 	}
 	authorizer := &testWorkloadAuthorizer{}
