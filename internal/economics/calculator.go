@@ -399,7 +399,7 @@ func calculationDigest(usage UsageInterval, rate ProviderRateCard, start, end st
 		RateUnit: rate.Unit,
 		RateAmount: canonicalRate,
 		Currency: rate.Currency,
-		CurrencyMetadataVersion rate.CurrencyMetadataVersion,
+		CurrencyMetadataVersion: rate.CurrencyMetadataVersion,
 		CurrencyMinorUnit: rate.CurrencyMinorUnit,
 		EffectiveFrom: from,
 		EffectiveTo: to,
