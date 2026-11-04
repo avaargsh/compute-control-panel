@@ -306,6 +306,31 @@ class ContractSchemasTest(unittest.TestCase):
         ):
             self.assertEqual(paths[route][method]["x-implementation-status"], "proposed")
 
+    def test_pinned_cross_plane_workload_shape_fixtures(self) -> None:
+        fixture_path = CONTRACT_ROOT / "fixtures" / "workload-create-consumers.v1.json"
+        fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+        self.assertEqual(fixture["fixture_version"], "compute.workload-create-consumers.v1")
+        self.assertGreaterEqual(len(fixture["cases"]), 12)
+        self.assertEqual(
+            {item["repo"] for item in fixture["source_pins"]},
+            {"avaargsh/agent-control-panel", "avaargsh/agent-runtime", "avaargsh/EngageGuard"},
+        )
+        for pin in fixture["source_pins"]:
+            self.assertEqual(len(pin["commit"]), 40, pin)
+            self.assertIn(pin["state"], ("proposed", "draft"))
+
+        schema = self.validator("compute-workload-create-v1.schema.json")
+        for case in fixture["cases"]:
+            with self.subTest(case=case["name"]):
+                violations = list(schema.iter_errors(case["body"]))
+                expected_valid = case["expect_schema_valid"]
+                self.assertEqual(
+                    not violations,
+                    expected_valid,
+                    f"cross-plane fixture disagrees with JSON Schema: {case['name']}: "
+                    + "; ".join(str(err) for err in violations[:3]),
+                )
+
     def test_openapi_declares_write_and_read_contract_paths_and_local_schema_refs(self) -> None:
         openapi_path = CONTRACT_ROOT / "openapi.json"
         document = json.loads(openapi_path.read_text(encoding="utf-8"))
