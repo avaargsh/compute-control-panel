@@ -46,7 +46,7 @@ func trustedObservation(o operation.Operation, result operation.ObservationResul
 	obs := operation.Observation{
 		OperationID: o.ID, TenantID: o.TenantID, WorkloadID: o.WorkloadID,
 		ProviderID: o.ProviderID, DesiredGeneration: o.Generation, Result: result,
-		ResourceVersion: "provider-rv-1", ObservedAt: time.Now().Add(-time.Second),
+		ResourceVersion: "provider-rv-1", ObservedAt: time.Now().UTC(),
 	}
 	if result == operation.ResourcePresent {
 		obs.ResourceID = "job-" + o.ID
