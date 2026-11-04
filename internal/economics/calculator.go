@@ -16,30 +16,27 @@ import (
 )
 
 const (
-	CalculationVersion = "compute-cost-v1"
-	quantityScale      = 18
-
-	StatusFinal      = "FINAL"
-	StatusIncomplete = "INCOMPLETE"
-
-	ReasonRateGap         = "RATE_GAP"
+	CalculationVersion     = "compute-cost-v1"
+	quantityScale          = 18
+	StatusFinal            = "FINAL"
+	StatusIncomplete       = "INCOMPLETE"
+	ReasonRateGap          = "RATE_GAP"
 	ReasonIncompleteSource = "INCOMPLETE_SOURCE"
-
-	usageSchemaVersion = "compute.economics.usage-interval.v1"
-	rateSchemaVersion  = "compute.economics.provider-rate-card.v1"
-	usageUnit          = "GPU_DEVICE_COUNT"
-	rateBasis           = "ALLOCATED_GPU_HOUR"
-	rateUnit            = "GPU_HOUR"
+	usageSchemaVersion     = "compute.economics.usage-interval.v1"
+	rateSchemaVersion      = "compute.economics.provider-rate-card.v1"
+	usageUnit              = "GPU_DEVICE_COUNT"
+	rateBasis              = "ALLOCATED_GPU_HOUR"
+	rateUnit               = "GPU_HOUR"
 )
 
 var (
-	ErrInvalidUsage               = errors.New("invalid usage interval")
-	ErrInvalidRate                = errors.New("invalid provider rate card")
-	ErrAmbiguousRate              = errors.New("multiple provider rates cover the same interval")
-	ErrCurrencyMismatch           = errors.New("currency changes inside one usage interval")
-	ErrCurrencyPrecisionMismatch  = errors.New("currency precision changes inside one usage interval")
-	ErrUnsupportedRateBasis       = errors.New("unsupported provider rate basis")
-	ErrUnsupportedRateUnit        = errors.New("unsupported provider rate unit")
+	ErrInvalidUsage              = errors.New("invalid usage interval")
+	ErrInvalidRate               = errors.New("invalid provider rate card")
+	ErrAmbiguousRate             = errors.New("multiple provider rates cover the same interval")
+	ErrCurrencyMismatch          = errors.New("currency changes inside one usage interval")
+	ErrCurrencyPrecisionMismatch = errors.New("currency precision changes inside one usage interval")
+	ErrUnsupportedRateBasis      = errors.New("unsupported provider rate basis")
+	ErrUnsupportedRateUnit       = errors.New("unsupported provider rate unit")
 )
 
 type UsageInterval struct {
@@ -67,34 +64,34 @@ type UsageInterval struct {
 }
 
 type ProviderRateCard struct {
-	SchemaVersion    string
-	RateCardID       string
-	Version          int
-	ProviderID       string
-	PoolID           string
-	ProfileID        string
-	RateBasis        string
-	Unit             string
-	RateAmount       string
-	Currency         string
-	EffectiveFrom    time.Time
-	EffectiveTo      *time.Time
-	SourceRef        string
+	SchemaVersion     string
+	RateCardID        string
+	Version           int
+	ProviderID        string
+	PoolID            string
+	ProfileID         string
+	RateBasis         string
+	Unit              string
+	RateAmount        string
+	Currency          string
+	EffectiveFrom     time.Time
+	EffectiveTo       *time.Time
+	SourceRef         string
 	CurrencyMinorUnit int
 }
 
 type CostSegment struct {
-	CostEntryID             string
-	CalculationInputDigest  string
-	Start                   string
-	End                     string
-	PricedQuantity          string
-	RateCardID              string
-	RateCardVersion         int
-	RateAmount              string
-	Currency                string
-	CurrencyMinorUnit       int
-	Amount                  string
+	CostEntryID            string
+	CalculationInputDigest string
+	Start                  string
+	End                    string
+	PricedQuantity         string
+	RateCardID             string
+	RateCardVersion        int
+	RateAmount             string
+	Currency               string
+	CurrencyMinorUnit      int
+	Amount                 string
 }
 
 type CalculationResult struct {
@@ -120,7 +117,6 @@ func Calculate(usage UsageInterval, rates []ProviderRateCard) (CalculationResult
 		result.Reason = ReasonIncompleteSource
 		return result, nil
 	}
-
 	matching := make([]ProviderRateCard, 0, len(rates))
 	for _, rate := range rates {
 		if rate.ProviderID != usage.ProviderID || rate.ProfileID != usage.ProfileID {
@@ -139,7 +135,6 @@ func Calculate(usage UsageInterval, rates []ProviderRateCard) (CalculationResult
 		result.Reason = ReasonRateGap
 		return result, nil
 	}
-
 	boundaries := []time.Time{usage.Start.UTC(), usage.End.UTC()}
 	for _, rate := range matching {
 		from := rate.EffectiveFrom.UTC()
@@ -155,18 +150,15 @@ func Calculate(usage UsageInterval, rates []ProviderRateCard) (CalculationResult
 	}
 	sort.Slice(boundaries, func(i, j int) bool { return boundaries[i].Before(boundaries[j]) })
 	boundaries = uniqueInstants(boundaries)
-
 	gpuCount, ok := new(big.Int).SetString(usage.GPUCount, 10)
 	if !ok || gpuCount.Sign() <= 0 {
 		return CalculationResult{}, fmt.Errorf("%w: GPU count must be a positive whole number", ErrInvalidUsage)
 	}
-
 	var selectedCurrency string
 	var selectedMinorUnit int
-	var totalQuantity = new(big.Rat)
-	var totalCost = new(big.Rat)
+	totalQuantity := new(big.Rat)
+	totalCost := new(big.Rat)
 	segments := make([]CostSegment, 0, len(boundaries)-1)
-
 	for i := 0; i < len(boundaries)-1; i++ {
 		segmentStart, segmentEnd := boundaries[i], boundaries[i+1]
 		var selected *ProviderRateCard
@@ -199,7 +191,6 @@ func Calculate(usage UsageInterval, rates []ProviderRateCard) (CalculationResult
 		} else if selected.CurrencyMinorUnit != selectedMinorUnit {
 			return CalculationResult{}, ErrCurrencyPrecisionMismatch
 		}
-
 		rateAmount, err := parsePositiveDecimal(selected.RateAmount)
 		if err != nil {
 			return CalculationResult{}, fmt.Errorf("%w: rate amount: %v", ErrInvalidRate, err)
@@ -216,7 +207,6 @@ func Calculate(usage UsageInterval, rates []ProviderRateCard) (CalculationResult
 		cost := new(big.Rat).Mul(new(big.Rat).Set(quantity), rateAmount)
 		roundedQuantity := roundHalfUp(quantity, quantityScale)
 		roundedAmount := roundHalfUp(cost, selected.CurrencyMinorUnit)
-
 		startText := segmentStart.UTC().Format(time.RFC3339Nano)
 		endText := segmentEnd.UTC().Format(time.RFC3339Nano)
 		digest, err := calculationDigest(usage, *selected, startText, endText)
@@ -241,11 +231,10 @@ func Calculate(usage UsageInterval, rates []ProviderRateCard) (CalculationResult
 		totalQuantity.Add(totalQuantity, quantity)
 		totalCost.Add(totalCost, new(big.Rat).SetFrac(roundedAmount, pow10(selected.CurrencyMinorUnit)))
 	}
-
 	result.Status = StatusFinal
 	result.Currency = selectedCurrency
 	result.TotalAllocatedGPUHours = formatTrimmed(roundHalfUp(totalQuantity, quantityScale), quantityScale, 1)
-	result.TotalDirectWorkloadCost = formatFixed(ratToScaledInteger(totalCost, selectedMinorUnit), selectedMinorUnit)
+	result.TotalDirectWorkloadCost = formatFixed(roundHalfUp(totalCost, selectedMinorUnit), selectedMinorUnit)
 	result.Segments = segments
 	return result, nil
 }
@@ -257,8 +246,7 @@ func validateUsage(usage UsageInterval) error {
 			usage.MeteringPolicyVersion, usage.GPUModel) ||
 		usage.ResourceClass != "GPU" || usage.Unit != usageUnit ||
 		usage.Start.IsZero() || usage.End.IsZero() || !usage.End.After(usage.Start) ||
-		!validWholePositiveInteger(usage.GPUCount) ||
-		(usage.AllocationGeneration < 0) ||
+		!validWholePositiveInteger(usage.GPUCount) || usage.AllocationGeneration < 0 ||
 		!validCoverage(usage.SourceCoverage) ||
 		(usage.Quality != "OBSERVED" && usage.Quality != "DERIVED" &&
 			usage.Quality != "ESTIMATED" && usage.Quality != "INCOMPLETE") ||
@@ -309,77 +297,79 @@ func calculationDigest(usage UsageInterval, rate ProviderRateCard, start, end st
 		return "", err
 	}
 	input := struct {
-		CalculationVersion string   `json:"calculationVersion"`
-		UsageSchemaVersion string   `json:"usageSchemaVersion"`
-		UsageIntervalID    string   `json:"usageIntervalId"`
-		TenantID           string   `json:"tenantId"`
-		ProjectID          string   `json:"projectId"`
-		WorkloadID         string   `json:"workloadId"`
-		AllocationID       string   `json:"allocationId"`
-		AllocationGeneration int64  `json:"allocationGeneration"`
-		ProviderID         string   `json:"providerId"`
-		PoolID             string   `json:"poolId"`
-		ProfileID          string   `json:"profileId"`
-		GPUModel           string   `json:"gpuModel"`
-		GPUCount           string   `json:"gpuCount"`
-		Unit               string   `json:"unit"`
-		WindowStart        string   `json:"windowStart"`
-		WindowEnd          string   `json:"windowEnd"`
-		MeteringPolicyVersion string `json:"meteringPolicyVersion"`
-		Quality            string   `json:"quality"`
-		AttributionMethod  string   `json:"attributionMethod"`
-		SourceEventIDs     []string `json:"sourceEventIds"`
-		SourceCoverage     string   `json:"sourceCoverage"`
-		RateCardID         string   `json:"rateCardId"`
-		RateCardVersion    int      `json:"rateCardVersion"`
-		RateProviderID     string   `json:"rateProviderId"`
-		RatePoolID         string   `json:"ratePoolId"`
-		RateProfileID      string   `json:"rateProfileId"`
-		RateBasis          string   `json:"rateBasis"`
-		RateUnit           string   `json:"rateUnit"`
-		RateAmount         string   `json:"rateAmount"`
-		Currency           string   `json:"currency"`
-		CurrencyMinorUnit  int      `json:"currencyMinorUnit"`
-		EffectiveFrom      string   `json:"effectiveFrom"`
-		EffectiveTo        string   `json:"effectiveTo"`
-		SegmentStart       string   `json:"segmentStart"`
-		SegmentEnd         string   `json:"segmentEnd"`
+		CalculationVersion    string   `json:"calculationVersion"`
+		UsageSchemaVersion    string   `json:"usageSchemaVersion"`
+		UsageIntervalID       string   `json:"usageIntervalId"`
+		TenantID              string   `json:"tenantId"`
+		ProjectID             string   `json:"projectId"`
+		WorkloadID            string   `json:"workloadId"`
+		AllocationID          string   `json:"allocationId"`
+		AllocationGeneration  int64    `json:"allocationGeneration"`
+		ProviderID            string   `json:"providerId"`
+		PoolID                string   `json:"poolId"`
+		ProfileID             string   `json:"profileId"`
+		GPUModel              string   `json:"gpuModel"`
+		GPUCount              string   `json:"gpuCount"`
+		Unit                  string   `json:"unit"`
+		WindowStart           string   `json:"windowStart"`
+		WindowEnd             string   `json:"windowEnd"`
+		MeteringPolicyVersion string   `json:"meteringPolicyVersion"`
+		Quality               string   `json:"quality"`
+		AttributionMethod     string   `json:"attributionMethod"`
+		SourceEventIDs        []string `json:"sourceEventIds"`
+		SourceCoverage        string   `json:"sourceCoverage"`
+		RateCardID            string   `json:"rateCardId"`
+		RateCardVersion       int      `json:"rateCardVersion"`
+		RateSourceRef         string   `json:"rateSourceRef"`
+		RateProviderID        string   `json:"rateProviderId"`
+		RatePoolID            string   `json:"ratePoolId"`
+		RateProfileID         string   `json:"rateProfileId"`
+		RateBasis             string   `json:"rateBasis"`
+		RateUnit              string   `json:"rateUnit"`
+		RateAmount            string   `json:"rateAmount"`
+		Currency              string   `json:"currency"`
+		CurrencyMinorUnit     int      `json:"currencyMinorUnit"`
+		EffectiveFrom         string   `json:"effectiveFrom"`
+		EffectiveTo           string   `json:"effectiveTo"`
+		SegmentStart          string   `json:"segmentStart"`
+		SegmentEnd            string   `json:"segmentEnd"`
 	}{
-		CalculationVersion: CalculationVersion,
-		UsageSchemaVersion: usage.SchemaVersion,
-		UsageIntervalID: usage.UsageIntervalID,
-		TenantID: usage.TenantID,
-		ProjectID: usage.ProjectID,
-		WorkloadID: usage.WorkloadID,
-		AllocationID: usage.AllocationID,
-		AllocationGeneration: usage.AllocationGeneration,
-		ProviderID: usage.ProviderID,
-		PoolID: usage.PoolID,
-		ProfileID: usage.ProfileID,
-		GPUModel: usage.GPUModel,
-		GPUCount: usage.GPUCount,
-		Unit: usage.Unit,
-		WindowStart: usage.Start.UTC().Format(time.RFC3339Nano),
-		WindowEnd: usage.End.UTC().Format(time.RFC3339Nano),
+		CalculationVersion:    CalculationVersion,
+		UsageSchemaVersion:    usage.SchemaVersion,
+		UsageIntervalID:       usage.UsageIntervalID,
+		TenantID:              usage.TenantID,
+		ProjectID:             usage.ProjectID,
+		WorkloadID:            usage.WorkloadID,
+		AllocationID:          usage.AllocationID,
+		AllocationGeneration:  usage.AllocationGeneration,
+		ProviderID:            usage.ProviderID,
+		PoolID:                usage.PoolID,
+		ProfileID:             usage.ProfileID,
+		GPUModel:              usage.GPUModel,
+		GPUCount:              usage.GPUCount,
+		Unit:                  usage.Unit,
+		WindowStart:           usage.Start.UTC().Format(time.RFC3339Nano),
+		WindowEnd:             usage.End.UTC().Format(time.RFC3339Nano),
 		MeteringPolicyVersion: usage.MeteringPolicyVersion,
-		Quality: usage.Quality,
-		AttributionMethod: usage.AttributionMethod,
-		SourceEventIDs: sourceIDs,
-		SourceCoverage: strconv.FormatFloat(usage.SourceCoverage, 'g', -1, 64),
-		RateCardID: rate.RateCardID,
-		RateCardVersion: rate.Version,
-		RateProviderID: rate.ProviderID,
-		RatePoolID: rate.PoolID,
-		RateProfileID: rate.ProfileID,
-		RateBasis: rate.RateBasis,
-		RateUnit: rate.Unit,
-		RateAmount: canonicalRate,
-		Currency: rate.Currency,
-		CurrencyMinorUnit: rate.CurrencyMinorUnit,
-		EffectiveFrom: from,
-		EffectiveTo: to,
-		SegmentStart: start,
-		SegmentEnd: end,
+		Quality:               usage.Quality,
+		AttributionMethod:     usage.AttributionMethod,
+		SourceEventIDs:        sourceIDs,
+		SourceCoverage:        strconv.FormatFloat(usage.SourceCoverage, 'g', -1, 64),
+		RateCardID:            rate.RateCardID,
+		RateCardVersion:       rate.Version,
+		RateSourceRef:         rate.SourceRef,
+		RateProviderID:        rate.ProviderID,
+		RatePoolID:            rate.PoolID,
+		RateProfileID:         rate.ProfileID,
+		RateBasis:             rate.RateBasis,
+		RateUnit:              rate.Unit,
+		RateAmount:            canonicalRate,
+		Currency:              rate.Currency,
+		CurrencyMinorUnit:     rate.CurrencyMinorUnit,
+		EffectiveFrom:         from,
+		EffectiveTo:           to,
+		SegmentStart:          start,
+		SegmentEnd:            end,
 	}
 	encoded, err := json.Marshal(input)
 	if err != nil {
@@ -463,11 +453,6 @@ func roundHalfUp(value *big.Rat, scale int) *big.Int {
 		quotient.Add(quotient, big.NewInt(1))
 	}
 	return quotient
-}
-
-func ratToScaledInteger(value *big.Rat, scale int) *big.Int {
-	// Posted segment amounts are already rounded to the same currency scale.
-	return roundHalfUp(value, scale)
 }
 
 func formatFixed(value *big.Int, scale int) string {
