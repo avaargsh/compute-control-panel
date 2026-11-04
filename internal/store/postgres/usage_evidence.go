@@ -392,7 +392,7 @@ func findUsageEvidenceConflict(
 		return UsageEvidenceSet{}, nil, err
 	}
 	if err := json.Unmarshal(persistedSourceIDs, &existing.SourceEventIDs); err != nil {
-		return UsageEvidenceSet{}, false, fmt.Errorf("decode conflicting evidence source IDs: %w", err)
+		return UsageEvidenceSet{}, nil, fmt.Errorf("decode conflicting evidence source IDs: %w", err)
 	}
 	existing.EvidencePayload = append([]byte(nil), persistedEvidence...)
 	existing.UsageIntervalPayload = append([]byte(nil), persistedUsage...)
