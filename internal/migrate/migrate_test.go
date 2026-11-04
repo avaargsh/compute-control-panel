@@ -88,7 +88,7 @@ func TestApplyIsIdempotentAndDetectsDrift(t *testing.T) {
 	if _, err := db.ExecContext(ctx, "UPDATE schema_migrations SET name = '0001_renamed.sql' WHERE version = 1"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Apply(ctx, db, ms); err == nil {
-		t.Fatal("migration name drift was silently accepted")
+	if _, err := Apply(ctx, db, ms); !errors.Is(err, ErrNameMismatch) {
+		t.Fatalf("want migration name mismatch, got %v", err)
 	}
 }
