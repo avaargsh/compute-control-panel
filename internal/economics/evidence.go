@@ -385,7 +385,7 @@ func validateEvidenceHeader(evidence AllocationUsageEvidence) error {
 			evidence.EvidenceSetID, evidence.TenantID, evidence.ProjectID, evidence.WorkloadID,
 			evidence.AllocationID, evidence.ProviderID, evidence.PoolID, evidence.ProfileID,
 			evidence.CapabilityProfileID, evidence.GPUModel, evidence.GPUCount, evidence.MeteringPolicyVersion,
-		) || evidence.AllocationGeneration < 0 || !validWholePositiveInteger(evidence.GPUCount) {
+		) || evidence.AllocationGeneration < 1 || !validWholePositiveInteger(evidence.GPUCount) {
 		return ErrInvalidEvidence
 	}
 	return nil
@@ -396,7 +396,7 @@ func validateEvidenceRecord(record EvidenceRecord) error {
 		record.ObservationID, record.TenantID, record.ProjectID, record.WorkloadID,
 		record.AllocationID, record.ProviderID, record.Source, record.AdapterVersion,
 		record.NativeUID, record.NativeResourceVersion, record.ResponseDigest, record.EvidenceRef,
-	) || record.AllocationGeneration < 0 || record.ObservedAt.IsZero() ||
+	) || record.AllocationGeneration < 1 || record.ObservedAt.IsZero() ||
 		record.RecordedAt.IsZero() || record.RecordedAt.Before(record.ObservedAt) ||
 		!isSHA256Digest(record.ResponseDigest) ||
 		(record.SourceTimestamp != nil && record.SourceTimestamp.IsZero()) {
