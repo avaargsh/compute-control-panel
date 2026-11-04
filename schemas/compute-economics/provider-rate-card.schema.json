@@ -51,11 +51,8 @@
     },
     "rateAmount": {
       "type": "string",
-      "pattern": "^(0|[1-9][0-9]*)(\\\\.[0-9]+)?$",
-      "description": "Non-negative base-10 decimal string. Never use binary floating point for accounting values.",
-      "not": {
-        "const": "0"
-      }
+      "pattern": "^(?=.*[1-9])(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+      "description": "Strictly positive base-10 decimal string. Never use binary floating point for accounting values."
     },
     "currency": {
       "type": "string",
