@@ -25,31 +25,7 @@ const (
 	maxWorkloadCreateBody    = 1 << 20
 )
 
-var workloadCPUDecimal = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?package httpapi
-
-import (
-	"bytes"
-	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
-	"net/http"
-	"regexp"
-	"strings"
-	"unicode/utf8"
-
-	"github.com/avaargsh/compute-control-panel/internal/identity"
-	"github.com/avaargsh/compute-control-panel/internal/operation"
-	"github.com/avaargsh/compute-control-panel/internal/store/postgres"
-)
-
-const (
-	workloadCreateAPIVersion = "compute.platform/v1"
-	)
+var workloadCPUDecimal = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?$`)
 
 type WorkloadPrincipal = identity.WorkloadPrincipal
 
