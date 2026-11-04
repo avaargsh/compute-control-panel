@@ -335,3 +335,28 @@ func TestCalculatorRejectsPartialEvidenceProvenance(t *testing.T) {
 		t.Fatalf("Calculate error = %v, want ErrInvalidUsage for partial evidence provenance", err)
 	}
 }
+
+
+func TestDeriveUsageIntervalUsesEarliestProviderLiabilityEnd(t *testing.T) {
+	evidence, policy := validAllocationUsageEvidence(t)
+	providerEnd := evidenceRecord(t, "provider-cost-end-early", "provider", "provider-resource-uid-1", "2026-11-04T10:05:00Z", "2026-11-04T10:00:00Z")
+	evidence.Provider.CostLiabilityEnd = recordPtr(providerEnd)
+
+	got, err := DeriveUsageInterval(evidence, policy)
+	if err != nil || got.Status != EvidenceStatusFinal || got.UsageInterval == nil {
+		t.Fatalf("unexpected result=%+v err=%v", got, err)
+	}
+	if !got.UsageInterval.End.Equal(evidenceTime(t, "2026-11-04T10:00:00Z")) {
+		t.Fatalf("end = %s, want earliest Provider liability end 10:00Z", got.UsageInterval.End)
+	}
+}
+
+func TestDeriveUsageIntervalRejectsEvidenceFromWrongAuthority(t *testing.T) {
+	evidence, policy := validAllocationUsageEvidence(t)
+	evidence.Provider.Binding.Source = "kubernetes"
+	got, err := DeriveUsageInterval(evidence, policy)
+	if err != nil || got.Status != EvidenceStatusIncomplete ||
+		got.ReasonCode != ReasonProviderIdentityMismatch || got.UsageInterval != nil {
+		t.Fatalf("unexpected result=%+v err=%v", got, err)
+	}
+}
