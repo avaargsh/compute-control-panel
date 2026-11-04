@@ -16,10 +16,10 @@ import (
 )
 
 const (
-	CalculationVersion           = "compute-cost-v1"
-	quantityScale                = 18
-	StatusFinal                  = "FINAL"
-	StatusIncomplete             = "INCOMPLETE"
+	CalculationVersion = "compute-cost-v1"
+	quantityScale      = 18
+	StatusFinal        = "FINAL"
+	StatusIncomplete   = "INCOMPLETE"
 
 	PostingReady                 = "POSTABLE"
 	PostingSkippedZeroMinorUnits = "SKIPPED_ZERO_MINOR_UNITS"
