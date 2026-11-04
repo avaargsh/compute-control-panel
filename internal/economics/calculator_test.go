@@ -67,6 +67,11 @@ func TestCalculateSplitsEffectiveRateBoundaryAndMatchesGoldenCost(t *testing.T) 
 	if len(got.Segments) != 2 {
 		t.Fatalf("segments = %d, want 2", len(got.Segments))
 	}
+	for i, segment := range got.Segments {
+		if segment.CurrencyMetadataVersion != CurrencyMetadataVersion {
+			t.Fatalf("segment %d metadata version = %q, want %q", i, segment.CurrencyMetadataVersion, CurrencyMetadataVersion)
+		}
+	}
 	if got.Segments[0].PricedQuantity != "3.0" || got.Segments[0].Amount != "30.00" ||
 		got.Segments[0].RateCardID != "rate-h100-v1" ||
 		got.Segments[1].PricedQuantity != "3.0" || got.Segments[1].Amount != "36.00" ||
