@@ -313,7 +313,7 @@ func (r *Repository) PersistUsageEvidenceSet(ctx context.Context, p PersistUsage
 	)
 	ON CONFLICT DO NOTHING
 	RETURNING ` + usageEvidenceSetColumns
-	record, err = scanUsageEvidenceSet(tx.QueryRowContext(ctx, insert,
+	insertedRecord, insertErr := scanUsageEvidenceSet(tx.QueryRowContext(ctx, insert,
 		record.EvidenceSetID, record.SchemaVersion, record.TenantID, record.ProjectID,
 		record.WorkloadID, record.AllocationID, record.AllocationGeneration,
 		record.ProviderID, record.ComputeOperationID, record.ProviderRequestDigest, record.ProviderResourceID,
@@ -323,14 +323,14 @@ func (r *Repository) PersistUsageEvidenceSet(ctx context.Context, p PersistUsage
 		record.GPUCount, derived.sourceEventJSON, derived.evidenceJSON, derived.usageJSON,
 		usageIntervalUnit, usageAttributionMethod, usageEvidenceQuality, 1,
 	))
-	if err == nil {
+	if insertErr == nil {
 		if err := tx.Commit(); err != nil {
 			return UsageEvidenceSet{}, false, fmt.Errorf("commit usage evidence set: %w", err)
 		}
-		return record, true, nil
+		return insertedRecord, true, nil
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return UsageEvidenceSet{}, false, fmt.Errorf("insert usage evidence set: %w", err)
+	if !errors.Is(insertErr, sql.ErrNoRows) {
+		return UsageEvidenceSet{}, false, fmt.Errorf("insert usage evidence set: %w", insertErr)
 	}
 
 	existing, payloadMismatches, err := findUsageEvidenceConflict(ctx, tx, record, derived.sourceEventJSON, derived.evidenceJSON, derived.usageJSON)
