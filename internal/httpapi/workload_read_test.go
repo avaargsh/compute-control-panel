@@ -37,7 +37,13 @@ func (r *testWorkloadReadRepository) GetWorkloadDetails(_ context.Context, tenan
 	r.calls++
 	r.tenantID = tenantID
 	r.workloadID = workloadID
-	return r.details, r.err
+	if r.err != nil {
+		return postgres.WorkloadDetails{}, r.err
+	}
+	if tenantID != r.details.Workload.TenantID || workloadID != r.details.Workload.WorkloadID {
+		return postgres.WorkloadDetails{}, sql.ErrNoRows
+	}
+	return r.details, nil
 }
 
 func newReadFixture() (WorkloadPrincipal, *testWorkloadReadAuthorizer, *testWorkloadReadRepository) {
