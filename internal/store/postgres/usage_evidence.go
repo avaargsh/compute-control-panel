@@ -144,9 +144,9 @@ func deriveUsageEvidence(p PersistUsageEvidenceParams) (derivedUsageEvidence, er
 	envelope := usageEvidenceEnvelope{
 		Evidence: p.Evidence,
 		Policy: usageEvidencePolicySnapshot{
-			Version:                         p.Policy.Version,
-			AsOf:                            p.Policy.AsOf.UTC(),
-			MaximumClockSkew:                p.Policy.MaximumClockSkew,
+			Version:                        p.Policy.Version,
+			AsOf:                           p.Policy.AsOf.UTC(),
+			MaximumClockSkew:               p.Policy.MaximumClockSkew,
 			TrustedSourceTimestampAdapters: trustedSources,
 			CertifiedDeviceAdapters:        certifiedAdapters,
 		},
