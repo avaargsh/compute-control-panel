@@ -23,9 +23,9 @@ const (
 )
 
 type WorkloadPrincipal struct {
-	TenantID  string
-	Subject   string
-	Service   string
+	TenantID   string
+	Subject    string
+	Service    string
 	ProjectIDs []string
 }
 
@@ -89,15 +89,15 @@ type WorkloadAcceleratorRequest struct {
 }
 
 type WorkloadResourcesRequest struct {
-	CPU          string                        `json:"cpu"`
-	Memory       string                        `json:"memory"`
+	CPU          string                       `json:"cpu"`
+	Memory       string                       `json:"memory"`
 	Accelerators []WorkloadAcceleratorRequest `json:"accelerators,omitempty"`
-	Storage      string                        `json:"storage,omitempty"`
+	Storage      string                       `json:"storage,omitempty"`
 }
 
 type WorkloadConstraintsRequest struct {
-	PoolSelector      map[string]string `json:"pool_selector,omitempty"`
-	MaxDurationSeconds int              `json:"max_duration_seconds,omitempty"`
+	PoolSelector       map[string]string `json:"pool_selector,omitempty"`
+	MaxDurationSeconds int               `json:"max_duration_seconds,omitempty"`
 }
 
 type WorkloadAuthorizationRequest struct {
@@ -108,13 +108,13 @@ type WorkloadAuthorizationRequest struct {
 }
 
 type WorkloadCreateRequest struct {
-	APIVersion       string                         `json:"api_version"`
-	ProjectID        string                         `json:"project_id"`
-	OwnerRef         WorkloadOwnerRef               `json:"owner_ref"`
-	ComputeProfileRef *WorkloadComputeProfileRef     `json:"compute_profile_ref,omitempty"`
-	Resources        *WorkloadResourcesRequest      `json:"resources,omitempty"`
-	Constraints      *WorkloadConstraintsRequest   `json:"constraints,omitempty"`
-	Authorization    *WorkloadAuthorizationRequest `json:"authorization,omitempty"`
+	APIVersion        string                        `json:"api_version"`
+	ProjectID         string                        `json:"project_id"`
+	OwnerRef          WorkloadOwnerRef              `json:"owner_ref"`
+	ComputeProfileRef *WorkloadComputeProfileRef    `json:"compute_profile_ref,omitempty"`
+	Resources         *WorkloadResourcesRequest     `json:"resources,omitempty"`
+	Constraints       *WorkloadConstraintsRequest   `json:"constraints,omitempty"`
+	Authorization     *WorkloadAuthorizationRequest `json:"authorization,omitempty"`
 }
 
 type workloadAcceptedResponse struct {
@@ -227,14 +227,14 @@ func (h *WorkloadCreateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusAccepted)
 	_ = json.NewEncoder(w).Encode(workloadAcceptedResponse{
-		WorkloadID: acceptance.Workload.WorkloadID,
-		DesiredGeneration: acceptance.Workload.DesiredGeneration,
-		DesiredState: acceptance.Workload.DesiredState,
-		ObservedPhase: acceptance.Workload.ObservedPhase,
-		AllocationID: acceptance.Allocation.AllocationID,
-		AllocationPhase: acceptance.Allocation.Phase,
+		WorkloadID:         acceptance.Workload.WorkloadID,
+		DesiredGeneration:  acceptance.Workload.DesiredGeneration,
+		DesiredState:       acceptance.Workload.DesiredState,
+		ObservedPhase:      acceptance.Workload.ObservedPhase,
+		AllocationID:       acceptance.Allocation.AllocationID,
+		AllocationPhase:    acceptance.Allocation.Phase,
 		ComputeOperationID: acceptance.Operation.ID,
-		StatusURL: statusURL,
+		StatusURL:          statusURL,
 	})
 	_ = created // The response shape is intentionally identical for a first accept and an exact idempotent replay.
 }
@@ -282,10 +282,10 @@ func (h *WorkloadCreateHandler) accept(
 		Kind          string `json:"operation_kind"`
 	}{
 		RequestDigest: requestDigest,
-		ProviderID: selection.ProviderID,
-		PoolID: selection.PoolID,
-		Generation: 1,
-		Kind: string(operation.Create),
+		ProviderID:    selection.ProviderID,
+		PoolID:        selection.PoolID,
+		Generation:    1,
+		Kind:          string(operation.Create),
 	})
 	if err != nil {
 		return postgres.WorkloadAcceptance{}, false, err
@@ -301,38 +301,38 @@ func (h *WorkloadCreateHandler) accept(
 		profileRevision = request.ComputeProfileRef.Revision
 	}
 	op := operation.Operation{
-		ID: operationID,
-		TenantID: principal.TenantID,
-		WorkloadID: workloadID,
-		AllocationID: allocationID,
-		ProviderID: selection.ProviderID,
+		ID:             operationID,
+		TenantID:       principal.TenantID,
+		WorkloadID:     workloadID,
+		AllocationID:   allocationID,
+		ProviderID:     selection.ProviderID,
 		IdempotencyKey: operationKey,
-		RequestDigest: providerDigest,
-		Generation: 1,
-		Version: 1,
-		Kind: operation.Create,
-		Status: operation.Pending,
+		RequestDigest:  providerDigest,
+		Generation:     1,
+		Version:        1,
+		Kind:           operation.Create,
+		Status:         operation.Pending,
 	}
 	params := postgres.AcceptWorkloadParams{
 		Workload: postgres.CreateWorkloadParams{
-			WorkloadID: workloadID,
-			TenantID: principal.TenantID,
-			ProjectID: request.ProjectID,
-			OwnerService: request.OwnerRef.Service,
-			OwnerResourceType: request.OwnerRef.ResourceType,
-			OwnerResourceID: request.OwnerRef.ResourceID,
-			ComputeProfileID: profileID,
+			WorkloadID:             workloadID,
+			TenantID:               principal.TenantID,
+			ProjectID:              request.ProjectID,
+			OwnerService:           request.OwnerRef.Service,
+			OwnerResourceType:      request.OwnerRef.ResourceType,
+			OwnerResourceID:        request.OwnerRef.ResourceID,
+			ComputeProfileID:       profileID,
 			ComputeProfileRevision: profileRevision,
-			NormalizedRequest: json.RawMessage(normalized),
-			RequestDigest: requestDigest,
-			IdempotencyKey: idempotencyKey,
-			EventID: workloadEventID,
-			CorrelationID: correlationID,
+			NormalizedRequest:      json.RawMessage(normalized),
+			RequestDigest:          requestDigest,
+			IdempotencyKey:         idempotencyKey,
+			EventID:                workloadEventID,
+			CorrelationID:          correlationID,
 		},
-		AllocationID: allocationID,
-		ProviderID: selection.ProviderID,
-		PoolID: selection.PoolID,
-		Operation: op,
+		AllocationID:     allocationID,
+		ProviderID:       selection.ProviderID,
+		PoolID:           selection.PoolID,
+		Operation:        op,
 		OperationEventID: operationEventID,
 	}
 	return h.deps.Repository.AcceptWorkload(ctx, params)
