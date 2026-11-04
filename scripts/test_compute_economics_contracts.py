@@ -188,6 +188,35 @@ class ComputeEconomicsContractTests(unittest.TestCase):
         cls.cost_fixture = read_json(
             EXAMPLE_DIR / "workload-cost-allocation-rate-boundary-v1.json"
         )
+        cls.currency_metadata = read_json(
+            SCHEMA_DIR / "currency-metadata-snapshot-v1.json"
+        )
+
+    def test_currency_registry_snapshot_matches_runtime_and_contracts(self) -> None:
+        snapshot = self.currency_metadata
+        self.assertEqual(CURRENCY_METADATA_VERSION, snapshot["snapshotVersion"])
+        self.assertEqual(CURRENCY_MINOR_UNITS, snapshot["currencies"])
+
+        for schema_name in ("provider_rate_card", "workload_cost_entry"):
+            with self.subTest(schema=schema_name):
+                schema = self.schemas[schema_name]
+                self.assertEqual(
+                    CURRENCY_METADATA_VERSION,
+                    schema["properties"]["currencyMetadataVersion"]["const"],
+                )
+                self.assertEqual(
+                    set(CURRENCY_MINOR_UNITS),
+                    set(schema["properties"]["currency"]["enum"]),
+                )
+                schema_pairs = {
+                    item["properties"]["currency"]["const"]:
+                    item["properties"]["currencyMinorUnit"]["const"]
+                    for item in schema["oneOf"]
+                }
+                self.assertEqual(CURRENCY_MINOR_UNITS, schema_pairs)
+
+        self.assertNotIn("ZZZ", snapshot["currencies"])
+        self.assertNotIn("XXX", snapshot["currencies"])
 
     def assert_valid(self, schema_name: str, instance: dict[str, Any]) -> None:
         errors = sorted(
