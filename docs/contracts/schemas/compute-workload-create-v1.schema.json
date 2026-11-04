@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Compute Workload create request v1",
+  "type": "object",
+  "required": [
+    "api_version",
+    "project_id",
+    "owner_ref"
+  ],
+  "properties": {
+    "api_version": {
+      "const": "compute.platform/v1"
+    },
+    "project_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "owner_ref": {
+      "$ref": "./owner-ref-v1.schema.json"
+    },
+    "compute_profile_ref": {
+      "type": "object",
+      "required": [
+        "id",
+        "revision"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "additionalProperties": false
+    },
+    "resources": {
+      "type": "object",
+      "required": [
+        "cpu",
+        "memory"
+      ],
+      "properties": {
+        "cpu": {
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)?$"
+        },
+        "memory": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "accelerators": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "vendor",
+              "model",
+              "count"
+            ],
+            "properties": {
+              "vendor": {
+                "type": "string",
+                "minLength": 1
+              },
+              "model": {
+                "type": "string",
+                "minLength": 1
+              },
+              "count": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "storage": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "constraints": {
+      "type": "object",
+      "properties": {
+        "pool_selector": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "max_duration_seconds": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "authorization": {
+      "type": "object",
+      "required": [
+        "guard_operation_id",
+        "permit_ref",
+        "action_hash",
+        "audience"
+      ],
+      "properties": {
+        "guard_operation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "permit_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "action_hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "audience": {
+          "const": "compute-control-panel"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "allOf": [
+    {
+      "oneOf": [
+        {
+          "required": [
+            "compute_profile_ref"
+          ],
+          "not": {
+            "required": [
+              "resources"
+            ]
+          }
+        },
+        {
+          "required": [
+            "resources"
+          ],
+          "not": {
+            "required": [
+              "compute_profile_ref"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "additionalProperties": false
+}
