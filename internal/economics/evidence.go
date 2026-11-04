@@ -144,8 +144,10 @@ type AllocationUsageEvidence struct {
 	Device                DeviceUsageEvidence
 }
 
-// EvidencePolicy is trusted platform configuration. Timestamp allowlist keys
-// use source@adapterVersion; certified adapter keys use capability@source@version.
+// EvidencePolicy is trusted, versioned platform configuration. Bump Version
+// whenever timestamp trust, clock-skew limits or certified device adapters change.
+// Timestamp allowlist keys use source@adapterVersion; certified adapter keys
+// use capability@source@version.
 type EvidencePolicy struct {
 	Version                        string
 	AsOf                           time.Time
