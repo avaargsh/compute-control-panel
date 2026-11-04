@@ -61,18 +61,18 @@ type EvidenceRecord struct {
 }
 
 type ProviderUsageEvidence struct {
-	ComputeOperationID   string
+	ComputeOperationID     string
 	OperationRequestDigest string
-	OperationSucceeded   bool
-	ResourceID           string
-	ResourceUID          string
-	PoolID               string
-	ProfileID            string
-	GPUModel             string
-	GPUCount             int64
-	Binding              EvidenceRecord
-	CostLiabilityStart   EvidenceRecord
-	CostLiabilityEnd     *EvidenceRecord
+	OperationSucceeded     bool
+	ResourceID             string
+	ResourceUID            string
+	PoolID                 string
+	ProfileID              string
+	GPUModel               string
+	GPUCount               int64
+	Binding                EvidenceRecord
+	CostLiabilityStart     EvidenceRecord
+	CostLiabilityEnd       *EvidenceRecord
 }
 
 type KueueUsageEvidence struct {
@@ -482,30 +482,30 @@ func allocationUsageEvidenceDigest(
 		JobUID                string
 		PodUID                string
 		DeviceMode            string
-		DeviceResourceUID     string
-		DeviceIDs             []string
-		ProviderPoolID        string
-		ProviderProfileID     string
-		ProviderGPUModel      string
-		ProviderGPUCount      int64
-		KueueProfileID        string
-		KueueLocalQueue       string
-		KueueClusterQueue     string
-		KueueResourceFlavor   string
-		KueueAdmitted         bool
-		KueueGPUCount         int64
-		PodNodeName           string
-		PodScheduled          bool
-		DeviceClaimUID        string
-		DeviceDriver          string
-		DevicePoolID          string
-		DeviceProfileID       string
-		DeviceGPUCount        int64
-		ProviderComputeOperationID string
+		DeviceResourceUID              string
+		DeviceIDs                      []string
+		ProviderPoolID                 string
+		ProviderProfileID              string
+		ProviderGPUModel               string
+		ProviderGPUCount               int64
+		KueueProfileID                 string
+		KueueLocalQueue                string
+		KueueClusterQueue              string
+		KueueResourceFlavor            string
+		KueueAdmitted                  bool
+		KueueGPUCount                  int64
+		PodNodeName                    string
+		PodScheduled                   bool
+		DeviceClaimUID                 string
+		DeviceDriver                   string
+		DevicePoolID                   string
+		DeviceProfileID                string
+		DeviceGPUCount                 int64
+		ProviderComputeOperationID     string
 		ProviderOperationRequestDigest string
-		ProviderOperationSucceeded bool
-		KueueGPUResourceName string
-		Records               []canonicalEvidenceRecord
+		ProviderOperationSucceeded     bool
+		KueueGPUResourceName           string
+		Records                        []canonicalEvidenceRecord
 		CostableStart         string
 		CostableEnd           string
 	}{
