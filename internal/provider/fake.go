@@ -68,8 +68,19 @@ type Adapter interface {
 type FakeProvider struct {
 	mu         sync.Mutex
 	journal    map[string]*fakeRecord
+	resources  map[string]fakeResource
 	nextLost   bool
 	generation uint64
+}
+
+// fakeResource tracks *live* target ownership separately from historical
+// operation receipts. A completed DELETE must not make old CREATE inspections
+// report a still-present resource.
+type fakeResource struct {
+	uid        string
+	tenantID   string
+	workloadID string
+	providerID string
 }
 
 type fakeRecord struct {
@@ -82,7 +93,10 @@ type fakeRecord struct {
 }
 
 func NewFakeProvider() *FakeProvider {
-	return &FakeProvider{journal: make(map[string]*fakeRecord)}
+	return &FakeProvider{
+		journal:   make(map[string]*fakeRecord),
+		resources: make(map[string]fakeResource),
+	}
 }
 
 func (f *FakeProvider) LoseNextAcknowledgement() {
@@ -129,28 +143,57 @@ func (f *FakeProvider) Apply(ctx context.Context, req Request) (Acknowledgement,
 	if err := req.Validate(); err != nil {
 		return Acknowledgement{}, err
 	}
-	if req.Kind != operation.Create {
-		return Acknowledgement{}, ErrInvalidRequest
-	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	existing, found := f.journal[req.OperationID]
-	if found && !sameRequest(existing.request, req) {
+	rec, found := f.journal[req.OperationID]
+	if found && !sameRequest(rec.request, req) {
 		return Acknowledgement{}, ErrOperationConflict
 	}
 	if !found {
-		existing = &fakeRecord{request: req}
-		f.journal[req.OperationID] = existing
+		rec = &fakeRecord{request: req}
 	}
-	if !existing.applied {
-		// A fake CREATE is materialized once per exact operation identity.
-		// UPDATE/DELETE need target-aware provider-specific implementations.
+	if !rec.applied {
+		switch req.Kind {
+		case operation.Create:
+			// Fake IDs are deterministic per operation, never reused after
+			// release. This is NOT proof of real Provider resource creation.
+			rec.resourceID = "fake-resource/" + req.OperationID
+			rec.resourceUID = "fake-uid/" + req.OperationID
+			if _, exists := f.resources[rec.resourceID]; exists {
+				return Acknowledgement{}, ErrOperationConflict
+			}
+			f.resources[rec.resourceID] = fakeResource{
+				uid:        rec.resourceUID,
+				tenantID:   req.TenantID,
+				workloadID: req.WorkloadID,
+				providerID: req.ProviderID,
+			}
+		case operation.Update, operation.Delete:
+			// Never act on a name alone: the exact live UID and all
+			// ownership dimensions must match. Missing targets are NOT
+			// authoritative NOT_APPLIED_FINAL or release receipts.
+			live, exists := f.resources[req.TargetResourceID]
+			if !exists || live.uid != req.TargetResourceUID ||
+				live.tenantID != req.TenantID ||
+				live.workloadID != req.WorkloadID ||
+				live.providerID != req.ProviderID {
+				return Acknowledgement{}, ErrOperationConflict
+			}
+			rec.resourceID = req.TargetResourceID
+			rec.resourceUID = req.TargetResourceUID
+			if req.Kind == operation.Delete {
+				delete(f.resources, req.TargetResourceID)
+			}
+			// Fake UPDATE proves identity and idempotence only; it does not
+			// model a provider-specific change to a Job or Pod specification.
+		default:
+			return Acknowledgement{}, ErrInvalidRequest
+		}
 		f.generation++
-		existing.applied = true
-		existing.noEffectFinal = false
-		existing.resourceID = "fake-resource/" + req.OperationID
-		existing.resourceUID = "fake-uid/" + req.OperationID
-		existing.version = f.generation
+		rec.applied = true
+		rec.noEffectFinal = false
+		rec.version = f.generation
+		f.journal[req.OperationID] = rec
 	}
 	ack := Acknowledgement{OperationID: req.OperationID, RequestDigest: req.RequestDigest}
 	if f.nextLost {
@@ -190,7 +233,25 @@ func (f *FakeProvider) Inspect(ctx context.Context, req Request) (operation.Obse
 	}
 	obs.ResourceVersion = fmt.Sprintf("fake-journal/%d", rec.version)
 	switch {
+	case rec.applied && req.Kind == operation.Delete:
+		if _, stillPresent := f.resources[req.TargetResourceID]; stillPresent {
+			obs.Result = operation.ObservationConflict
+			obs.ReasonCode = "DELETE_TARGET_STILL_PRESENT"
+			break
+		}
+		obs.Result = operation.TargetAbsent
+		obs.TargetResourceID = req.TargetResourceID
+		obs.TargetResourceUID = req.TargetResourceUID
 	case rec.applied:
+		live, exists := f.resources[rec.resourceID]
+		if !exists || live.uid != rec.resourceUID ||
+			live.tenantID != req.TenantID ||
+			live.workloadID != req.WorkloadID ||
+			live.providerID != req.ProviderID {
+			obs.Result = operation.ObservationConflict
+			obs.ReasonCode = "RESOURCE_NO_LONGER_PRESENT"
+			break
+		}
 		obs.Result = operation.ResourcePresent
 		obs.ResourceID = rec.resourceID
 		obs.ResourceUID = rec.resourceUID
