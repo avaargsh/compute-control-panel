@@ -539,4 +539,3 @@ func writeWorkloadAPIError(w http.ResponseWriter, status int, code, message stri
 
 // Ensure compile-time interface assignments remain visible and intentional.
 var _ WorkloadAcceptanceRepository = (*postgres.Repository)(nil)
-
