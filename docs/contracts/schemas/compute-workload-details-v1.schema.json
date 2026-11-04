@@ -1,0 +1,172 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.compute-control-panel.dev/v1/compute-workload-details-v1.schema.json",
+  "title": "Authenticated Workload read projection v1",
+  "description": "Matches the currently implemented but not production-mounted GET /api/v1/workloads/{workload_id} response; both histories contain at most 100 chronological entries.",
+  "type": "object",
+  "required": [
+    "workload",
+    "allocations",
+    "operations",
+    "history_truncated"
+  ],
+  "properties": {
+    "workload": {
+      "type": "object",
+      "required": [
+        "workload_id",
+        "project_id",
+        "desired_generation",
+        "version",
+        "desired_state",
+        "observed_phase",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "workload_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "project_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "desired_generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "desired_state": {
+          "type": "string",
+          "enum": [
+            "ACTIVE",
+            "DELETE_REQUESTED"
+          ]
+        },
+        "observed_phase": {
+          "type": "string",
+          "minLength": 1
+        },
+        "latest_allocation_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false
+    },
+    "allocations": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "required": [
+          "allocation_id",
+          "provider_id",
+          "pool_id",
+          "desired_generation",
+          "phase",
+          "version"
+        ],
+        "properties": {
+          "allocation_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "provider_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "pool_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "desired_generation": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "phase": {
+            "type": "string",
+            "minLength": 1
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "operations": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "required": [
+          "compute_operation_id",
+          "provider_id",
+          "operation_kind",
+          "desired_generation",
+          "version",
+          "status"
+        ],
+        "properties": {
+          "compute_operation_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "allocation_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "provider_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "operation_kind": {
+            "type": "string",
+            "enum": [
+              "CREATE",
+              "UPDATE",
+              "DELETE"
+            ]
+          },
+          "desired_generation": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "status": {
+            "type": "string",
+            "minLength": 1
+          },
+          "cleanup_required": {
+            "type": "boolean"
+          },
+          "reconcile_required": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "history_truncated": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false
+}
