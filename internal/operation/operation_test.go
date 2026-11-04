@@ -274,3 +274,39 @@ func TestApplyObservationRejectsFutureEvidence(t *testing.T) {
 		t.Fatalf("future-dated observation was accepted: %v", err)
 	}
 }
+
+// Lease durations must remain representable at PostgreSQL microsecond precision
+// and bounded so a worker cannot accidentally hold a reconciliation fence for
+// days after a configuration error.
+func TestOperationLeaseDurationBounds(t *testing.T) {
+	now := time.Date(2026, time.November, 4, 10, 0, 0, 0, time.UTC)
+	invalid := []time.Duration{time.Nanosecond, time.Microsecond, time.Millisecond - time.Nanosecond, 24*time.Hour + time.Nanosecond}
+	for _, ttl := range invalid {
+		t.Run(ttl.String(), func(t *testing.T) {
+			initial := fixture(Create)
+			claimed, err := initial.Claim(initial.Version, "controller", now, ttl)
+			if !errors.Is(err, ErrInvalid) || claimed.Status != initial.Status || claimed.Version != initial.Version || claimed.FenceToken != initial.FenceToken {
+				t.Fatalf("invalid Claim TTL advanced operation: ttl=%s, op=%+v, err=%v", ttl, claimed, err)
+			}
+			inFlight := claimAndStart(t, fixture(Create), now)
+			unknown, err := inFlight.MarkUnknown(inFlight.Version, inFlight.LeaseOwner, inFlight.FenceToken, now.Add(2*time.Second))
+			if err != nil {
+				t.Fatal(err)
+			}
+			reconciling, err := unknown.BeginReconciliation(unknown.Version, "", 0, "reconciler", now.Add(3*time.Second), ttl)
+			if !errors.Is(err, ErrInvalid) || reconciling.Status != unknown.Status ||
+				reconciling.Version != unknown.Version || reconciling.FenceToken != unknown.FenceToken {
+				t.Fatalf("invalid reconciliation TTL advanced UNKNOWN: ttl=%s, op=%+v, err=%v", ttl, reconciling, err)
+			}
+		})
+	}
+	for _, ttl := range []time.Duration{time.Millisecond, time.Minute, 24 * time.Hour} {
+		t.Run("valid-"+ttl.String(), func(t *testing.T) {
+			initial := fixture(Create)
+			claimed, err := initial.Claim(initial.Version, "controller", now, ttl)
+			if err != nil || claimed.Status != Leased || !claimed.LeaseExpiresAt.Equal(now.Add(ttl)) {
+				t.Fatalf("valid claim TTL rejected: ttl=%s, op=%+v, err=%v", ttl, claimed, err)
+			}
+		})
+	}
+}
