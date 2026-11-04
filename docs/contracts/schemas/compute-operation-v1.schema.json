@@ -137,14 +137,26 @@
         "required": [
           "lease_owner",
           "lease_expires_at"
-        ]
+        ],
+        "properties": {
+          "fence_token": {
+            "minimum": 1
+          }
+        }
       }
     },
     {
       "if": {
         "properties": {
           "status": {
-            "const": "PENDING"
+            "enum": [
+              "PENDING",
+              "UNKNOWN",
+              "SUCCEEDED",
+              "FAILED",
+              "MANUAL_REVIEW",
+              "SUPERSEDED"
+            ]
           }
         },
         "required": [
@@ -166,6 +178,354 @@
             }
           ]
         }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation_kind": {
+            "const": "CREATE"
+          }
+        },
+        "required": [
+          "operation_kind"
+        ]
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "target_resource_id"
+              ]
+            },
+            {
+              "required": [
+                "target_resource_uid"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation_kind": {
+            "enum": [
+              "UPDATE",
+              "DELETE"
+            ]
+          }
+        },
+        "required": [
+          "operation_kind"
+        ]
+      },
+      "then": {
+        "required": [
+          "target_resource_id",
+          "target_resource_uid"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "enum": [
+              "PENDING",
+              "LEASED",
+              "IN_FLIGHT",
+              "UNKNOWN",
+              "RECONCILING"
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "provider_resource_id"
+              ]
+            },
+            {
+              "required": [
+                "provider_resource_uid"
+              ]
+            },
+            {
+              "required": [
+                "error_code"
+              ]
+            },
+            {
+              "required": [
+                "manual_review_code"
+              ]
+            }
+          ]
+        },
+        "properties": {
+          "cleanup_required": {
+            "const": false
+          },
+          "reconcile_required": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "SUCCEEDED"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "oneOf": [
+          {
+            "properties": {
+              "operation_kind": {
+                "const": "CREATE"
+              }
+            },
+            "required": [
+              "operation_kind",
+              "provider_resource_id",
+              "provider_resource_uid"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "error_code"
+                  ]
+                },
+                {
+                  "required": [
+                    "manual_review_code"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "properties": {
+              "operation_kind": {
+                "const": "UPDATE"
+              }
+            },
+            "required": [
+              "operation_kind",
+              "target_resource_id",
+              "target_resource_uid",
+              "provider_resource_id",
+              "provider_resource_uid"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "error_code"
+                  ]
+                },
+                {
+                  "required": [
+                    "manual_review_code"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "properties": {
+              "operation_kind": {
+                "const": "DELETE"
+              }
+            },
+            "required": [
+              "operation_kind",
+              "target_resource_id",
+              "target_resource_uid"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "provider_resource_id"
+                  ]
+                },
+                {
+                  "required": [
+                    "provider_resource_uid"
+                  ]
+                },
+                {
+                  "required": [
+                    "error_code"
+                  ]
+                },
+                {
+                  "required": [
+                    "manual_review_code"
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        "properties": {
+          "cleanup_required": {
+            "const": false
+          },
+          "reconcile_required": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "FAILED"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "error_code"
+        ],
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "provider_resource_id"
+              ]
+            },
+            {
+              "required": [
+                "provider_resource_uid"
+              ]
+            },
+            {
+              "required": [
+                "manual_review_code"
+              ]
+            }
+          ]
+        },
+        "properties": {
+          "cleanup_required": {
+            "const": false
+          },
+          "reconcile_required": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "MANUAL_REVIEW"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "manual_review_code"
+        ],
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "provider_resource_id"
+              ]
+            },
+            {
+              "required": [
+                "provider_resource_uid"
+              ]
+            },
+            {
+              "required": [
+                "error_code"
+              ]
+            }
+          ]
+        },
+        "properties": {
+          "cleanup_required": {
+            "const": false
+          },
+          "reconcile_required": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "SUPERSEDED"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "reconcile_required"
+        ],
+        "properties": {
+          "reconcile_required": {
+            "const": true
+          },
+          "cleanup_required": {
+            "type": "boolean"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "cleanup_required": {
+                  "const": true
+                }
+              },
+              "required": [
+                "cleanup_required"
+              ]
+            },
+            "then": {
+              "required": [
+                "provider_resource_id",
+                "provider_resource_uid"
+              ]
+            }
+          }
+        ]
       }
     }
   ],
