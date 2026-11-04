@@ -178,13 +178,18 @@ func DeriveUsageInterval(evidence AllocationUsageEvidence, policy EvidencePolicy
 	if provider.CostLiabilityEnd != nil && provider.CostLiabilityEnd.NativeUID != provider.ResourceUID {
 		return incomplete(ReasonProviderIdentityMismatch)
 	}
+	if provider.Binding.Source != "provider" || provider.CostLiabilityStart.Source != "provider" ||
+		(provider.CostLiabilityEnd != nil && provider.CostLiabilityEnd.Source != "provider") {
+		return incomplete(ReasonProviderIdentityMismatch)
+	}
 
 	kueue := evidence.Kueue
 	if !kueue.Admitted {
 		return incomplete(ReasonKueueNotAdmitted)
 	}
 	if !nonBlank(kueue.WorkloadUID, kueue.JobUID, kueue.LocalQueue, kueue.ClusterQueue, kueue.ResourceFlavor) ||
-		kueue.ProfileID != evidence.ProfileID || kueue.WorkloadUID != kueue.Admission.NativeUID {
+		kueue.ProfileID != evidence.ProfileID || kueue.WorkloadUID != kueue.Admission.NativeUID ||
+		kueue.Admission.Source != "kueue" || (kueue.Release != nil && kueue.Release.Source != "kueue") {
 		return incomplete(ReasonKueueIdentityMismatch)
 	}
 	if kueue.AdmittedGPUCount != expectedGPUCount {
@@ -196,7 +201,8 @@ func DeriveUsageInterval(evidence AllocationUsageEvidence, policy EvidencePolicy
 		return incomplete(ReasonPodNotScheduled)
 	}
 	if !nonBlank(pod.PodUID, pod.JobUID, pod.NodeName) ||
-		pod.PodUID != pod.ScheduledRecord.NativeUID || pod.JobUID != kueue.JobUID {
+		pod.PodUID != pod.ScheduledRecord.NativeUID || pod.JobUID != kueue.JobUID ||
+		pod.ScheduledRecord.Source != "kubernetes" {
 		return incomplete(ReasonKueueIdentityMismatch)
 	}
 
@@ -209,7 +215,8 @@ func DeriveUsageInterval(evidence AllocationUsageEvidence, policy EvidencePolicy
 	}
 	switch device.Mode {
 	case DeviceEvidenceModeDRA:
-		if strings.TrimSpace(device.ClaimUID) == "" || device.ClaimUID != device.ResourceUID {
+		if strings.TrimSpace(device.ClaimUID) == "" || device.ClaimUID != device.ResourceUID ||
+			device.Assignment.Source != "dra" || (device.Release != nil && device.Release.Source != "dra") {
 			return incomplete(ReasonDeviceAssignmentMissing)
 		}
 	case DeviceEvidenceModeCertifiedAdapter:
