@@ -200,3 +200,62 @@ func TestReconcileRejectsPreLeaseNoEffectFinality(t *testing.T) {
 		t.Fatalf("stale evidence was appended: count=%d err=%v", count, err)
 	}
 }
+
+// TestReconcileRejectsStaleTerminalObservations ensures a provider result
+// collected before the current reconciliation claim cannot finalize an
+// ambiguous operation. Rejected evidence must leave the lease, operation,
+// observation table and outbox untouched; a fresh Inspect can still succeed.
+func TestReconcileRejectsStaleTerminalObservations(t *testing.T) {
+	cases := []struct {
+		name       string
+		result     operation.ObservationResult
+		wantStatus operation.Status
+	}{
+		{name: "resource present", result: operation.ResourcePresent, wantStatus: operation.Succeeded},
+		{name: "provider operation failed final", result: operation.OperationFailedFinal, wantStatus: operation.Failed},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, db, ctx, current := setupReconciliation(t)
+			var claimedAt time.Time
+			if err := db.QueryRowContext(ctx,
+				"SELECT updated_at FROM compute_operations WHERE tenant_id=$1 AND compute_operation_id=$2",
+				current.TenantID, current.ID).Scan(&claimedAt); err != nil {
+				t.Fatal(err)
+			}
+			observed := trustedObservation(current, tc.result)
+			if tc.result == operation.OperationFailedFinal {
+				observed.ErrorCode = "PROVIDER_OPERATION_FAILED"
+			}
+			observed.ObservedAt = claimedAt.Add(-time.Hour)
+			evidence := inspectionEvidence(current, observed)
+			if _, err := repo.ReconcileOperation(ctx, current.TenantID, current.ID, current.Version,
+				"reconciler", current.FenceToken, evidence); !errors.Is(err, operation.ErrObservation) {
+				t.Fatalf("pre-lease terminal provider evidence was accepted: %v", err)
+			}
+			persisted, err := repo.GetOperation(ctx, current.TenantID, current.ID)
+			if err != nil || persisted.Status != operation.Reconciling ||
+				persisted.Version != current.Version || persisted.FenceToken != current.FenceToken {
+				t.Fatalf("stale evidence mutated operation/lease: %+v, err=%v", persisted, err)
+			}
+			var observations, outbox int
+			if err := db.QueryRowContext(ctx, "SELECT count(*) FROM compute_resource_observations WHERE observation_id=$1",
+				evidence.ObservationID).Scan(&observations); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.QueryRowContext(ctx, "SELECT count(*) FROM compute_outbox_events WHERE event_id=$1",
+				evidence.EventID).Scan(&outbox); err != nil {
+				t.Fatal(err)
+			}
+			if observations != 0 || outbox != 0 {
+				t.Fatalf("rejected terminal evidence emitted durable side effects: observations=%d outbox=%d", observations, outbox)
+			}
+			evidence.Observation.ObservedAt = time.Now().UTC()
+			next, err := repo.ReconcileOperation(ctx, current.TenantID, current.ID, current.Version,
+				"reconciler", current.FenceToken, evidence)
+			if err != nil || next.Status != tc.wantStatus {
+				t.Fatalf("fresh provider result could not finalize existing claim: %+v, err=%v", next, err)
+			}
+		})
+	}
+}
