@@ -319,6 +319,40 @@ class ComputeEconomicsContractTests(unittest.TestCase):
                 usage["quantity"]["gpuCount"] = invalid_gpu_count
                 self.assertFalse(self.validators["usage_interval"].is_valid(usage))
 
+    def test_workload_cost_entry_quantity_is_limited_to_eighteen_fractional_digits(self) -> None:
+        segment = self.cost_fixture["expected"]["segments"][0]
+        entry = {
+            "schemaVersion": "compute.economics.workload-cost-entry.v1",
+            "costEntryId": "cost-precision-test",
+            "entryType": "CHARGE",
+            "tenantId": "tenant-demo",
+            "projectId": "project-demo",
+            "workloadId": "workload-demo",
+            "allocationId": "allocation-demo",
+            "providerId": "provider-demo",
+            "poolId": "pool-h100",
+            "profileId": "gpu-h100-80gb",
+            "usageIntervalId": "usage-int-001",
+            "pricedWindow": {"start": segment["start"], "end": segment["end"]},
+            "pricedQuantity": "0.000000000000000001",
+            "unit": "GPU_HOUR",
+            "rateCardId": segment["rateCardId"],
+            "rateCardVersion": segment["rateCardVersion"],
+            "rateAmount": segment["rateAmountPerGpuHour"],
+            "currency": "CNY",
+            "currencyMinorUnit": 2,
+            "amount": "0.01",
+            "calculationInputDigest": "sha256:" + "c" * 64,
+            "calculationVersion": "cost-v1",
+            "roundingMode": "CURRENCY_MINOR_UNIT_HALF_UP",
+            "calculationStatus": "FINAL",
+            "sourceCoverage": 1,
+            "recordedAt": "2026-11-01T12:00:08Z",
+        }
+        self.assert_valid("workload_cost_entry", entry)
+        entry["pricedQuantity"] = "0." + "0" * 18 + "1"
+        self.assertFalse(self.validators["workload_cost_entry"].is_valid(entry))
+
     def test_cost_reversal_requires_link_and_charge_cannot_be_reversal(self) -> None:
         segment = self.cost_fixture["expected"]["segments"][0]
         entry = {

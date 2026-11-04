@@ -98,7 +98,7 @@
     },
     "pricedQuantity": {
       "type": "string",
-      "pattern": "^(?=.*[1-9])(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+      "pattern": "^(?=.*[1-9])(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,18})?$",
       "description": "Strictly positive base-10 decimal string. Never use binary floating point for accounting values."
     },
     "unit": {

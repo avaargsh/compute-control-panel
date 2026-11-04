@@ -55,6 +55,9 @@ A final cost entry requires complete time and identity coverage. Incomplete tele
 - Parse decimal strings into exact decimal arithmetic; do not use IEEE-754 binary floating point for quantities, rates or currency.
 - Compute duration from timestamp instants, not local wall-clock arithmetic. Store all calculation boundaries as offset-aware timestamps; UTC is preferred for persisted examples.
 - Resolve the currency's minor-unit scale from a versioned ISO 4217 currency registry at the boundary. ProviderRateCard and WorkloadCostEntry both persist currencyMinorUnit; a currency precision change inside one usage interval fails closed. Round each posted segment amount to that scale using HALF_UP. Sum the posted segment amounts for the Workload total so the total reconciles exactly to its constituent postings.
+- Persist `pricedQuantity` (GPU-hours) to a fixed maximum of **18 fractional decimal places**, rounded HALF_UP; trim trailing zeroes but retain at least one fractional digit. This is the canonical serialized quantity precision for v1.
+- Compute currency cost from the exact unrounded rational quantity (whole GPU count × exact nanoseconds / nanoseconds per hour) multiplied by the exact decimal rate. **Never calculate cost from the rounded 18-place quantity.** Round each segment amount only at the currency minor-unit boundary.
+- The calculation input digest binds the exact source interval boundaries, source event IDs, Allocation/Provider/Profile identity, rate-card ID/version/source reference, unit rate and currency precision. The exact source remains reproducible even when the serialized quantity is rounded.
 - Preserve the calculation version and source facts so a result can be reproduced.
 
 ## 6. Idempotency, correction and replay
