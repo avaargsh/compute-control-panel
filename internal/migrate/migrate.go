@@ -29,6 +29,7 @@ type Migration struct {
 
 var (
 	ErrChecksumMismatch = errors.New("applied migration checksum differs from file")
+	ErrNameMismatch     = errors.New("applied migration name differs from file")
 	ErrMissingMigration = errors.New("applied migration is missing from source")
 )
 
@@ -65,8 +66,8 @@ func Load(fsys fs.FS) ([]Migration, error) {
 }
 
 // Apply runs pending migrations, each in its own transaction, under an
-// advisory lock. Already-applied migrations must match their recorded checksum.
-// It returns the versions applied by this call.
+// advisory lock. Already-applied migrations must match their recorded name
+// and checksum. It returns the versions applied by this call.
 func Apply(ctx context.Context, db *sql.DB, migrations []Migration) ([]int, error) {
 	conn, err := db.Conn(ctx)
 	if err != nil {
@@ -89,19 +90,23 @@ func Apply(ctx context.Context, db *sql.DB, migrations []Migration) ([]int, erro
 		return nil, err
 	}
 
-	applied := map[int]string{}
-	rows, err := conn.QueryContext(ctx, `SELECT version, checksum FROM schema_migrations`)
+	type appliedMigration struct {
+		name     string
+		checksum string
+	}
+	applied := map[int]appliedMigration{}
+	rows, err := conn.QueryContext(ctx, `SELECT version, name, checksum FROM schema_migrations`)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var v int
-		var sum string
-		if err := rows.Scan(&v, &sum); err != nil {
+		var name, sum string
+		if err := rows.Scan(&v, &name, &sum); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		applied[v] = sum
+		applied[v] = appliedMigration{name: name, checksum: sum}
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
@@ -113,12 +118,15 @@ func Apply(ctx context.Context, db *sql.DB, migrations []Migration) ([]int, erro
 	for _, m := range migrations {
 		known[m.Version] = m
 	}
-	for v, sum := range applied {
+	for v, recorded := range applied {
 		m, ok := known[v]
 		if !ok {
 			return nil, fmt.Errorf("%w: version %04d", ErrMissingMigration, v)
 		}
-		if m.Checksum != sum {
+		if m.Name != recorded.name {
+			return nil, fmt.Errorf("%w: version %04d recorded %q, source %q", ErrNameMismatch, v, recorded.name, m.Name)
+		}
+		if m.Checksum != recorded.checksum {
 			return nil, fmt.Errorf("%w: %s", ErrChecksumMismatch, m.Name)
 		}
 	}
