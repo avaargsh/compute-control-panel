@@ -256,17 +256,17 @@ func buildAcceptanceLookup(principal WorkloadPrincipal, request WorkloadCreateRe
 		profileRevision = request.ComputeProfileRef.Revision
 	}
 	return postgres.AcceptanceLookup{
-		TenantID: principal.TenantID,
-		IdempotencyKey: idempotencyKey,
-		RequestDigest: requestDigest,
-		ProjectID: request.ProjectID,
-		OwnerService: request.OwnerRef.Service,
-		OwnerResourceType: request.OwnerRef.ResourceType,
-		OwnerResourceID: request.OwnerRef.ResourceID,
-		ComputeProfileID: profileID,
-		ComputeProfileRevision: profileRevision,
+		TenantID:                principal.TenantID,
+		IdempotencyKey:          idempotencyKey,
+		RequestDigest:           requestDigest,
+		ProjectID:               request.ProjectID,
+		OwnerService:            request.OwnerRef.Service,
+		OwnerResourceType:       request.OwnerRef.ResourceType,
+		OwnerResourceID:         request.OwnerRef.ResourceID,
+		ComputeProfileID:        profileID,
+		ComputeProfileRevision:  profileRevision,
 		OperationIdempotencyKey: stableOperationIdempotencyKey(principal.TenantID, idempotencyKey),
-		OperationRequestDigest: operationDigest,
+		OperationRequestDigest:  operationDigest,
 	}, nil
 }
 
@@ -277,8 +277,8 @@ func workloadOperationIntentDigest(requestDigest string) (string, error) {
 		Kind          string `json:"operation_kind"`
 	}{
 		RequestDigest: requestDigest,
-		Generation: 1,
-		Kind: string(operation.Create),
+		Generation:    1,
+		Kind:          string(operation.Create),
 	})
 	if err != nil {
 		return "", err
@@ -293,14 +293,14 @@ func writeWorkloadAccepted(w http.ResponseWriter, acceptance postgres.WorkloadAc
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusAccepted)
 	_ = json.NewEncoder(w).Encode(workloadAcceptedResponse{
-		WorkloadID: acceptance.Workload.WorkloadID,
-		DesiredGeneration: acceptance.Workload.DesiredGeneration,
-		DesiredState: acceptance.Workload.DesiredState,
-		ObservedPhase: acceptance.Workload.ObservedPhase,
-		AllocationID: acceptance.Allocation.AllocationID,
-		AllocationPhase: acceptance.Allocation.Phase,
+		WorkloadID:         acceptance.Workload.WorkloadID,
+		DesiredGeneration:  acceptance.Workload.DesiredGeneration,
+		DesiredState:       acceptance.Workload.DesiredState,
+		ObservedPhase:      acceptance.Workload.ObservedPhase,
+		AllocationID:       acceptance.Allocation.AllocationID,
+		AllocationPhase:    acceptance.Allocation.Phase,
 		ComputeOperationID: acceptance.Operation.ID,
-		StatusURL: statusURL,
+		StatusURL:          statusURL,
 	})
 }
 
