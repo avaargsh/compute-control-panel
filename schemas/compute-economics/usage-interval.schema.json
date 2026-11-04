@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/avaargsh/compute-control-panel/blob/main/schemas/compute-economics/usage-interval.schema.json",
+  "title": "Compute Economics UsageInterval v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "usageIntervalId",
+    "tenantId",
+    "projectId",
+    "workloadId",
+    "allocationId",
+    "providerId",
+    "poolId",
+    "profileId",
+    "window",
+    "quantity",
+    "unit",
+    "meteringPolicyVersion",
+    "sourceEventIds",
+    "quality",
+    "attributionMethod"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "compute.economics.usage-interval.v1"
+    },
+    "usageIntervalId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tenantId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "projectId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workloadId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "allocationId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "allocationGeneration": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "providerId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "poolId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "profileId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "resourceClass": {
+      "const": "GPU"
+    },
+    "gpuModel": {
+      "type": "string",
+      "minLength": 1
+    },
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start",
+        "end"
+      ],
+      "properties": {
+        "start": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "end": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "quantity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gpuCount"
+      ],
+      "properties": {
+        "gpuCount": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)(\\\\.[0-9]+)?$",
+          "description": "Non-negative base-10 decimal string. Never use binary floating point for accounting values.",
+          "not": {
+            "const": "0"
+          }
+        }
+      }
+    },
+    "unit": {
+      "const": "GPU_DEVICE_COUNT"
+    },
+    "meteringPolicyVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sourceEventIds": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "quality": {
+      "enum": [
+        "OBSERVED",
+        "DERIVED",
+        "ESTIMATED",
+        "INCOMPLETE"
+      ]
+    },
+    "attributionMethod": {
+      "enum": [
+        "ALLOCATION_BOUNDARY",
+        "DEVICE_BINDING"
+      ]
+    },
+    "sourceCoverage": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "observedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "recordedAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "description": "A normalized Allocation-bound GPU quantity interval. It is not a billable usage fact; commercial billable usage has a separate contract."
+}
