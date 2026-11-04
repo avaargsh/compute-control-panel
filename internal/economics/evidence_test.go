@@ -61,16 +61,28 @@ func validAllocationUsageEvidence(t *testing.T) (AllocationUsageEvidence, Eviden
 		GPUCount: "2",
 		MeteringPolicyVersion: "allocation-evidence-v1",
 		Provider: ProviderUsageEvidence{
-			ComputeOperationID: "compute-operation-1",
-			OperationRequestDigest: "sha256:" + strings.Repeat("b", 64),
-			OperationSucceeded: true,
+			Operation: ComputeOperationUsageEvidence{
+				ID: "compute-operation-1",
+				TenantID: "tenant-1",
+				ProjectID: "project-1",
+				WorkloadID: "workload-1",
+				AllocationID: "allocation-1",
+				DesiredGeneration: 7,
+				ProviderID: "provider-1",
+				Status: "SUCCEEDED",
+				RequestDigest: "sha256:" + strings.Repeat("b", 64),
+			},
 			ResourceID: "provider-resource-1",
 			ResourceUID: "provider-resource-uid-1",
 			PoolID: "pool-h100",
 			ProfileID: "profile-h100",
 			GPUModel: "H100",
 			GPUCount: 2,
-			Binding: evidenceRecord(t, "provider-binding", "provider", "provider-resource-uid-1", "2026-11-04T09:05:00Z", "2026-11-04T09:00:00Z"),
+			Binding: func() EvidenceRecord {
+				record := evidenceRecord(t, "provider-binding", "provider", "provider-resource-uid-1", "2026-11-04T09:05:00Z", "2026-11-04T09:00:00Z")
+				record.ComputeOperationID = "compute-operation-1"
+				return record
+			}(),
 			CostLiabilityStart: evidenceRecord(t, "provider-cost-start", "provider", "provider-resource-uid-1", "2026-11-04T08:35:00Z", "2026-11-04T08:30:00Z"),
 			CostLiabilityEnd: recordPtr(evidenceRecord(t, "provider-cost-end", "provider", "provider-resource-uid-1", "2026-11-04T12:00:00Z", "2026-11-04T11:55:00Z")),
 		},
@@ -405,7 +417,7 @@ func TestEvidenceGenerationMustBePositive(t *testing.T) {
 func TestDeriveUsageIntervalRequiresSuccessfulAllocationBoundOperation(t *testing.T) {
 	t.Run("operation not succeeded", func(t *testing.T) {
 		evidence, policy := validAllocationUsageEvidence(t)
-		evidence.Provider.OperationSucceeded = false
+		evidence.Provider.Operation.Status = "IN_FLIGHT"
 		got, err := DeriveUsageInterval(evidence, policy)
 		if err != nil || got.Status != EvidenceStatusIncomplete ||
 			got.ReasonCode != ReasonProviderBindingMissing || got.UsageInterval != nil {
@@ -414,11 +426,45 @@ func TestDeriveUsageIntervalRequiresSuccessfulAllocationBoundOperation(t *testin
 	})
 	t.Run("operation request digest missing", func(t *testing.T) {
 		evidence, policy := validAllocationUsageEvidence(t)
-		evidence.Provider.OperationRequestDigest = "invalid"
+		evidence.Provider.Operation.RequestDigest = "invalid"
 		got, err := DeriveUsageInterval(evidence, policy)
 		if err != nil || got.Status != EvidenceStatusIncomplete ||
 			got.ReasonCode != ReasonProviderBindingMissing || got.UsageInterval != nil {
 			t.Fatalf("unexpected result=%+v err=%v", got, err)
 		}
 	})
+}
+
+
+func TestDeriveUsageIntervalRejectsProviderOperationScopeMismatch(t *testing.T) {
+	tests := []struct {
+		name string
+		mutate func(*ComputeOperationUsageEvidence)
+	}{
+		{name: "wrong tenant", mutate: func(op *ComputeOperationUsageEvidence) { op.TenantID = "tenant-other" }},
+		{name: "wrong allocation", mutate: func(op *ComputeOperationUsageEvidence) { op.AllocationID = "allocation-other" }},
+		{name: "wrong generation", mutate: func(op *ComputeOperationUsageEvidence) { op.DesiredGeneration++ }},
+		{name: "wrong provider", mutate: func(op *ComputeOperationUsageEvidence) { op.ProviderID = "provider-other" }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			evidence, policy := validAllocationUsageEvidence(t)
+			test.mutate(&evidence.Provider.Operation)
+			got, err := DeriveUsageInterval(evidence, policy)
+			if err != nil || got.Status != EvidenceStatusIncomplete ||
+				got.ReasonCode != ReasonProviderIdentityMismatch || got.UsageInterval != nil {
+				t.Fatalf("unexpected result=%+v err=%v", got, err)
+			}
+		})
+	}
+}
+
+func TestDeriveUsageIntervalRequiresProviderInspectLinkedToOperation(t *testing.T) {
+	evidence, policy := validAllocationUsageEvidence(t)
+	evidence.Provider.Binding.ComputeOperationID = "different-operation"
+	got, err := DeriveUsageInterval(evidence, policy)
+	if err != nil || got.Status != EvidenceStatusIncomplete ||
+		got.ReasonCode != ReasonProviderIdentityMismatch || got.UsageInterval != nil {
+		t.Fatalf("unexpected result=%+v err=%v", got, err)
+	}
 }
