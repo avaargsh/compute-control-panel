@@ -3,20 +3,22 @@ package postgres
 import (
 	"context"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/avaargsh/compute-control-panel/internal/economics"
 )
 
 const (
-	AllocationUsageEvidenceSchemaVersion = "compute.economics.allocation-usage-evidence.v1"
-	usageIntervalSchemaVersion           = "compute.economics.usage-interval.v1"
-	usageIntervalUnit                    = "GPU_DEVICE_COUNT"
-	usageAttributionMethod               = "DEVICE_BINDING"
-	usageEvidenceQuality                 = "DERIVED"
+	usageIntervalUnit       = "GPU_DEVICE_COUNT"
+	usageAttributionMethod  = "DEVICE_BINDING"
+	usageEvidenceQuality    = "DERIVED"
 )
 
 var (
@@ -25,181 +27,181 @@ var (
 	ErrUsageEvidenceConflict = errors.New("Allocation usage evidence conflicts with an existing immutable record")
 )
 
-// PersistUsageEvidenceParams is the normalized final evidence envelope accepted
-// by the PostgreSQL boundary. EvidencePayload contains source identity and
-// provenance references/digests only; it must not contain raw secrets or
-// unredacted provider response bodies.
+// PersistUsageEvidenceParams contains source facts and trusted platform policy.
+// The repository derives the UsageInterval itself; callers cannot submit a
+// self-asserted FINAL status, digest, or arbitrary JSON payload.
 type PersistUsageEvidenceParams struct {
-	SchemaVersion         string
-	EvidenceSetID         string
-	TenantID              string
-	ProjectID             string
-	WorkloadID            string
-	AllocationID          string
-	AllocationGeneration  int64
-	ProviderID            string
-	ComputeOperationID    string
-	ProviderResourceID    string
-	ProviderResourceUID   string
-	PoolID                string
-	ProfileID             string
-	GPUModel              string
-	CapabilityProfileID   string
-	MeteringPolicyVersion string
-	EvidenceDigest        string
-	UsageIntervalID       string
-	UsageStart            time.Time
-	UsageEnd              time.Time
-	GPUCount              int64
-	SourceEventIDs        []string
-	EvidencePayload       json.RawMessage
-	UsageIntervalPayload  json.RawMessage
+	Evidence economics.AllocationUsageEvidence
+	Policy   economics.EvidencePolicy
 }
 
 // UsageEvidenceSet is the immutable persistence projection for one FINAL
 // UsageInterval. One Allocation generation can have only one such record in v1.
 type UsageEvidenceSet struct {
-	SchemaVersion         string
-	EvidenceSetID         string
-	TenantID              string
-	ProjectID             string
-	WorkloadID            string
-	AllocationID          string
-	AllocationGeneration  int64
-	ProviderID            string
-	ComputeOperationID    string
-	ProviderResourceID    string
-	ProviderResourceUID   string
-	PoolID                string
-	ProfileID             string
-	GPUModel              string
-	CapabilityProfileID   string
-	MeteringPolicyVersion string
-	EvidenceDigest        string
-	UsageIntervalID       string
-	UsageStart            time.Time
-	UsageEnd              time.Time
-	GPUCount              int64
-	SourceEventIDs        []string
-	EvidencePayload       json.RawMessage
-	UsageIntervalPayload  json.RawMessage
-	RecordedAt            time.Time
+	SchemaVersion          string
+	EvidenceSetID          string
+	TenantID               string
+	ProjectID              string
+	WorkloadID             string
+	AllocationID           string
+	AllocationGeneration   int64
+	ProviderID             string
+	ComputeOperationID     string
+	ProviderResourceID     string
+	ProviderResourceUID    string
+	PoolID                 string
+	ProfileID              string
+	GPUModel               string
+	CapabilityProfileID    string
+	EvidencePolicyVersion  string
+	MeteringPolicyVersion  string
+	EvidenceDigest         string
+	UsageIntervalID        string
+	UsageStart             time.Time
+	UsageEnd               time.Time
+	GPUCount               int64
+	SourceEventIDs         []string
+	EvidencePayload        json.RawMessage
+	UsageIntervalPayload   json.RawMessage
+	RecordedAt             time.Time
 }
 
 type usageEvidenceScanner interface {
 	Scan(...any) error
 }
 
-type allocationEvidencePayload struct {
-	SchemaVersion         string
-	EvidenceSetID         string
-	TenantID              string
-	ProjectID             string
-	WorkloadID            string
-	AllocationID          string
-	AllocationGeneration  int64
-	ProviderID            string
-	PoolID                string
-	ProfileID             string
-	CapabilityProfileID   string
-	MeteringPolicyVersion string
-	GPUModel              string
-	GPUCount              string
-	Provider              struct {
-		Operation struct {
-			ID                string
-			TenantID          string
-			ProjectID         string
-			WorkloadID        string
-			AllocationID      string
-			DesiredGeneration int64
-			ProviderID        string
-			Status            string
-		}
-		ResourceID  string
-		ResourceUID string
-	}
+type usageEvidencePolicySnapshot struct {
+	Version                        string
+	AsOf                           time.Time
+	MaximumClockSkew               time.Duration
+	TrustedSourceTimestampAdapters []string
+	CertifiedDeviceAdapters        []string
 }
 
-type persistedUsageIntervalPayload struct {
-	SchemaVersion         string
-	UsageIntervalID       string
-	TenantID              string
-	ProjectID             string
-	WorkloadID            string
-	AllocationID          string
-	AllocationGeneration  int64
-	ProviderID            string
-	PoolID                string
-	ProfileID             string
-	ResourceClass         string
-	GPUModel              string
-	Start                 time.Time
-	End                   time.Time
-	GPUCount              string
-	Unit                  string
-	MeteringPolicyVersion string
-	SourceEventIDs        []string
-	Quality               string
-	AttributionMethod     string
-	SourceCoverage        float64
-	EvidenceSetID         string
-	EvidenceDigest        string
-	CapabilityProfileID   string
+type usageEvidenceEnvelope struct {
+	Evidence economics.AllocationUsageEvidence
+	Policy   usageEvidencePolicySnapshot
+}
+
+type derivedUsageEvidence struct {
+	record          UsageEvidenceSet
+	sourceEventJSON []byte
+	evidenceJSON    []byte
+	usageJSON       []byte
 }
 
 const usageEvidenceSetColumns = `evidence_set_id, schema_version, tenant_id, project_id,
 	workload_id, allocation_id, allocation_generation, provider_id, compute_operation_id,
 	provider_resource_id, provider_resource_uid, pool_id, profile_id, gpu_model,
-	capability_profile_id, metering_policy_version, evidence_digest, usage_interval_id,
-	usage_start, usage_end, gpu_count, source_event_ids, evidence_payload,
-	usage_interval_payload, recorded_at`
+	capability_profile_id, evidence_policy_version, metering_policy_version,
+	evidence_digest, usage_interval_id, usage_start, usage_end, gpu_count,
+	source_event_ids, evidence_payload, usage_interval_payload, recorded_at`
 
-func validateUsageEvidenceParams(p PersistUsageEvidenceParams) error {
-	for _, value := range []string{
-		p.EvidenceSetID, p.TenantID, p.ProjectID, p.WorkloadID, p.AllocationID,
-		p.ProviderID, p.ComputeOperationID, p.ProviderResourceID, p.ProviderResourceUID,
-		p.PoolID, p.ProfileID, p.GPUModel, p.CapabilityProfileID, p.MeteringPolicyVersion,
-	} {
-		if strings.TrimSpace(value) == "" {
-			return fmt.Errorf("%w: required identity or policy field is empty", ErrInvalidUsageEvidence)
-		}
+func deriveUsageEvidence(p PersistUsageEvidenceParams) (derivedUsageEvidence, error) {
+	if strings.TrimSpace(p.Policy.Version) == "" {
+		return derivedUsageEvidence{}, fmt.Errorf("%w: trusted evidence policy version is empty", ErrInvalidUsageEvidence)
 	}
-	if p.SchemaVersion != AllocationUsageEvidenceSchemaVersion ||
-		p.AllocationGeneration <= 0 ||
-		!validUsageEvidenceDigest(p.EvidenceDigest) ||
-		p.UsageIntervalID != "usage_"+strings.TrimPrefix(p.EvidenceDigest, "sha256:") ||
-		p.UsageStart.IsZero() || p.UsageEnd.IsZero() || !p.UsageEnd.After(p.UsageStart) ||
-		p.GPUCount <= 0 {
-		return fmt.Errorf("%w: invalid schema, identity, digest or usage interval", ErrInvalidUsageEvidence)
+	derivation, err := economics.DeriveUsageInterval(p.Evidence, p.Policy)
+	if err != nil {
+		return derivedUsageEvidence{}, fmt.Errorf("%w: derive Allocation usage: %v", ErrInvalidUsageEvidence, err)
 	}
-	if len(p.SourceEventIDs) == 0 {
-		return fmt.Errorf("%w: source event references are required", ErrInvalidUsageEvidence)
-	}
-	seen := make(map[string]struct{}, len(p.SourceEventIDs))
-	for _, eventID := range p.SourceEventIDs {
-		if strings.TrimSpace(eventID) == "" {
-			return fmt.Errorf("%w: empty source event reference", ErrInvalidUsageEvidence)
+	if derivation.Status != economics.EvidenceStatusFinal || derivation.UsageInterval == nil {
+		reason := derivation.ReasonCode
+		if reason == "" {
+			reason = derivation.Status
 		}
-		if _, exists := seen[eventID]; exists {
-			return fmt.Errorf("%w: duplicate source event reference", ErrInvalidUsageEvidence)
-		}
-		seen[eventID] = struct{}{}
+		return derivedUsageEvidence{}, fmt.Errorf("%w: E1 derivation returned %s", ErrUsageEvidenceNotReady, reason)
 	}
 
-	if _, err := strictJSONObject(p.EvidencePayload); err != nil {
-		return fmt.Errorf("%w: evidence payload: %v", ErrInvalidUsageEvidence, err)
+	usage := *derivation.UsageInterval
+	if derivation.EvidenceDigest == "" || derivation.EvidenceDigest != usage.EvidenceDigest ||
+		usage.SchemaVersion != "compute.economics.usage-interval.v1" ||
+		usage.SourceCoverage != 1 || usage.Quality != usageEvidenceQuality ||
+		usage.AttributionMethod != usageAttributionMethod ||
+		len(usage.SourceEventIDs) == 0 {
+		return derivedUsageEvidence{}, fmt.Errorf("%w: derived UsageInterval provenance is incomplete", ErrInvalidUsageEvidence)
 	}
-	if _, err := strictJSONObject(p.UsageIntervalPayload); err != nil {
-		return fmt.Errorf("%w: UsageInterval payload: %v", ErrInvalidUsageEvidence, err)
+	gpuCount, err := strconv.ParseInt(usage.GPUCount, 10, 64)
+	if err != nil || gpuCount <= 0 {
+		return derivedUsageEvidence{}, fmt.Errorf("%w: derived GPU count must be a positive whole integer", ErrInvalidUsageEvidence)
 	}
-	if err := validateAllocationEvidencePayload(p); err != nil {
-		return err
+
+	trustedSources := make([]string, 0, len(p.Policy.TrustedSourceTimestampAdapters))
+	for key, enabled := range p.Policy.TrustedSourceTimestampAdapters {
+		if enabled {
+			trustedSources = append(trustedSources, key)
+		}
 	}
-	if err := validatePersistedUsageIntervalPayload(p); err != nil {
-		return err
+	certifiedAdapters := make([]string, 0, len(p.Policy.CertifiedDeviceAdapters))
+	for key, enabled := range p.Policy.CertifiedDeviceAdapters {
+		if enabled {
+			certifiedAdapters = append(certifiedAdapters, key)
+		}
 	}
-	return nil
+	sort.Strings(trustedSources)
+	sort.Strings(certifiedAdapters)
+
+	envelope := usageEvidenceEnvelope{
+		Evidence: p.Evidence,
+		Policy: usageEvidencePolicySnapshot{
+			Version: p.Policy.Version, AsOf: p.Policy.AsOf.UTC(),
+			MaximumClockSkew: p.Policy.MaximumClockSkew,
+			TrustedSourceTimestampAdapters: trustedSources,
+			CertifiedDeviceAdapters: certifiedAdapters,
+		},
+	}
+	evidenceJSON, err := json.Marshal(envelope)
+	if err != nil {
+		return derivedUsageEvidence{}, fmt.Errorf("%w: encode immutable evidence envelope: %v", ErrInvalidUsageEvidence, err)
+	}
+	usageJSON, err := json.Marshal(usage)
+	if err != nil {
+		return derivedUsageEvidence{}, fmt.Errorf("%w: encode derived UsageInterval: %v", ErrInvalidUsageEvidence, err)
+	}
+	sourceEventJSON, err := json.Marshal(usage.SourceEventIDs)
+	if err != nil {
+		return derivedUsageEvidence{}, fmt.Errorf("%w: encode source event references: %v", ErrInvalidUsageEvidence, err)
+	}
+
+	provider := p.Evidence.Provider
+	record := UsageEvidenceSet{
+		SchemaVersion:         p.Evidence.SchemaVersion,
+		EvidenceSetID:         p.Evidence.EvidenceSetID,
+		TenantID:              usage.TenantID,
+		ProjectID:             usage.ProjectID,
+		WorkloadID:            usage.WorkloadID,
+		AllocationID:          usage.AllocationID,
+		AllocationGeneration:  usage.AllocationGeneration,
+		ProviderID:            usage.ProviderID,
+		ComputeOperationID:    provider.Operation.ID,
+		ProviderResourceID:    provider.ResourceID,
+		ProviderResourceUID:   provider.ResourceUID,
+		PoolID:                usage.PoolID,
+		ProfileID:             usage.ProfileID,
+		GPUModel:              usage.GPUModel,
+		CapabilityProfileID:   usage.CapabilityProfileID,
+		EvidencePolicyVersion: p.Policy.Version,
+		MeteringPolicyVersion: usage.MeteringPolicyVersion,
+		EvidenceDigest:        derivation.EvidenceDigest,
+		UsageIntervalID:       usage.UsageIntervalID,
+		UsageStart:            usage.Start.UTC(),
+		UsageEnd:              usage.End.UTC(),
+		GPUCount:              gpuCount,
+		SourceEventIDs:        append([]string(nil), usage.SourceEventIDs...),
+		EvidencePayload:       append([]byte(nil), evidenceJSON...),
+		UsageIntervalPayload:  append([]byte(nil), usageJSON...),
+	}
+	if record.SchemaVersion != economics.AllocationUsageEvidenceSchemaVersion ||
+		strings.TrimSpace(record.EvidenceSetID) == "" ||
+		!validUsageEvidenceDigest(record.EvidenceDigest) ||
+		record.UsageIntervalID != "usage_"+strings.TrimPrefix(record.EvidenceDigest, "sha256:") ||
+		!record.UsageEnd.After(record.UsageStart) {
+		return derivedUsageEvidence{}, fmt.Errorf("%w: invalid final evidence identity or interval", ErrInvalidUsageEvidence)
+	}
+	return derivedUsageEvidence{
+		record: record, sourceEventJSON: sourceEventJSON,
+		evidenceJSON: evidenceJSON, usageJSON: usageJSON,
+	}, nil
 }
 
 func validUsageEvidenceDigest(value string) bool {
@@ -210,87 +212,6 @@ func validUsageEvidenceDigest(value string) bool {
 	return err == nil
 }
 
-func validateAllocationEvidencePayload(p PersistUsageEvidenceParams) error {
-	var payload allocationEvidencePayload
-	if err := json.Unmarshal(p.EvidencePayload, &payload); err != nil {
-		return fmt.Errorf("%w: decode allocation evidence payload: %v", ErrInvalidUsageEvidence, err)
-	}
-	op := payload.Provider.Operation
-	if payload.SchemaVersion != p.SchemaVersion ||
-		payload.EvidenceSetID != p.EvidenceSetID ||
-		payload.TenantID != p.TenantID ||
-		payload.ProjectID != p.ProjectID ||
-		payload.WorkloadID != p.WorkloadID ||
-		payload.AllocationID != p.AllocationID ||
-		payload.AllocationGeneration != p.AllocationGeneration ||
-		payload.ProviderID != p.ProviderID ||
-		payload.PoolID != p.PoolID ||
-		payload.ProfileID != p.ProfileID ||
-		payload.GPUModel != p.GPUModel ||
-		payload.GPUCount != fmt.Sprint(p.GPUCount) ||
-		payload.CapabilityProfileID != p.CapabilityProfileID ||
-		payload.MeteringPolicyVersion != p.MeteringPolicyVersion ||
-		payload.Provider.ResourceID != p.ProviderResourceID ||
-		payload.Provider.ResourceUID != p.ProviderResourceUID ||
-		op.ID != p.ComputeOperationID ||
-		op.TenantID != p.TenantID ||
-		op.ProjectID != p.ProjectID ||
-		op.WorkloadID != p.WorkloadID ||
-		op.AllocationID != p.AllocationID ||
-		op.DesiredGeneration != p.AllocationGeneration ||
-		op.ProviderID != p.ProviderID ||
-		op.Status != "SUCCEEDED" {
-		return fmt.Errorf("%w: evidence payload identity does not match persistence scope", ErrInvalidUsageEvidence)
-	}
-	return nil
-}
-
-func validatePersistedUsageIntervalPayload(p PersistUsageEvidenceParams) error {
-	var payload persistedUsageIntervalPayload
-	if err := json.Unmarshal(p.UsageIntervalPayload, &payload); err != nil {
-		return fmt.Errorf("%w: decode UsageInterval payload: %v", ErrInvalidUsageEvidence, err)
-	}
-	if payload.SchemaVersion != usageIntervalSchemaVersion ||
-		payload.UsageIntervalID != p.UsageIntervalID ||
-		payload.TenantID != p.TenantID ||
-		payload.ProjectID != p.ProjectID ||
-		payload.WorkloadID != p.WorkloadID ||
-		payload.AllocationID != p.AllocationID ||
-		payload.AllocationGeneration != p.AllocationGeneration ||
-		payload.ProviderID != p.ProviderID ||
-		payload.PoolID != p.PoolID ||
-		payload.ProfileID != p.ProfileID ||
-		payload.ResourceClass != "GPU" ||
-		payload.GPUModel != p.GPUModel ||
-		payload.Start.IsZero() || !payload.Start.Equal(p.UsageStart) ||
-		payload.End.IsZero() || !payload.End.Equal(p.UsageEnd) ||
-		payload.GPUCount != fmt.Sprint(p.GPUCount) ||
-		payload.Unit != usageIntervalUnit ||
-		payload.MeteringPolicyVersion != p.MeteringPolicyVersion ||
-		!sameStringSlice(payload.SourceEventIDs, p.SourceEventIDs) ||
-		payload.Quality != usageEvidenceQuality ||
-		payload.AttributionMethod != usageAttributionMethod ||
-		payload.SourceCoverage != 1 ||
-		payload.EvidenceSetID != p.EvidenceSetID ||
-		payload.EvidenceDigest != p.EvidenceDigest ||
-		payload.CapabilityProfileID != p.CapabilityProfileID {
-		return fmt.Errorf("%w: UsageInterval payload does not match evidence scope", ErrInvalidUsageEvidence)
-	}
-	return nil
-}
-
-func sameStringSlice(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
 func scanUsageEvidenceSet(row usageEvidenceScanner) (UsageEvidenceSet, error) {
 	var record UsageEvidenceSet
 	var sourceIDs, evidencePayload, usagePayload []byte
@@ -299,9 +220,9 @@ func scanUsageEvidenceSet(row usageEvidenceScanner) (UsageEvidenceSet, error) {
 		&record.WorkloadID, &record.AllocationID, &record.AllocationGeneration,
 		&record.ProviderID, &record.ComputeOperationID, &record.ProviderResourceID,
 		&record.ProviderResourceUID, &record.PoolID, &record.ProfileID, &record.GPUModel,
-		&record.CapabilityProfileID, &record.MeteringPolicyVersion, &record.EvidenceDigest,
-		&record.UsageIntervalID, &record.UsageStart, &record.UsageEnd, &record.GPUCount,
-		&sourceIDs, &evidencePayload, &usagePayload, &record.RecordedAt,
+		&record.CapabilityProfileID, &record.EvidencePolicyVersion, &record.MeteringPolicyVersion,
+		&record.EvidenceDigest, &record.UsageIntervalID, &record.UsageStart, &record.UsageEnd,
+		&record.GPUCount, &sourceIDs, &evidencePayload, &usagePayload, &record.RecordedAt,
 	)
 	if err != nil {
 		return UsageEvidenceSet{}, err
@@ -311,7 +232,8 @@ func scanUsageEvidenceSet(row usageEvidenceScanner) (UsageEvidenceSet, error) {
 	}
 	record.EvidencePayload = append([]byte(nil), evidencePayload...)
 	record.UsageIntervalPayload = append([]byte(nil), usagePayload...)
-	if record.EvidenceSetID == "" || record.TenantID == "" || record.AllocationGeneration <= 0 ||
+	if record.EvidenceSetID == "" || record.TenantID == "" ||
+		record.AllocationGeneration <= 0 || record.EvidencePolicyVersion == "" ||
 		!validUsageEvidenceDigest(record.EvidenceDigest) || record.GPUCount <= 0 ||
 		!record.UsageEnd.After(record.UsageStart) || len(record.SourceEventIDs) == 0 {
 		return UsageEvidenceSet{}, errors.New("invalid persisted Allocation usage evidence")
@@ -319,19 +241,16 @@ func scanUsageEvidenceSet(row usageEvidenceScanner) (UsageEvidenceSet, error) {
 	return record, nil
 }
 
-// PersistUsageEvidenceSet stores a complete E1 evidence set after rechecking
-// the exact successful Provider Operation and workload Project in PostgreSQL.
-// A single FINAL record per Allocation generation prevents overlapping
-// evidence from being costed twice. Exact replay is idempotent.
+// PersistUsageEvidenceSet reruns E1 derivation using the supplied source facts
+// and trusted platform policy, then stores only a FINAL result. The database
+// independently checks the successful Provider Operation, resource UID and
+// Workload Project before the immutable row can be inserted.
 func (r *Repository) PersistUsageEvidenceSet(ctx context.Context, p PersistUsageEvidenceParams) (UsageEvidenceSet, bool, error) {
-	if err := validateUsageEvidenceParams(p); err != nil {
+	derived, err := deriveUsageEvidence(p)
+	if err != nil {
 		return UsageEvidenceSet{}, false, err
 	}
-	sourceIDs, err := json.Marshal(p.SourceEventIDs)
-	if err != nil {
-		return UsageEvidenceSet{}, false, fmt.Errorf("marshal evidence source IDs: %w", err)
-	}
-
+	record := derived.record
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return UsageEvidenceSet{}, false, fmt.Errorf("begin usage evidence transaction: %w", err)
@@ -363,9 +282,9 @@ func (r *Repository) PersistUsageEvidenceSet(ctx context.Context, p PersistUsage
 		  AND o.provider_resource_uid=$8
 		  AND w.project_id=$9
 		FOR SHARE OF o, w, a`,
-		p.ComputeOperationID, p.TenantID, p.WorkloadID, p.AllocationID,
-		p.ProviderID, p.AllocationGeneration, p.ProviderResourceID,
-		p.ProviderResourceUID, p.ProjectID,
+		record.ComputeOperationID, record.TenantID, record.WorkloadID,
+		record.AllocationID, record.ProviderID, record.AllocationGeneration,
+		record.ProviderResourceID, record.ProviderResourceUID, record.ProjectID,
 	).Scan(&operationID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return UsageEvidenceSet{}, false, ErrUsageEvidenceNotReady
@@ -378,23 +297,25 @@ func (r *Repository) PersistUsageEvidenceSet(ctx context.Context, p PersistUsage
 		evidence_set_id, schema_version, tenant_id, project_id, workload_id,
 		allocation_id, allocation_generation, provider_id, compute_operation_id,
 		provider_resource_id, provider_resource_uid, pool_id, profile_id, gpu_model,
-		capability_profile_id, metering_policy_version, evidence_digest, usage_interval_id,
-		usage_start, usage_end, gpu_count, source_event_ids, evidence_payload,
-		usage_interval_payload, usage_unit, attribution_method, quality, source_coverage
+		capability_profile_id, evidence_policy_version, metering_policy_version,
+		evidence_digest, usage_interval_id, usage_start, usage_end, gpu_count,
+		source_event_ids, evidence_payload, usage_interval_payload,
+		usage_unit, attribution_method, quality, source_coverage
 	) VALUES (
 		$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
-		$19,$20,$21,$22::jsonb,$23::jsonb,$24::jsonb,$25,$26,$27,$28
+		$19,$20,$21,$22,$23::jsonb,$24::jsonb,$25::jsonb,$26,$27,$28,$29
 	)
 	ON CONFLICT DO NOTHING
 	RETURNING ` + usageEvidenceSetColumns
-	record, err := scanUsageEvidenceSet(tx.QueryRowContext(ctx, insert,
-		p.EvidenceSetID, p.SchemaVersion, p.TenantID, p.ProjectID, p.WorkloadID,
-		p.AllocationID, p.AllocationGeneration, p.ProviderID, p.ComputeOperationID,
-		p.ProviderResourceID, p.ProviderResourceUID, p.PoolID, p.ProfileID, p.GPUModel,
-		p.CapabilityProfileID, p.MeteringPolicyVersion, p.EvidenceDigest, p.UsageIntervalID,
-		p.UsageStart, p.UsageEnd, p.GPUCount, sourceIDs, []byte(p.EvidencePayload),
-		[]byte(p.UsageIntervalPayload), usageIntervalUnit, usageAttributionMethod,
-		usageEvidenceQuality, 1,
+	record, err = scanUsageEvidenceSet(tx.QueryRowContext(ctx, insert,
+		record.EvidenceSetID, record.SchemaVersion, record.TenantID, record.ProjectID,
+		record.WorkloadID, record.AllocationID, record.AllocationGeneration,
+		record.ProviderID, record.ComputeOperationID, record.ProviderResourceID,
+		record.ProviderResourceUID, record.PoolID, record.ProfileID, record.GPUModel,
+		record.CapabilityProfileID, record.EvidencePolicyVersion, record.MeteringPolicyVersion,
+		record.EvidenceDigest, record.UsageIntervalID, record.UsageStart, record.UsageEnd,
+		record.GPUCount, derived.sourceEventJSON, derived.evidenceJSON, derived.usageJSON,
+		usageIntervalUnit, usageAttributionMethod, usageEvidenceQuality, 1,
 	))
 	if err == nil {
 		if err := tx.Commit(); err != nil {
@@ -406,14 +327,14 @@ func (r *Repository) PersistUsageEvidenceSet(ctx context.Context, p PersistUsage
 		return UsageEvidenceSet{}, false, fmt.Errorf("insert usage evidence set: %w", err)
 	}
 
-	existing, payloadsMatch, err := findUsageEvidenceConflict(ctx, tx, p, sourceIDs)
+	existing, payloadsMatch, err := findUsageEvidenceConflict(ctx, tx, record, derived.sourceEventJSON, derived.evidenceJSON, derived.usageJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return UsageEvidenceSet{}, false, ErrUsageEvidenceConflict
 	}
 	if err != nil {
 		return UsageEvidenceSet{}, false, fmt.Errorf("read conflicting usage evidence set: %w", err)
 	}
-	if !payloadsMatch || !sameUsageEvidenceIntent(existing, p) {
+	if !payloadsMatch || !sameUsageEvidenceIntent(existing, record) {
 		return UsageEvidenceSet{}, false, ErrUsageEvidenceConflict
 	}
 	if err := tx.Commit(); err != nil {
@@ -425,8 +346,8 @@ func (r *Repository) PersistUsageEvidenceSet(ctx context.Context, p PersistUsage
 func findUsageEvidenceConflict(
 	ctx context.Context,
 	tx *sql.Tx,
-	p PersistUsageEvidenceParams,
-	sourceIDs []byte,
+	record UsageEvidenceSet,
+	sourceIDs, evidenceJSON, usageJSON []byte,
 ) (UsageEvidenceSet, bool, error) {
 	query := `SELECT ` + usageEvidenceSetColumns + `,
 		(evidence_payload=$5::jsonb
@@ -442,57 +363,69 @@ func findUsageEvidenceConflict(
 		              ELSE 2 END
 		LIMIT 1
 		FOR SHARE`
-	var record UsageEvidenceSet
-	var sourceEventJSON, evidencePayload, usagePayload []byte
+	var existing UsageEvidenceSet
+	var persistedSourceIDs, persistedEvidence, persistedUsage []byte
 	var payloadsMatch bool
 	err := tx.QueryRowContext(ctx, query,
-		p.TenantID, p.EvidenceSetID, p.AllocationID, p.AllocationGeneration,
-		[]byte(p.EvidencePayload), []byte(p.UsageIntervalPayload), sourceIDs,
-		p.UsageIntervalID,
+		record.TenantID, record.EvidenceSetID, record.AllocationID, record.AllocationGeneration,
+		evidenceJSON, usageJSON, sourceIDs, record.UsageIntervalID,
 	).Scan(
-		&record.EvidenceSetID, &record.SchemaVersion, &record.TenantID, &record.ProjectID,
-		&record.WorkloadID, &record.AllocationID, &record.AllocationGeneration,
-		&record.ProviderID, &record.ComputeOperationID, &record.ProviderResourceID,
-		&record.ProviderResourceUID, &record.PoolID, &record.ProfileID, &record.GPUModel,
-		&record.CapabilityProfileID, &record.MeteringPolicyVersion, &record.EvidenceDigest,
-		&record.UsageIntervalID, &record.UsageStart, &record.UsageEnd, &record.GPUCount,
-		&sourceEventJSON, &evidencePayload, &usagePayload, &record.RecordedAt,
-		&payloadsMatch,
+		&existing.EvidenceSetID, &existing.SchemaVersion, &existing.TenantID, &existing.ProjectID,
+		&existing.WorkloadID, &existing.AllocationID, &existing.AllocationGeneration,
+		&existing.ProviderID, &existing.ComputeOperationID, &existing.ProviderResourceID,
+		&existing.ProviderResourceUID, &existing.PoolID, &existing.ProfileID, &existing.GPUModel,
+		&existing.CapabilityProfileID, &existing.EvidencePolicyVersion, &existing.MeteringPolicyVersion,
+		&existing.EvidenceDigest, &existing.UsageIntervalID, &existing.UsageStart, &existing.UsageEnd,
+		&existing.GPUCount, &persistedSourceIDs, &persistedEvidence, &persistedUsage,
+		&existing.RecordedAt, &payloadsMatch,
 	)
 	if err != nil {
 		return UsageEvidenceSet{}, false, err
 	}
-	if err := json.Unmarshal(sourceEventJSON, &record.SourceEventIDs); err != nil {
+	if err := json.Unmarshal(persistedSourceIDs, &existing.SourceEventIDs); err != nil {
 		return UsageEvidenceSet{}, false, fmt.Errorf("decode conflicting evidence source IDs: %w", err)
 	}
-	record.EvidencePayload = append([]byte(nil), evidencePayload...)
-	record.UsageIntervalPayload = append([]byte(nil), usagePayload...)
-	return record, payloadsMatch, nil
+	existing.EvidencePayload = append([]byte(nil), persistedEvidence...)
+	existing.UsageIntervalPayload = append([]byte(nil), persistedUsage...)
+	return existing, payloadsMatch, nil
 }
 
-func sameUsageEvidenceIntent(existing UsageEvidenceSet, p PersistUsageEvidenceParams) bool {
-	return existing.SchemaVersion == p.SchemaVersion &&
-		existing.EvidenceSetID == p.EvidenceSetID &&
-		existing.TenantID == p.TenantID &&
-		existing.ProjectID == p.ProjectID &&
-		existing.WorkloadID == p.WorkloadID &&
-		existing.AllocationID == p.AllocationID &&
-		existing.AllocationGeneration == p.AllocationGeneration &&
-		existing.ProviderID == p.ProviderID &&
-		existing.ComputeOperationID == p.ComputeOperationID &&
-		existing.ProviderResourceID == p.ProviderResourceID &&
-		existing.ProviderResourceUID == p.ProviderResourceUID &&
-		existing.PoolID == p.PoolID &&
-		existing.ProfileID == p.ProfileID &&
-		existing.GPUModel == p.GPUModel &&
-		existing.CapabilityProfileID == p.CapabilityProfileID &&
-		existing.MeteringPolicyVersion == p.MeteringPolicyVersion &&
-		existing.EvidenceDigest == p.EvidenceDigest &&
-		existing.UsageIntervalID == p.UsageIntervalID &&
-		existing.UsageStart.Equal(p.UsageStart) &&
-		existing.UsageEnd.Equal(p.UsageEnd) &&
-		existing.GPUCount == p.GPUCount &&
-		sameStringSlice(existing.SourceEventIDs, p.SourceEventIDs)
+func sameUsageEvidenceIntent(existing, record UsageEvidenceSet) bool {
+	return existing.SchemaVersion == record.SchemaVersion &&
+		existing.EvidenceSetID == record.EvidenceSetID &&
+		existing.TenantID == record.TenantID &&
+		existing.ProjectID == record.ProjectID &&
+		existing.WorkloadID == record.WorkloadID &&
+		existing.AllocationID == record.AllocationID &&
+		existing.AllocationGeneration == record.AllocationGeneration &&
+		existing.ProviderID == record.ProviderID &&
+		existing.ComputeOperationID == record.ComputeOperationID &&
+		existing.ProviderResourceID == record.ProviderResourceID &&
+		existing.ProviderResourceUID == record.ProviderResourceUID &&
+		existing.PoolID == record.PoolID &&
+		existing.ProfileID == record.ProfileID &&
+		existing.GPUModel == record.GPUModel &&
+		existing.CapabilityProfileID == record.CapabilityProfileID &&
+		existing.EvidencePolicyVersion == record.EvidencePolicyVersion &&
+		existing.MeteringPolicyVersion == record.MeteringPolicyVersion &&
+		existing.EvidenceDigest == record.EvidenceDigest &&
+		existing.UsageIntervalID == record.UsageIntervalID &&
+		existing.UsageStart.Equal(record.UsageStart) &&
+		existing.UsageEnd.Equal(record.UsageEnd) &&
+		existing.GPUCount == record.GPUCount &&
+		sameStringSlice(existing.SourceEventIDs, record.SourceEventIDs)
+}
+
+func sameStringSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // GetUsageEvidenceSet returns evidence only within the requested tenant scope.
