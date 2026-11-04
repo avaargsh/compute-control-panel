@@ -15,7 +15,8 @@
     "rateAmount",
     "currency",
     "effectiveFrom",
-    "sourceRef"
+    "sourceRef",
+    "currencyMinorUnit"
   ],
   "properties": {
     "schemaVersion": {
@@ -57,7 +58,7 @@
     "currency": {
       "type": "string",
       "pattern": "^[A-Z]{3}$",
-      "description": "ISO 4217 currency code."
+      "description": "ISO 4217 currency code. Validate against the application's versioned currency registry; this regex checks syntax only."
     },
     "effectiveFrom": {
       "type": "string",
@@ -77,6 +78,12 @@
     "createdAt": {
       "type": "string",
       "format": "date-time"
+    },
+    "currencyMinorUnit": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4,
+      "description": "Fraction digits from the versioned currency metadata used for this calculation."
     }
   },
   "description": "Versioned procurement rate for the initial direct Workload cost slice. Rate windows are start-inclusive and end-exclusive."
