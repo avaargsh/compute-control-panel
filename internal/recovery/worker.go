@@ -71,7 +71,7 @@ func validLabel(value string) bool {
 // RECONCILING state until expiry; another worker cannot blindly re-dispatch.
 // This is a library entry point, not an externally reachable API operation.
 func (w *Worker) RecoverUnknown(ctx context.Context, tenantID, operationID, owner string, ttl time.Duration) (operation.Operation, error) {
-	if !validLabel(tenantID) || !validLabel(operationID) || !validLabel(owner) || ttl <= 0 {
+	if !validLabel(tenantID) || !validLabel(operationID) || !validLabel(owner) || !operation.ValidLeaseTTL(ttl) {
 		return operation.Operation{}, operation.ErrInvalid
 	}
 	current, err := w.journal.GetOperation(ctx, tenantID, operationID)
