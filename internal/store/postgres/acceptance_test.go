@@ -159,6 +159,30 @@ func TestAcceptWorkloadReplayReturnsStableIdentitiesAndEvents(t *testing.T) {
 		t.Fatalf("first acceptance: created=%t err=%v", created, err)
 	}
 
+	lookup := AcceptanceLookup{
+		TenantID: params.Workload.TenantID,
+		IdempotencyKey: params.Workload.IdempotencyKey,
+		RequestDigest: params.Workload.RequestDigest,
+		ProjectID: params.Workload.ProjectID,
+		OwnerService: params.Workload.OwnerService,
+		OwnerResourceType: params.Workload.OwnerResourceType,
+		OwnerResourceID: params.Workload.OwnerResourceID,
+		ComputeProfileID: params.Workload.ComputeProfileID,
+		ComputeProfileRevision: params.Workload.ComputeProfileRevision,
+		OperationIdempotencyKey: params.Operation.IdempotencyKey,
+		OperationRequestDigest: params.Operation.RequestDigest,
+	}
+	lookedUp, found, err := repo.GetAcceptanceByIdempotency(ctx, lookup)
+	if err != nil || !found {
+		t.Fatalf("lookup accepted Workload: found=%t err=%v", found, err)
+	}
+	if lookedUp.Workload.WorkloadID != first.Workload.WorkloadID ||
+		lookedUp.Allocation.AllocationID != first.Allocation.AllocationID ||
+		lookedUp.Operation.ID != first.Operation.ID ||
+		lookedUp.Allocation.ProviderID != first.Allocation.ProviderID {
+		t.Fatalf("lookup did not return original acceptance identities: first=%+v lookup=%+v", first, lookedUp)
+	}
+
 	replay := params
 	replay.Workload.WorkloadID = "new-candidate-workload-" + randomSuffix(t)
 	replay.Workload.EventID = "new-candidate-workload-event-" + randomSuffix(t)
