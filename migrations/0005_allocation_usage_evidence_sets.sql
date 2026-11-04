@@ -89,6 +89,7 @@ BEGIN
           AND o.desired_generation = NEW.allocation_generation
           AND o.operation_kind IN ('CREATE', 'UPDATE')
           AND o.status = 'SUCCEEDED'
+          AND a.phase IN ('BOUND', 'RELEASING', 'RELEASED')
           AND o.provider_resource_id = NEW.provider_resource_id
           AND o.provider_resource_uid = NEW.provider_resource_uid
           AND w.project_id = NEW.project_id
