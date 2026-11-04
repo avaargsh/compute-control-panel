@@ -33,7 +33,7 @@ type WorkloadReadHandler struct {
 }
 
 type workloadReadResponse struct {
-	Workload    workloadReadWorkloadResponse    `json:"workload"`
+	Workload    workloadReadWorkloadResponse     `json:"workload"`
 	Allocations []workloadReadAllocationResponse `json:"allocations"`
 	Operations  []workloadReadOperationResponse  `json:"operations"`
 }
@@ -64,11 +64,11 @@ type workloadReadOperationResponse struct {
 	AllocationID      string           `json:"allocation_id,omitempty"`
 	ProviderID        string           `json:"provider_id"`
 	Kind              operation.Kind   `json:"operation_kind"`
-	DesiredGeneration uint64            `json:"desired_generation"`
-	Version           uint64            `json:"version"`
+	DesiredGeneration uint64           `json:"desired_generation"`
+	Version           uint64           `json:"version"`
 	Status            operation.Status `json:"status"`
-	CleanupRequired   bool              `json:"cleanup_required,omitempty"`
-	ReconcileRequired bool              `json:"reconcile_required,omitempty"`
+	CleanupRequired   bool             `json:"cleanup_required,omitempty"`
+	ReconcileRequired bool             `json:"reconcile_required,omitempty"`
 }
 
 func NewWorkloadReadHandler(deps WorkloadReadDependencies) (http.Handler, error) {
@@ -139,25 +139,25 @@ func (h *WorkloadReadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	allocations := make([]workloadReadAllocationResponse, 0, len(details.Allocations))
 	for _, allocation := range details.Allocations {
 		allocations = append(allocations, workloadReadAllocationResponse{
-			AllocationID: allocation.AllocationID,
-			ProviderID: allocation.ProviderID,
-			PoolID: allocation.PoolID,
+			AllocationID:      allocation.AllocationID,
+			ProviderID:        allocation.ProviderID,
+			PoolID:            allocation.PoolID,
 			DesiredGeneration: allocation.DesiredGeneration,
-			Phase: allocation.Phase,
-			Version: allocation.Version,
+			Phase:             allocation.Phase,
+			Version:           allocation.Version,
 		})
 	}
 	operations := make([]workloadReadOperationResponse, 0, len(details.Operations))
 	for _, item := range details.Operations {
 		operations = append(operations, workloadReadOperationResponse{
-			OperationID: item.ID,
-			AllocationID: item.AllocationID,
-			ProviderID: item.ProviderID,
-			Kind: item.Kind,
+			OperationID:       item.ID,
+			AllocationID:      item.AllocationID,
+			ProviderID:        item.ProviderID,
+			Kind:              item.Kind,
 			DesiredGeneration: item.Generation,
-			Version: item.Version,
-			Status: item.Status,
-			CleanupRequired: item.CleanupRequired,
+			Version:           item.Version,
+			Status:            item.Status,
+			CleanupRequired:   item.CleanupRequired,
 			ReconcileRequired: item.ReconcileRequired,
 		})
 	}
@@ -168,18 +168,18 @@ func (h *WorkloadReadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 	response := workloadReadResponse{
 		Workload: workloadReadWorkloadResponse{
-			WorkloadID: details.Workload.WorkloadID,
-			ProjectID: details.Workload.ProjectID,
-			DesiredGeneration: details.Workload.DesiredGeneration,
-			Version: details.Workload.Version,
-			DesiredState: details.Workload.DesiredState,
-			ObservedPhase: details.Workload.ObservedPhase,
+			WorkloadID:         details.Workload.WorkloadID,
+			ProjectID:          details.Workload.ProjectID,
+			DesiredGeneration:  details.Workload.DesiredGeneration,
+			Version:            details.Workload.Version,
+			DesiredState:       details.Workload.DesiredState,
+			ObservedPhase:      details.Workload.ObservedPhase,
 			LatestAllocationID: latestAllocationID,
-			CreatedAt: details.Workload.CreatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00"),
-			UpdatedAt: details.Workload.UpdatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00"),
+			CreatedAt:          details.Workload.CreatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00"),
+			UpdatedAt:          details.Workload.UpdatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00"),
 		},
 		Allocations: allocations,
-		Operations: operations,
+		Operations:  operations,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
