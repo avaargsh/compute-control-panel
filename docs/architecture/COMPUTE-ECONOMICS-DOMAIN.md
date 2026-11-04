@@ -44,20 +44,24 @@ These measures are deliberately separate. API fields, reports and dashboards mus
 
 | Measure | Definition | Primary use |
 |---|---|---|
-| capacity_gpu_hours | Physical/contracted GPU capacity multiplied by elapsed time | Capacity inventory and supply cost |
-| allocated_gpu_hours | Capacity assigned to a stable Allocation over elapsed time | Initial workload cost attribution |
-| reserved_gpu_hours | Capacity contractually reserved or held, whether assigned or active | Provider commitment and capacity accounting |
-| active_gpu_hours | Allocated time weighted by a defined activity signal and sampling policy | Operational utilization analysis |
-| idle_gpu_hours | Eligible capacity time with no allocation or workload, per an explicit idle definition | Idle-capacity analysis |
-| billable_gpu_hours | Quantity chargeable under a commercial contract and billing policy | Revenue calculation |
+| capacity_gpu_hours | Healthy/eligible physical capacity multiplied by elapsed time; denominator must state whether it is installed, provisioned or schedulable capacity | Capacity inventory and utilization denominator |
+| allocated_gpu_hours | GPU device quantity assigned to a stable Allocation multiplied by its accepted Allocation interval | Initial direct Workload cost attribution |
+| reserved_gpu_hours | Capacity contractually held by a Provider commitment or customer reservation, independent of Workload activity | Commitment and reservation economics |
+| active_gpu_hours | Allocated GPU time above an explicitly versioned activity threshold | Operational activity reporting |
+| activity_weighted_gpu_hours | Integral of normalized activity signal (0–1) over allocated GPU time | Utilization-weighted analysis; not billing |
+| unallocated_idle_gpu_hours | Healthy/schedulable capacity time with no Allocation | Unallocated capacity aging |
+| allocated_inactive_gpu_hours | Allocated time below the activity threshold | Underutilized allocation analysis |
+| billable_gpu_hours | Quantity chargeable under a commercial contract and BillingPolicy | Revenue calculation |
 | effective_workload_output | Workload-specific measured output, e.g. tokens, samples or jobs completed | Delivered-cost comparison |
 
 Rules:
 
 - GPU utilization is an operational observation, not a universal compute unit, billing unit or proof of useful output.
-- active_gpu_hours depends on a documented activity signal and sampling/aggregation policy.
+- active_gpu_hours uses a versioned threshold and sampling/aggregation policy. activity_weighted_gpu_hours is a separate weighted metric; neither is a commercial billing quantity.
+- unallocated_idle_gpu_hours and allocated_inactive_gpu_hours are mutually distinct. An inactive allocation must not be counted as unallocated idle capacity.
+- capacity_gpu_hours must disclose its denominator (installed, provisioned, healthy or schedulable); unavailable hardware must not silently inflate eligible capacity.
 - effective_workload_output is workload-specific. Do not collapse unlike workloads into one synthetic GPU-hour measure.
-- allocated, reserved, active, idle and billable time can differ. Preserve the differences in storage and APIs.
+- allocated, reserved, active, idle and billable time can overlap by design. Preserve dimensions instead of summing them as if they were disjoint.
 
 ## 4. GPU telemetry and effective-workload analytics
 
@@ -85,6 +89,8 @@ A GPU reporting 90% activity is not necessarily delivering more useful work than
 
 Telemetry can be linked to Workload cost only through a stable Allocation/device binding and a valid time interval. Unattributed device metrics remain infrastructure observations; do not guess the Workload owner.
 
+A costable Allocation interval requires the accepted Allocation projection and authoritative boundary evidence under the P0 contract (Provider resource realization plus applicable Kueue admission and DRA/device ownership evidence). A Provider acknowledgement or a raw device metric alone does not establish a costable Workload Allocation.
+
 ## 5. Metering domain
 
 ### UsageSample
@@ -94,6 +100,8 @@ Immutable source observation or counter point. It preserves source identity, sou
 ### UsageInterval
 
 A normalized interval derived from samples and lifecycle evidence. It identifies the resource, Allocation, Workload, start/end, quantity/unit, aggregation policy version and source sample references.
+
+The v1 UsageInterval schema uses full GPU device counts only (GPU_DEVICE_COUNT). Fractional GPU sharing, MIG slices and vendor-specific partitions require an explicit profile-scoped unit contract before they can be charged; they must not be coerced to whole-GPU counts.
 
 The interval pipeline must define behavior for duplicate samples/events, missing samples and telemetry gaps, late arrival and out-of-order events, clock skew and timestamp correction, Allocation start/end boundaries, GPU partition changes and device replacement, counter reset and Provider identity changes.
 
