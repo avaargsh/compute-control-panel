@@ -125,6 +125,7 @@ func (o Operation) Validate() error {
 		strings.TrimSpace(o.TenantID) == "" ||
 		strings.TrimSpace(o.WorkloadID) == "" ||
 		strings.TrimSpace(o.ProviderID) == "" ||
+		(o.AllocationID != "" && strings.TrimSpace(o.AllocationID) == "") ||
 		strings.TrimSpace(o.IdempotencyKey) == "" ||
 		!validDigest(o.RequestDigest) ||
 		o.Generation == 0 || o.Version == 0 {
