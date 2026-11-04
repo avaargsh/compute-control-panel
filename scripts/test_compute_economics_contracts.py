@@ -287,8 +287,10 @@ class ComputeEconomicsContractTests(unittest.TestCase):
         self.assertFalse(self.validators["usage_sample"].is_valid(sample))
 
         usage = json.loads(json.dumps(self.cost_fixture["usageInterval"]))
-        usage["quantity"]["gpuCount"] = "0.0"
-        self.assertFalse(self.validators["usage_interval"].is_valid(usage))
+        for invalid_gpu_count in ("0", "0.0", "1.5", "-1"):
+            with self.subTest(gpu_count=invalid_gpu_count):
+                usage["quantity"]["gpuCount"] = invalid_gpu_count
+                self.assertFalse(self.validators["usage_interval"].is_valid(usage))
 
     def test_cost_reversal_requires_link_and_charge_cannot_be_reversal(self) -> None:
         segment = self.cost_fixture["expected"]["segments"][0]
