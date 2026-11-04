@@ -23,10 +23,10 @@ func (a testPrincipalAuthenticator) Authenticate(context.Context, *http.Request)
 }
 
 type testWorkloadAuthorizer struct {
-	err        error
-	calls      int
+	err         error
+	calls       int
 	lastRequest WorkloadCreateRequest
-	lastDigest string
+	lastDigest  string
 }
 
 func (a *testWorkloadAuthorizer) AuthorizeCreate(_ context.Context, _ WorkloadPrincipal, request WorkloadCreateRequest, digest string) error {
@@ -255,12 +255,11 @@ func TestCreateWorkloadPersistsAuthorizedAtomicAcceptance(t *testing.T) {
 	}
 }
 
-
 func TestValidWorkloadDigestRequiresCanonicalLowercaseHex(t *testing.T) {
-	if !validWorkloadDigest("sha256:"+strings.Repeat("a", 64)) {
+	if !validWorkloadDigest("sha256:" + strings.Repeat("a", 64)) {
 		t.Fatal("lowercase SHA-256 digest should be accepted")
 	}
-	if validWorkloadDigest("sha256:"+strings.Repeat("A", 64)) {
+	if validWorkloadDigest("sha256:" + strings.Repeat("A", 64)) {
 		t.Fatal("uppercase SHA-256 digest must be rejected as non-canonical")
 	}
 }
@@ -315,7 +314,6 @@ func TestProviderSelectorDoesNotReceiveGuardPermit(t *testing.T) {
 		t.Fatalf("persisted Workload request contains authorization proof: %s", repo.params.Workload.NormalizedRequest)
 	}
 }
-
 
 func TestCreateWorkloadIdempotentReplaySkipsProviderSelection(t *testing.T) {
 	principal, authorizer, selector, repo := newAcceptanceFixture()
