@@ -49,7 +49,8 @@
       "effectiveFrom": "2026-01-01T00:00:00Z",
       "effectiveTo": "2026-11-01T10:30:00Z",
       "sourceRef": "contract-demo#rate-1",
-      "currencyMinorUnit": 2
+      "currencyMinorUnit": 2,
+      "currencyMetadataVersion": "six-list-one-2026-09-17-subset-v1"
     },
     {
       "schemaVersion": "compute.economics.provider-rate-card.v1",
@@ -65,7 +66,8 @@
       "effectiveFrom": "2026-11-01T10:30:00Z",
       "effectiveTo": null,
       "sourceRef": "contract-demo#rate-2",
-      "currencyMinorUnit": 2
+      "currencyMinorUnit": 2,
+      "currencyMetadataVersion": "six-list-one-2026-09-17-subset-v1"
     }
   ],
   "expected": {
@@ -98,6 +100,7 @@
     "totalAllocatedGpuHours": "6.0",
     "totalDirectWorkloadCost": "66.00",
     "currency": "CNY",
-    "calculationStatus": "FINAL"
+    "calculationStatus": "FINAL",
+    "currencyMetadataVersion": "six-list-one-2026-09-17-subset-v1"
   }
 }

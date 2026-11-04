@@ -31,6 +31,13 @@ def read_json(path: Path) -> dict[str, Any]:
     return value
 
 
+CURRENCY_REGISTRY = read_json(
+    ROOT / "internal" / "economics" / "currency-metadata-registry-v1.json"
+)
+CURRENCY_METADATA_VERSION = CURRENCY_REGISTRY["registryVersion"]
+CURRENCY_MINOR_UNITS = CURRENCY_REGISTRY["supportedCurrencies"]
+
+
 def parse_instant(value: str) -> datetime:
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if parsed.tzinfo is None or parsed.utcoffset() is None:
@@ -95,6 +102,7 @@ def calculate_direct_cost(
     segments: list[dict[str, str | int]] = []
     selected_currency: str | None = None
     selected_currency_minor_unit: int | None = None
+    selected_currency_metadata_version: str | None = None
 
     for segment_start, segment_end in zip(ordered, ordered[1:]):
         matches = []
@@ -121,9 +129,20 @@ def calculate_direct_cost(
             raise ValueError("unsupported_rate_basis")
         currency = rate["currency"]
         currency_minor_unit = int(rate["currencyMinorUnit"])
+        currency_metadata_version = rate["currencyMetadataVersion"]
+        if currency_metadata_version != CURRENCY_METADATA_VERSION:
+            raise ValueError("unsupported_currency_metadata_version")
+        expected_minor_unit = CURRENCY_MINOR_UNITS.get(currency)
+        if expected_minor_unit is None:
+            raise ValueError("unsupported_currency")
+        if currency_minor_unit != expected_minor_unit:
+            raise ValueError("currency_precision_mismatch")
         if selected_currency is None:
             selected_currency = currency
             selected_currency_minor_unit = currency_minor_unit
+            selected_currency_metadata_version = currency_metadata_version
+        elif selected_currency_metadata_version != currency_metadata_version:
+            raise ValueError("currency_metadata_version_mismatch")
         elif selected_currency != currency:
             raise ValueError("currency_mismatch")
         elif selected_currency_minor_unit != currency_minor_unit:
@@ -224,6 +243,7 @@ class ComputeEconomicsContractTests(unittest.TestCase):
                 "rateCardVersion": segment["rateCardVersion"],
                 "rateAmount": segment["rateAmountPerGpuHour"],
                 "currency": "CNY",
+                "currencyMetadataVersion": CURRENCY_METADATA_VERSION,
                 "currencyMinorUnit": segment["currencyMinorUnit"],
                 "amount": segment["amount"],
                 "calculationInputDigest": "sha256:" + "a" * 64,
@@ -284,6 +304,71 @@ class ComputeEconomicsContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "rate_overlap"):
             calculate_direct_cost(self.cost_fixture["usageInterval"], rates)
 
+    def test_currency_metadata_registry_is_pinned_and_has_expected_minor_units(self) -> None:
+        self.assertEqual("six-list-one-2026-09-17-subset-v1", CURRENCY_METADATA_VERSION)
+        self.assertEqual(2, CURRENCY_MINOR_UNITS["CNY"])
+        self.assertEqual(0, CURRENCY_MINOR_UNITS["JPY"])
+        self.assertEqual(3, CURRENCY_MINOR_UNITS["KWD"])
+        self.assertEqual(4, CURRENCY_MINOR_UNITS["CLF"])
+
+    def test_currency_metadata_rejects_unknown_codes_versions_and_precision(self) -> None:
+        mutations = [
+            ("CNY minor-unit mismatch", "CNY", 3, CURRENCY_METADATA_VERSION, "currency_precision_mismatch"),
+            ("JPY minor-unit mismatch", "JPY", 2, CURRENCY_METADATA_VERSION, "currency_precision_mismatch"),
+            ("unknown currency", "ZZZ", 2, CURRENCY_METADATA_VERSION, "unsupported_currency"),
+            ("unknown snapshot", "CNY", 2, "unregistered-snapshot-v9", "unsupported_currency_metadata_version"),
+        ]
+        for name, code, minor_unit, version_value, error in mutations:
+            rates = [dict(rate) for rate in self.cost_fixture["rateCards"]]
+            rates[0]["currency"] = code
+            rates[0]["currencyMinorUnit"] = minor_unit
+            rates[0]["currencyMetadataVersion"] = version_value
+            rates[0]["effectiveTo"] = None
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(ValueError, error):
+                    calculate_direct_cost(self.cost_fixture["usageInterval"], rates[:1])
+
+    def test_currency_precision_mapping_is_enforced_by_rate_and_cost_schemas(self) -> None:
+        rate = dict(self.cost_fixture["rateCards"][0])
+        for code, minor_unit in (("CNY", 3), ("JPY", 2), ("ZZZ", 2)):
+            invalid = dict(rate)
+            invalid["currency"] = code
+            invalid["currencyMinorUnit"] = minor_unit
+            self.assertFalse(self.validators["provider_rate_card"].is_valid(invalid))
+        entry = {
+            "schemaVersion": "compute.economics.workload-cost-entry.v1",
+            "costEntryId": "currency-registry-test",
+            "entryType": "CHARGE",
+            "tenantId": "tenant-demo",
+            "projectId": "project-demo",
+            "workloadId": "workload-demo",
+            "allocationId": "allocation-demo",
+            "providerId": "provider-demo",
+            "poolId": "pool-h100",
+            "profileId": "gpu-h100-80gb",
+            "usageIntervalId": "usage-int-001",
+            "pricedWindow": {"start": "2026-11-01T09:00:00Z", "end": "2026-11-01T10:30:00Z"},
+            "pricedQuantity": "3.0",
+            "unit": "GPU_HOUR",
+            "rateCardId": "rate-h100-v1",
+            "rateCardVersion": 1,
+            "rateAmount": "10.00",
+            "currency": "CNY",
+            "currencyMetadataVersion": CURRENCY_METADATA_VERSION,
+            "currencyMinorUnit": 3,
+            "amount": "30.00",
+            "calculationInputDigest": "sha256:" + "d" * 64,
+            "calculationVersion": "compute-cost-v1",
+            "roundingMode": "CURRENCY_MINOR_UNIT_HALF_UP",
+            "calculationStatus": "FINAL",
+            "sourceCoverage": 1,
+            "recordedAt": "2026-11-01T12:00:08Z",
+        }
+        self.assertFalse(self.validators["workload_cost_entry"].is_valid(entry))
+        entry["currencyMinorUnit"] = 2
+        entry["currency"] = "ZZZ"
+        self.assertFalse(self.validators["workload_cost_entry"].is_valid(entry))
+
     def test_currency_change_inside_one_usage_interval_fails_closed(self) -> None:
         rates = [dict(rate) for rate in self.cost_fixture["rateCards"]]
         rates[1]["currency"] = "USD"
@@ -340,6 +425,7 @@ class ComputeEconomicsContractTests(unittest.TestCase):
             "rateCardVersion": segment["rateCardVersion"],
             "rateAmount": segment["rateAmountPerGpuHour"],
             "currency": "CNY",
+            "currencyMetadataVersion": CURRENCY_METADATA_VERSION,
             "currencyMinorUnit": 2,
             "amount": "0.01",
             "calculationInputDigest": "sha256:" + "c" * 64,
@@ -374,6 +460,7 @@ class ComputeEconomicsContractTests(unittest.TestCase):
             "rateCardVersion": segment["rateCardVersion"],
             "rateAmount": segment["rateAmountPerGpuHour"],
             "currency": "CNY",
+            "currencyMetadataVersion": CURRENCY_METADATA_VERSION,
             "currencyMinorUnit": segment["currencyMinorUnit"],
             "amount": segment["amount"],
             "calculationInputDigest": "sha256:" + "b" * 64,

@@ -16,7 +16,8 @@
     "currency",
     "effectiveFrom",
     "sourceRef",
-    "currencyMinorUnit"
+    "currencyMinorUnit",
+    "currencyMetadataVersion"
   ],
   "properties": {
     "schemaVersion": {
@@ -57,8 +58,50 @@
     },
     "currency": {
       "type": "string",
-      "pattern": "^[A-Z]{3}$",
-      "description": "ISO 4217 currency code. Validate against the application's versioned currency registry; this regex checks syntax only."
+      "enum": [
+        "AED",
+        "AUD",
+        "BHD",
+        "BRL",
+        "CAD",
+        "CHF",
+        "CLF",
+        "CLP",
+        "CNY",
+        "CZK",
+        "DKK",
+        "EUR",
+        "GBP",
+        "HKD",
+        "INR",
+        "IQD",
+        "ISK",
+        "JOD",
+        "JPY",
+        "KRW",
+        "KWD",
+        "LYD",
+        "MXN",
+        "MYR",
+        "NOK",
+        "NZD",
+        "OMR",
+        "PHP",
+        "PLN",
+        "SAR",
+        "SEK",
+        "SGD",
+        "THB",
+        "TND",
+        "TWD",
+        "USD",
+        "VND",
+        "XAF",
+        "XOF",
+        "XPF",
+        "ZAR"
+      ],
+      "description": "ISO 4217 currency code in the explicit Compute Economics v1 supported subset. Other ISO codes require a reviewed metadata snapshot update."
     },
     "effectiveFrom": {
       "type": "string",
@@ -83,8 +126,428 @@
       "type": "integer",
       "minimum": 0,
       "maximum": 4,
-      "description": "Fraction digits from the versioned currency metadata used for this calculation."
+      "description": "Must exactly match the minor-unit value in currencyMetadataVersion; mismatches are rejected."
+    },
+    "currencyMetadataVersion": {
+      "const": "six-list-one-2026-09-17-subset-v1",
+      "description": "Pinned application currency metadata snapshot. Persist this exact version for reproducible cost calculations."
     }
   },
-  "description": "Versioned procurement rate for the initial direct Workload cost slice. Rate windows are start-inclusive and end-exclusive."
+  "description": "Versioned procurement rate for the initial direct Workload cost slice. Rate windows are start-inclusive and end-exclusive.",
+  "allOf": [
+    {
+      "oneOf": [
+        {
+          "properties": {
+            "currency": {
+              "const": "AED"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "AUD"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "BHD"
+            },
+            "currencyMinorUnit": {
+              "const": 3
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "BRL"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "CAD"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "CHF"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "CLF"
+            },
+            "currencyMinorUnit": {
+              "const": 4
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "CLP"
+            },
+            "currencyMinorUnit": {
+              "const": 0
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "CNY"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "CZK"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "DKK"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "EUR"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "GBP"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "HKD"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "INR"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "IQD"
+            },
+            "currencyMinorUnit": {
+              "const": 3
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "ISK"
+            },
+            "currencyMinorUnit": {
+              "const": 0
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "JOD"
+            },
+            "currencyMinorUnit": {
+              "const": 3
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "JPY"
+            },
+            "currencyMinorUnit": {
+              "const": 0
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "KRW"
+            },
+            "currencyMinorUnit": {
+              "const": 0
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "KWD"
+            },
+            "currencyMinorUnit": {
+              "const": 3
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "LYD"
+            },
+            "currencyMinorUnit": {
+              "const": 3
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "MXN"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "MYR"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "NOK"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "NZD"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "OMR"
+            },
+            "currencyMinorUnit": {
+              "const": 3
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "PHP"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "PLN"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "SAR"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "SEK"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "SGD"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "THB"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "TND"
+            },
+            "currencyMinorUnit": {
+              "const": 3
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "TWD"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "USD"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "VND"
+            },
+            "currencyMinorUnit": {
+              "const": 0
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "XAF"
+            },
+            "currencyMinorUnit": {
+              "const": 0
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "XOF"
+            },
+            "currencyMinorUnit": {
+              "const": 0
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "XPF"
+            },
+            "currencyMinorUnit": {
+              "const": 0
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "ZAR"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        }
+      ]
+    }
+  ]
 }
