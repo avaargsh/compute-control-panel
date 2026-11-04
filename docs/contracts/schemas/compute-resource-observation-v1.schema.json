@@ -1,5 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.compute-control-panel.dev/v1/compute-resource-observation-v1.schema.json",
   "title": "Compute Resource Observation v1",
   "type": "object",
   "required": [
