@@ -61,7 +61,7 @@ func validAllocationUsageEvidence(t *testing.T) (AllocationUsageEvidence, Eviden
 		GPUModel:              "H100",
 		GPUCount:              "2",
 		MeteringPolicyVersion: "allocation-evidence-v1",
-		Provider: ProviderUsageEvidence{
+		Provider:              ProviderUsageEvidence{
 			Operation: ComputeOperationUsageEvidence{
 				ID:                "compute-operation-1",
 				TenantID:          "tenant-1",
@@ -79,7 +79,7 @@ func validAllocationUsageEvidence(t *testing.T) (AllocationUsageEvidence, Eviden
 			ProfileID:   "profile-h100",
 			GPUModel:    "H100",
 			GPUCount:    2,
-			Binding: func() EvidenceRecord {
+			Binding:     func() EvidenceRecord {
 				record := evidenceRecord(t, "provider-binding", "provider", "provider-resource-uid-1", "2026-11-04T09:05:00Z", "2026-11-04T09:00:00Z")
 				record.ComputeOperationID = "compute-operation-1"
 				return record
@@ -123,9 +123,9 @@ func validAllocationUsageEvidence(t *testing.T) (AllocationUsageEvidence, Eviden
 		},
 	}
 	policy := EvidencePolicy{
-		Version:          "allocation-evidence-v1",
-		AsOf:             evidenceTime(t, "2026-11-04T12:10:00Z"),
-		MaximumClockSkew: 2 * time.Minute,
+		Version:                        "allocation-evidence-v1",
+		AsOf:                           evidenceTime(t, "2026-11-04T12:10:00Z"),
+		MaximumClockSkew:               2 * time.Minute,
 		TrustedSourceTimestampAdapters: map[string]bool{
 			"provider@v1":   true,
 			"kueue@v1":      true,
@@ -434,7 +434,7 @@ func TestDeriveUsageIntervalRequiresSuccessfulAllocationBoundOperation(t *testin
 
 func TestDeriveUsageIntervalRejectsProviderOperationScopeMismatch(t *testing.T) {
 	tests := []struct {
-		name string
+		name   string
 		mutate func(*ComputeOperationUsageEvidence)
 	}{
 		{name: "wrong tenant", mutate: func(op *ComputeOperationUsageEvidence) { op.TenantID = "tenant-other" }},
