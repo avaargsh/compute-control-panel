@@ -1,0 +1,53 @@
+{
+  "schemaVersion": "compute.economics.event-envelope.v1",
+  "eventId": "evt-usage-sample-001",
+  "eventType": "USAGE_SAMPLE_RECORDED",
+  "producer": {
+    "service": "compute-metering",
+    "version": "0.1.0"
+  },
+  "tenantId": "tenant-demo",
+  "aggregate": {
+    "type": "GPU_DEVICE",
+    "id": "provider-demo/device-uuid-001",
+    "version": 1
+  },
+  "occurredAt": "2026-11-01T09:15:00Z",
+  "emittedAt": "2026-11-01T09:15:02Z",
+  "payloadSchemaId": "https://raw.githubusercontent.com/avaargsh/compute-control-panel/main/schemas/compute-economics/usage-sample.schema.json",
+  "causationId": null,
+  "correlationId": "workload-demo",
+  "retentionClass": "RAW_TELEMETRY",
+  "payload": {
+    "schemaVersion": "compute.economics.usage-sample.v1",
+    "usageSampleId": "usage-sample-001",
+    "tenantId": "tenant-demo",
+    "projectId": "project-demo",
+    "workloadId": "workload-demo",
+    "allocationId": "allocation-demo",
+    "providerId": "provider-demo",
+    "poolId": "pool-h100",
+    "resource": {
+      "providerResourceUid": "provider-resource-uid-001",
+      "nodeUid": "node-001",
+      "deviceUuid": "device-uuid-001",
+      "partitionId": null
+    },
+    "gpuModel": "H100",
+    "metricName": "GPU_COMPUTE_UTILIZATION",
+    "metricValue": "73.5",
+    "unit": "PERCENT",
+    "aggregation": "GAUGE",
+    "samplePeriodMs": 1000,
+    "observedAt": "2026-11-01T09:15:00Z",
+    "collectedAt": "2026-11-01T09:15:01Z",
+    "source": {
+      "adapter": "nvidia-dcgm",
+      "adapterVersion": "0.1.0",
+      "sourceMetricName": "DCGM_FI_DEV_GPU_UTIL",
+      "rawEvidenceRef": "provider-metrics://sample-001"
+    },
+    "quality": "VALID",
+    "retentionClass": "RAW_TELEMETRY"
+  }
+}
