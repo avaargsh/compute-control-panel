@@ -352,3 +352,47 @@ func TestReplayProducesIdenticalCostEntries(t *testing.T) {
 		}
 	}
 }
+
+
+func TestDeviceBoundUsageRequiresTrustedEvidenceIdentity(t *testing.T) {
+	usage, rates := goldenInputs(t)
+	usage.AttributionMethod = "DEVICE_BINDING"
+	if _, err := Calculate(usage, rates); !errors.Is(err, ErrInvalidUsage) {
+		t.Fatalf("device-bound UsageInterval without evidence identity error = %v, want ErrInvalidUsage", err)
+	}
+
+	usage.EvidenceSetID = "evidence-set-001"
+	usage.EvidenceDigest = "sha256:" + strings.Repeat("a", 64)
+	usage.CapabilityProfileID = "capability-profile-h100-v1"
+	got, err := Calculate(usage, rates)
+	if err != nil {
+		t.Fatalf("complete evidence identity rejected: %v", err)
+	}
+	if got.Status != StatusFinal || len(got.Segments) != 2 {
+		t.Fatalf("unexpected calculation for evidence-bound UsageInterval: %+v", got)
+	}
+}
+
+func TestCalculationDigestBindsEvidenceIdentity(t *testing.T) {
+	usage, rates := goldenInputs(t)
+	usage.AttributionMethod = "DEVICE_BINDING"
+	usage.EvidenceSetID = "evidence-set-001"
+	usage.EvidenceDigest = "sha256:" + strings.Repeat("a", 64)
+	usage.CapabilityProfileID = "capability-profile-h100-v1"
+	start := usage.Start.UTC().Format(time.RFC3339Nano)
+	end := usage.End.UTC().Format(time.RFC3339Nano)
+
+	first, err := calculationDigest(usage, rates[0], start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := usage
+	changed.EvidenceDigest = "sha256:" + strings.Repeat("b", 64)
+	second, err := calculationDigest(changed, rates[0], start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Fatal("changing E1 evidence digest did not change cost calculation input digest")
+	}
+}
