@@ -25,28 +25,6 @@ func (r *testWorkloadIdentityResolver) ResolveWorkloadPrincipal(_ context.Contex
 	return r.principal, r.err
 }
 
-func verifiedSPIFFERequest(t *testing.T, identities ...string) *httptest.ResponseRecorder {
-	t.Helper()
-	uris := make([]*url.URL, 0, len(identities))
-	for _, identity := range identities {
-		parsed, err := url.Parse(identity)
-		if err != nil {
-			t.Fatal(err)
-		}
-		uris = append(uris, parsed)
-	}
-	leaf := &x509.Certificate{Raw: []byte("verified-leaf"), URIs: uris}
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest("GET", "/test", nil)
-	request.TLS = &tls.ConnectionState{
-		PeerCertificates: []*x509.Certificate{leaf},
-		VerifiedChains:   [][]*x509.Certificate{{leaf}},
-	}
-	_ = recorder
-	_ = request
-	return recorder
-}
-
 func TestNewSPIFFEWorkloadAuthenticatorRequiresTrustDomainAndResolver(t *testing.T) {
 	if _, err := NewSPIFFEWorkloadAuthenticator("", &testWorkloadIdentityResolver{}); err == nil {
 		t.Fatal("empty trust domain must fail")
