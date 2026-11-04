@@ -282,6 +282,7 @@ func TestPersistUsageEvidenceSetRejectsIncompleteOrForgedSourceFacts(t *testing.
 			p.Evidence.Device.Release.ObservationID = p.Evidence.Device.Assignment.ObservationID
 		}},
 		{"wrong Provider authority", func(p *PersistUsageEvidenceParams) { p.Evidence.Provider.Binding.Source = "kubernetes" }},
+		{"missing trusted policy version", func(p *PersistUsageEvidenceParams) { p.Policy.Version = "" }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
