@@ -243,6 +243,15 @@ func TestFakeProviderRejectsStaleGenerationMutation(t *testing.T) {
 		t.Fatalf("new generation UPDATE rejected: %v", err)
 	}
 
+	// A stale CREATE receipt is historical, not proof that the current
+	// generation still owns a live resource. Otherwise stale-generation
+	// compensation could delete the newer generation's target.
+	historical, err := fake.Inspect(ctx, create)
+	if err != nil || historical.Result != operation.ObservationConflict ||
+		historical.ReasonCode != "RESOURCE_GENERATION_SUPERSEDED" {
+		t.Fatalf("historical CREATE falsely reported current resource: %+v %v", historical, err)
+	}
+
 	for _, kind := range []operation.Kind{operation.Update, operation.Delete} {
 		t.Run(string(kind), func(t *testing.T) {
 			stale := current
