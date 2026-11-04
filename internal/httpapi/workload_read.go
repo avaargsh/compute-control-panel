@@ -36,7 +36,7 @@ type workloadReadResponse struct {
 	Workload         workloadReadWorkloadResponse     `json:"workload"`
 	Allocations      []workloadReadAllocationResponse `json:"allocations"`
 	Operations       []workloadReadOperationResponse  `json:"operations"`
-	HistoryTruncated bool                              `json:"history_truncated"`
+	HistoryTruncated bool                             `json:"history_truncated"`
 }
 
 type workloadReadWorkloadResponse struct {
