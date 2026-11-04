@@ -3,8 +3,8 @@
   "info": {
     "title": "Compute Control Plane API",
     "version": "1.0.0",
-    "summary": "Proposed provider-neutral compute workload and operation API.",
-    "description": "Contract proposal only. The current repository does not yet expose the write/read Workload API, authenticated tenant authorization, or production Provider/Kueue/DRA adapters. POST create must use Repository.AcceptWorkload; its initial Allocation is PENDING and is not readiness evidence."
+    "summary": "Proposed provider-neutral API contract; Workload POST/GET handlers implemented but not mounted by default.",
+    "description": "POST /api/v1/workloads and GET /api/v1/workloads/{workload_id} have dependency-injected handlers on main. They are not mounted by the default service entry point, nor production-enabled. The other paths remain proposals. Deployment must provision and enforce verified service mTLS identity, Tenant/Project authorization, Guard policy, DB isolation and Provider selection/Inspect. A 202 means durable Workload acceptance with PENDING Allocation only, never resource readiness."
   },
   "servers": [
     {
@@ -30,7 +30,7 @@
         "description": "A 202 is returned only after Workload, initial PENDING Allocation, latest-allocation projection, Allocation-bound CREATE Operation and both dispatchable Outbox events commit in one database transaction. Provider dispatch is asynchronous.",
         "security": [
           {
-            "ServiceBearerAuth": []
+            "ServiceMTLS": []
           }
         ],
         "parameters": [
@@ -87,7 +87,8 @@
           "422": {
             "$ref": "#/components/responses/UnprocessableEntity"
           }
-        }
+        },
+        "x-implementation-status": "handler-unmounted"
       },
       "get": {
         "tags": [
@@ -97,7 +98,7 @@
         "summary": "List tenant-scoped workloads.",
         "security": [
           {
-            "ServiceBearerAuth": []
+            "ServiceMTLS": []
           }
         ],
         "parameters": [
@@ -153,7 +154,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           }
-        }
+        },
+        "x-implementation-status": "proposed",
+        "description": "Proposed only; no public HTTP handler is implemented on current main."
       }
     },
     "/api/v1/workloads/{workload_id}": {
@@ -176,16 +179,16 @@
         "summary": "Read a tenant-scoped workload.",
         "security": [
           {
-            "ServiceBearerAuth": []
+            "ServiceMTLS": []
           }
         ],
         "responses": {
           "200": {
-            "description": "Workload desired state and observed projection.",
+            "description": "Authenticated Tenant/Project-scoped Repeatable Read snapshot: Workload plus bounded chronological Allocation and Operation histories (100 per collection).",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Workload"
+                  "$ref": "#/components/schemas/WorkloadDetails"
                 }
               }
             }
@@ -193,10 +196,14 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-implementation-status": "handler-unmounted"
       },
       "delete": {
         "tags": [
@@ -204,10 +211,10 @@
         ],
         "operationId": "requestWorkloadDeletion",
         "summary": "Persist delete intent asynchronously.",
-        "description": "A 202 records DELETE_REQUESTED. It is not proof that provider resources or Kueue reservations have been released.",
+        "description": "A 202 records DELETE_REQUESTED. It is not proof that provider resources or Kueue reservations have been released. Proposed only; no public HTTP handler is implemented on current main.",
         "security": [
           {
-            "ServiceBearerAuth": []
+            "ServiceMTLS": []
           }
         ],
         "responses": {
@@ -245,7 +252,8 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-implementation-status": "proposed"
       }
     },
     "/api/v1/workloads/{workload_id}/allocations": {
@@ -268,7 +276,7 @@
         "summary": "List allocations associated with a workload.",
         "security": [
           {
-            "ServiceBearerAuth": []
+            "ServiceMTLS": []
           }
         ],
         "responses": {
@@ -300,7 +308,9 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-implementation-status": "proposed",
+        "description": "Proposed only; no public HTTP handler is implemented on current main."
       }
     },
     "/api/v1/compute-operations/{compute_operation_id}": {
@@ -323,7 +333,7 @@
         "summary": "Read provider mutation intent and reconciliation evidence references.",
         "security": [
           {
-            "ServiceBearerAuth": []
+            "ServiceMTLS": []
           }
         ],
         "responses": {
@@ -343,17 +353,17 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
-        }
+        },
+        "x-implementation-status": "proposed",
+        "description": "Proposed only; no public HTTP handler is implemented on current main."
       }
     }
   },
   "components": {
     "securitySchemes": {
-      "ServiceBearerAuth": {
-        "type": "http",
-        "scheme": "bearer",
-        "bearerFormat": "JWT",
-        "description": "Service workload identity. Tenant and project scope are derived from verified claims, never trusted from request body."
+      "ServiceMTLS": {
+        "type": "mutualTLS",
+        "description": "Verified client certificate chain and SPIFFE URI SAN under a configured trust domain, resolved server-side to a Tenant/Service/Project principal. The handler is pluggable, but the implemented authenticator is SPIFFE mTLS; no JWT/Bearer adapter is present."
       }
     },
     "schemas": {
@@ -377,6 +387,9 @@
       },
       "EventEnvelope": {
         "$ref": "./schemas/compute-event-envelope-v1.schema.json"
+      },
+      "WorkloadDetails": {
+        "$ref": "./schemas/compute-workload-details-v1.schema.json"
       }
     },
     "responses": {
