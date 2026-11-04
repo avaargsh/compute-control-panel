@@ -121,7 +121,7 @@ For the first auditable workload-cost slice:
 
 For v1 GPU-hour rates, the quantity is derived from the exact accepted Allocation interval and positive whole-GPU device count. Fractional device and MIG quantities require a later profile-scoped contract. The rate defines its own unit and basis; the system must reject incompatible units.
 
-**Important:** the initial cost basis is allocated/provisioned capacity time, not GPU active time. A Provider may charge for reserved capacity even while a workload is idle. Active time is an operational efficiency metric and must not silently discount the Provider's actual charge.
+**Important:** the initial cost basis is accepted Allocation GPU-device time, not GPU active time. A Provider may charge for reserved capacity even while a workload is idle; reserved capacity without a Workload Allocation remains a separate capacity/overhead cost. Active time is an operational efficiency metric and must not silently discount the Provider's actual charge.
 
 ### ProviderRateCard
 
