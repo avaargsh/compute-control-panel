@@ -215,6 +215,9 @@ func TestPersistUsageEvidenceSetIsImmutableIdempotentAndTenantScoped(t *testing.
 		params.Evidence.TenantID, first.EvidenceSetID); err == nil {
 		t.Fatal("immutable evidence accepted DELETE")
 	}
+	if _, err := db.ExecContext(ctx, "TRUNCATE compute_allocation_usage_evidence_sets"); err == nil {
+		t.Fatal("immutable evidence accepted TRUNCATE")
+	}
 }
 
 func TestPersistUsageEvidenceSetConcurrentReplayHasOneWinner(t *testing.T) {
