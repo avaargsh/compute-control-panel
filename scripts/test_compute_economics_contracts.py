@@ -236,6 +236,28 @@ class ComputeEconomicsContractTests(unittest.TestCase):
             with self.subTest(entry=entry["costEntryId"]):
                 self.assert_valid("workload_cost_entry", entry)
 
+
+    def test_provider_rate_card_binds_minor_units_to_versioned_currency_registry(self) -> None:
+        rate = dict(self.cost_fixture["rateCards"][0])
+        version = "six-list-one-2026-09-17-subset-v1"
+        rate["currencyMetadataVersion"] = version
+
+        # Known CNY precision is two; JPY has zero; the subset is explicit.
+        rate["currency"] = "CNY"
+        rate["currencyMinorUnit"] = 2
+        self.assert_valid("provider_rate_card", rate)
+
+        for currency, minor_unit in (("CNY", 3), ("JPY", 2), ("ZZZ", 2), ("XXX", 0)):
+            with self.subTest(currency=currency, minor_unit=minor_unit):
+                invalid = dict(rate)
+                invalid["currency"] = currency
+                invalid["currencyMinorUnit"] = minor_unit
+                self.assertFalse(self.validators["provider_rate_card"].is_valid(invalid))
+
+        unknown_snapshot = dict(rate)
+        unknown_snapshot["currencyMetadataVersion"] = "unregistered-snapshot-v9"
+        self.assertFalse(self.validators["provider_rate_card"].is_valid(unknown_snapshot))
+
     def test_rate_boundary_fixture_prices_six_gpu_hours_at_sixty_six_cny(self) -> None:
         segments = calculate_direct_cost(
             self.cost_fixture["usageInterval"], self.cost_fixture["rateCards"]
