@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from jsonschema import Draft202012Validator, FormatChecker
+from jsonschema import Draft202012Validator, FormatChecker, ValidationError
 from referencing import Registry, Resource
 
 CONTRACT_ROOT = Path(__file__).resolve().parents[1]
@@ -69,7 +69,7 @@ class ContractSchemasTest(unittest.TestCase):
             {"service": "provider", "resource_type": "job", "resource_id": "job-001"},
         ):
             with self.subTest(owner=owner):
-                with self.assertRaises(Exception):
+                with self.assertRaises(ValidationError):
                     validate.validate(owner)
 
     def test_workload_create_accepts_exactly_one_resource_mode(self) -> None:
