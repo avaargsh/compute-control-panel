@@ -27,6 +27,7 @@ func goldenInputs(t *testing.T) (UsageInterval, []ProviderRateCard) {
 		ProviderID: "provider-demo",
 		PoolID: "pool-h100",
 		ProfileID: "gpu-h100-80gb",
+		ResourceClass: "GPU",
 		GPUModel: "H100",
 		Start: mustTime(t, "2026-11-01T09:00:00Z"),
 		End: mustTime(t, "2026-11-01T12:00:00Z"),

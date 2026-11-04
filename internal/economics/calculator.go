@@ -440,8 +440,7 @@ func parsePositiveDecimal(value string) (*big.Rat, error) {
 }
 
 func canonicalDecimal(value string) (string, error) {
-	rational, err := parsePositiveDecimal(value)
-	if err != nil {
+	if _, err := parsePositiveDecimal(value); err != nil {
 		return "", err
 	}
 	parts := strings.Split(value, ".")
