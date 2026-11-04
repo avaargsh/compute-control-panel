@@ -67,6 +67,9 @@ type UsageInterval struct {
 	Quality               string
 	AttributionMethod     string
 	SourceCoverage        float64
+	EvidenceSetID         string
+	EvidenceDigest        string
+	CapabilityProfileID   string
 }
 
 type ProviderRateCard struct {
@@ -280,6 +283,10 @@ func validateUsage(usage UsageInterval) error {
 	if len(usage.SourceEventIDs) == 0 {
 		return fmt.Errorf("%w: at least one source event is required", ErrInvalidUsage)
 	}
+	hasEvidenceProvenance := usage.EvidenceSetID != "" || usage.EvidenceDigest != "" || usage.CapabilityProfileID != ""
+	if hasEvidenceProvenance && (!nonBlank(usage.EvidenceSetID, usage.EvidenceDigest, usage.CapabilityProfileID) || !isSHA256Digest(usage.EvidenceDigest)) {
+		return fmt.Errorf("%w: incomplete evidence-set provenance", ErrInvalidUsage)
+	}
 	seen := make(map[string]struct{}, len(usage.SourceEventIDs))
 	for _, id := range usage.SourceEventIDs {
 		if strings.TrimSpace(id) == "" {
@@ -352,6 +359,9 @@ func calculationDigest(usage UsageInterval, rate ProviderRateCard, start, end st
 		AttributionMethod       string   `json:"attributionMethod"`
 		SourceEventIDs          []string `json:"sourceEventIds"`
 		SourceCoverage          string   `json:"sourceCoverage"`
+		EvidenceSetID           string   `json:"evidenceSetId"`
+		EvidenceDigest          string   `json:"evidenceDigest"`
+		CapabilityProfileID     string   `json:"capabilityProfileId"`
 		RateCardID              string   `json:"rateCardId"`
 		RateCardVersion         int      `json:"rateCardVersion"`
 		RateSourceRef           string   `json:"rateSourceRef"`
@@ -390,6 +400,9 @@ func calculationDigest(usage UsageInterval, rate ProviderRateCard, start, end st
 		AttributionMethod:       usage.AttributionMethod,
 		SourceEventIDs:          sourceIDs,
 		SourceCoverage:          strconv.FormatFloat(usage.SourceCoverage, 'g', -1, 64),
+		EvidenceSetID:           usage.EvidenceSetID,
+		EvidenceDigest:          usage.EvidenceDigest,
+		CapabilityProfileID:     usage.CapabilityProfileID,
 		RateCardID:              rate.RateCardID,
 		RateCardVersion:         rate.Version,
 		RateSourceRef:           rate.SourceRef,
