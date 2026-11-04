@@ -47,6 +47,7 @@ type WorkloadProviderSelector interface {
 }
 
 type WorkloadAcceptanceRepository interface {
+	GetAcceptanceByIdempotency(context.Context, postgres.AcceptanceLookup) (postgres.WorkloadAcceptance, bool, error)
 	AcceptWorkload(context.Context, postgres.AcceptWorkloadParams) (postgres.WorkloadAcceptance, bool, error)
 }
 
@@ -196,9 +197,28 @@ func (h *WorkloadCreateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	}
 
 	// Authorization (including Guard Permit/action digest binding) precedes
-	// provider resolution so an unauthorized caller cannot enumerate capacity.
+	// either replay lookup or provider resolution.
 	if err := h.deps.Authorizer.AuthorizeCreate(r.Context(), principal, request, requestDigest); err != nil {
 		writeWorkloadAPIError(w, http.StatusForbidden, "WORKLOAD_CREATE_DENIED", "The requested Workload is not authorized")
+		return
+	}
+
+	lookup, err := buildAcceptanceLookup(principal, request, requestDigest, idempotencyKey)
+	if err != nil {
+		writeWorkloadAPIError(w, http.StatusInternalServerError, "WORKLOAD_ACCEPTANCE_FAILED", "The Workload acceptance lookup could not be prepared")
+		return
+	}
+	existing, found, err := h.deps.Repository.GetAcceptanceByIdempotency(r.Context(), lookup)
+	if err != nil {
+		if errors.Is(err, postgres.ErrIdempotencyConflict) {
+			writeWorkloadAPIError(w, http.StatusConflict, "IDEMPOTENCY_KEY_REUSED", "The Idempotency-Key is already bound to a different Workload request")
+		} else {
+			writeWorkloadAPIError(w, http.StatusInternalServerError, "WORKLOAD_ACCEPTANCE_FAILED", "The Workload acceptance lookup could not be completed")
+		}
+		return
+	}
+	if found {
+		writeWorkloadAccepted(w, existing)
 		return
 	}
 
@@ -221,22 +241,67 @@ func (h *WorkloadCreateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	_ = created // The response shape is intentionally identical for a first accept and an exact idempotent replay.
+	writeWorkloadAccepted(w, acceptance)
+}
+
+func buildAcceptanceLookup(principal WorkloadPrincipal, request WorkloadCreateRequest, requestDigest, idempotencyKey string) (postgres.AcceptanceLookup, error) {
+	operationDigest, err := workloadOperationIntentDigest(requestDigest)
+	if err != nil {
+		return postgres.AcceptanceLookup{}, err
+	}
+	profileID, profileRevision := "", ""
+	if request.ComputeProfileRef != nil {
+		profileID = request.ComputeProfileRef.ID
+		profileRevision = request.ComputeProfileRef.Revision
+	}
+	return postgres.AcceptanceLookup{
+		TenantID: principal.TenantID,
+		IdempotencyKey: idempotencyKey,
+		RequestDigest: requestDigest,
+		ProjectID: request.ProjectID,
+		OwnerService: request.OwnerRef.Service,
+		OwnerResourceType: request.OwnerRef.ResourceType,
+		OwnerResourceID: request.OwnerRef.ResourceID,
+		ComputeProfileID: profileID,
+		ComputeProfileRevision: profileRevision,
+		OperationIdempotencyKey: stableOperationIdempotencyKey(principal.TenantID, idempotencyKey),
+		OperationRequestDigest: operationDigest,
+	}, nil
+}
+
+func workloadOperationIntentDigest(requestDigest string) (string, error) {
+	intent, err := json.Marshal(struct {
+		RequestDigest string `json:"request_digest"`
+		Generation    uint64 `json:"generation"`
+		Kind          string `json:"operation_kind"`
+	}{
+		RequestDigest: requestDigest,
+		Generation: 1,
+		Kind: string(operation.Create),
+	})
+	if err != nil {
+		return "", err
+	}
+	return postgres.DigestRequest(intent)
+}
+
+func writeWorkloadAccepted(w http.ResponseWriter, acceptance postgres.WorkloadAcceptance) {
 	statusURL := "/api/v1/workloads/" + acceptance.Workload.WorkloadID
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Location", statusURL)
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusAccepted)
 	_ = json.NewEncoder(w).Encode(workloadAcceptedResponse{
-		WorkloadID:         acceptance.Workload.WorkloadID,
-		DesiredGeneration:  acceptance.Workload.DesiredGeneration,
-		DesiredState:       acceptance.Workload.DesiredState,
-		ObservedPhase:      acceptance.Workload.ObservedPhase,
-		AllocationID:       acceptance.Allocation.AllocationID,
-		AllocationPhase:    acceptance.Allocation.Phase,
+		WorkloadID: acceptance.Workload.WorkloadID,
+		DesiredGeneration: acceptance.Workload.DesiredGeneration,
+		DesiredState: acceptance.Workload.DesiredState,
+		ObservedPhase: acceptance.Workload.ObservedPhase,
+		AllocationID: acceptance.Allocation.AllocationID,
+		AllocationPhase: acceptance.Allocation.Phase,
 		ComputeOperationID: acceptance.Operation.ID,
-		StatusURL:          statusURL,
+		StatusURL: statusURL,
 	})
-	_ = created // The response shape is intentionally identical for a first accept and an exact idempotent replay.
 }
 
 func (h *WorkloadCreateHandler) accept(
@@ -274,23 +339,7 @@ func (h *WorkloadCreateHandler) accept(
 	}
 
 	operationKey := stableOperationIdempotencyKey(principal.TenantID, idempotencyKey)
-	providerIntent, err := json.Marshal(struct {
-		RequestDigest string `json:"request_digest"`
-		ProviderID    string `json:"provider_id"`
-		PoolID        string `json:"pool_id"`
-		Generation    uint64 `json:"generation"`
-		Kind          string `json:"operation_kind"`
-	}{
-		RequestDigest: requestDigest,
-		ProviderID:    selection.ProviderID,
-		PoolID:        selection.PoolID,
-		Generation:    1,
-		Kind:          string(operation.Create),
-	})
-	if err != nil {
-		return postgres.WorkloadAcceptance{}, false, err
-	}
-	providerDigest, err := postgres.DigestRequest(providerIntent)
+	providerDigest, err := workloadOperationIntentDigest(requestDigest)
 	if err != nil {
 		return postgres.WorkloadAcceptance{}, false, err
 	}
