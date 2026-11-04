@@ -181,8 +181,8 @@ func (h *WorkloadCreateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		writeWorkloadAPIError(w, http.StatusBadRequest, "INVALID_BODY", "Request body is invalid or exceeds the size limit")
 		return
 	}
-	if err := rejectDuplicateJSONKeys(body); err != nil {
-		writeWorkloadAPIError(w, http.StatusBadRequest, "INVALID_JSON", "Request JSON is malformed or contains duplicate object keys")
+	if err := validateWorkloadJSONTokens(body); err != nil {
+		writeWorkloadAPIError(w, http.StatusBadRequest, "INVALID_JSON", "Request JSON is malformed, contains duplicate object keys or an unsupported null value")
 		return
 	}
 
@@ -479,7 +479,11 @@ func validateWorkloadCreateRequest(request WorkloadCreateRequest) error {
 	return nil
 }
 
-func rejectDuplicateJSONKeys(body []byte) error {
+// validateWorkloadJSONTokens enforces JSON-level Workload v1 invariants
+// before the typed decoder collapses explicit nulls into zero/nil values.
+// The v1 JSON Schema admits omission of optional properties but no null
+// values anywhere in the request tree.
+func validateWorkloadJSONTokens(body []byte) error {
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
 	if err := consumeJSONValue(decoder); err != nil {
@@ -498,6 +502,9 @@ func consumeJSONValue(decoder *json.Decoder) error {
 	token, err := decoder.Token()
 	if err != nil {
 		return err
+	}
+	if token == nil {
+		return errors.New("explicit JSON null is not valid for Workload v1")
 	}
 	delim, isDelim := token.(json.Delim)
 	if !isDelim {
