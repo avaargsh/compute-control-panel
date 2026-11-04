@@ -82,4 +82,13 @@ func TestApplyIsIdempotentAndDetectsDrift(t *testing.T) {
 	if _, err := Apply(ctx, db, ms[:1]); !errors.Is(err, ErrMissingMigration) {
 		t.Fatalf("want missing migration, got %v", err)
 	}
+
+	// The migration ledger records both the SQL checksum and source filename.
+	// Reusing the same version/checksum under a different name must fail closed.
+	if _, err := db.ExecContext(ctx, "UPDATE schema_migrations SET name = '0001_renamed.sql' WHERE version = 1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Apply(ctx, db, ms); err == nil {
+		t.Fatal("migration name drift was silently accepted")
+	}
 }
