@@ -108,6 +108,13 @@ type Observation struct {
 	ReasonCode      string
 }
 
+// ValidLeaseTTL bounds durable operation leases to a PostgreSQL-safe interval.
+// Sub-millisecond leases can collapse at database timestamp precision, while
+// unbounded leases prevent inspect-first failover after worker crashes.
+func ValidLeaseTTL(ttl time.Duration) bool {
+	return ttl >= time.Millisecond && ttl <= 24*time.Hour
+}
+
 func validDigest(value string) bool {
 	if !strings.HasPrefix(value, "sha256:") || len(value) != len("sha256:")+64 {
 		return false
@@ -244,7 +251,7 @@ func (o Operation) Claim(expectedVersion uint64, owner string, now time.Time, tt
 	if o.Status != Pending {
 		return o, ErrTransition
 	}
-	if strings.TrimSpace(owner) == "" || now.IsZero() || ttl <= 0 {
+	if strings.TrimSpace(owner) == "" || now.IsZero() || !ValidLeaseTTL(ttl) {
 		return o, ErrInvalid
 	}
 	o.Status = Leased
@@ -322,7 +329,7 @@ func (o Operation) BeginReconciliation(expectedVersion uint64, currentOwner stri
 	if err := o.checkVersion(expectedVersion); err != nil {
 		return o, err
 	}
-	if strings.TrimSpace(newOwner) == "" || now.IsZero() || ttl <= 0 {
+	if strings.TrimSpace(newOwner) == "" || now.IsZero() || !ValidLeaseTTL(ttl) {
 		return o, ErrInvalid
 	}
 

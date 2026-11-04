@@ -221,3 +221,25 @@ func TestExpiredInspectionLeaseCanReconcileWithNewFence(t *testing.T) {
 		t.Fatalf("expired recovery must fence old worker and inspect: %+v %v", next, err)
 	}
 }
+
+// Invalid lease TTLs must fail before the worker reads or fences UNKNOWN.
+// In particular a sub-millisecond lease could expire on PostgreSQL's
+// timestamp precision boundary before Inspect can persist its result.
+func TestRecoverUnknownRejectsUnsafeLeaseDurationWithoutClaim(t *testing.T) {
+	_, repo, original := setupUnknown(t)
+	worker, err := recovery.NewWorker(repo, adapterFor(provider.NewFakeProvider()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ttl := range []time.Duration{time.Nanosecond, time.Millisecond - time.Nanosecond, 24*time.Hour + time.Nanosecond} {
+		_, err := worker.RecoverUnknown(context.Background(), original.TenantID, original.ID, "reconciler", ttl)
+		if !errors.Is(err, operation.ErrInvalid) {
+			t.Fatalf("invalid recovery TTL %s was accepted: %v", ttl, err)
+		}
+		current, err := repo.GetOperation(context.Background(), original.TenantID, original.ID)
+		if err != nil || current.Status != operation.Unknown ||
+			current.Version != original.Version || current.FenceToken != original.FenceToken {
+			t.Fatalf("invalid TTL consumed recovery lease: ttl=%s, op=%+v, err=%v", ttl, current, err)
+		}
+	}
+}

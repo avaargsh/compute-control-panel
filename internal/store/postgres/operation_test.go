@@ -217,3 +217,53 @@ func TestOldGenerationOperationCannotDispatchButCanReplay(t *testing.T) {
 		t.Fatalf("stale generation operation was dispatchable: %v", err)
 	}
 }
+
+// Database-backed Claim and BeginReconciliation must reject lease durations
+// that cannot survive PostgreSQL timestamp precision or exceed the recovery
+// max, without changing versions, fences or state.
+func TestDurableOperationRejectsInvalidLeaseDurations(t *testing.T) {
+	db := openIntegrationDB(t)
+	repo, err := NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	initial := operationFixture(t, repo, ctx, "tenant-lease-ttl-"+randomSuffix(t))
+	if _, created, err := repo.CreateOperation(ctx, initial, "event-"+randomSuffix(t), "corr-lease"); err != nil || !created {
+		t.Fatalf("create operation: created=%t err=%v", created, err)
+	}
+	invalid := []time.Duration{time.Nanosecond, time.Millisecond - time.Nanosecond, 24*time.Hour + time.Nanosecond}
+	for _, ttl := range invalid {
+		_, err := repo.ClaimOperation(ctx, initial.TenantID, initial.ID, initial.Version, "worker", ttl)
+		if !errors.Is(err, operation.ErrInvalid) {
+			t.Fatalf("invalid claim TTL %s accepted: %v", ttl, err)
+		}
+		state, err := repo.GetOperation(ctx, initial.TenantID, initial.ID)
+		if err != nil || state.Status != operation.Pending || state.Version != initial.Version || state.FenceToken != initial.FenceToken {
+			t.Fatalf("invalid claim TTL changed durable state: %+v, err=%v", state, err)
+		}
+	}
+	claimed, err := repo.ClaimOperation(ctx, initial.TenantID, initial.ID, initial.Version, "worker", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := repo.StartOperation(ctx, initial.TenantID, initial.ID, claimed.Version, "worker", claimed.FenceToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unknown, err := repo.MarkOperationUnknown(ctx, initial.TenantID, initial.ID, started.Version, "worker", started.FenceToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ttl := range invalid {
+		_, err := repo.BeginOperationReconciliation(ctx, unknown.TenantID, unknown.ID,
+			unknown.Version, "", 0, "reconciler", ttl)
+		if !errors.Is(err, operation.ErrInvalid) {
+			t.Fatalf("invalid reconciliation TTL %s accepted: %v", ttl, err)
+		}
+		state, err := repo.GetOperation(ctx, unknown.TenantID, unknown.ID)
+		if err != nil || state.Status != operation.Unknown || state.Version != unknown.Version || state.FenceToken != unknown.FenceToken {
+			t.Fatalf("invalid reconciliation TTL changed durable UNKNOWN: %+v, err=%v", state, err)
+		}
+	}
+}

@@ -268,6 +268,9 @@ func nullableTime(t time.Time) any {
 }
 
 func (r *Repository) ClaimOperation(ctx context.Context, tenantID, operationID string, expectedVersion uint64, owner string, ttl time.Duration) (operation.Operation, error) {
+	if !operation.ValidLeaseTTL(ttl) {
+		return operation.Operation{}, operation.ErrInvalid
+	}
 	return r.mutateOperation(ctx, tenantID, operationID, expectedVersion, func(o operation.Operation, now time.Time) (operation.Operation, error) {
 		return o.Claim(expectedVersion, owner, now, ttl)
 	})
@@ -293,6 +296,9 @@ func (r *Repository) ExpireOperationLease(ctx context.Context, tenantID, operati
 
 func (r *Repository) BeginOperationReconciliation(ctx context.Context, tenantID, operationID string, expectedVersion uint64,
 	currentOwner string, currentToken uint64, newOwner string, ttl time.Duration) (operation.Operation, error) {
+	if !operation.ValidLeaseTTL(ttl) {
+		return operation.Operation{}, operation.ErrInvalid
+	}
 	return r.mutateOperation(ctx, tenantID, operationID, expectedVersion, func(o operation.Operation, now time.Time) (operation.Operation, error) {
 		return o.BeginReconciliation(expectedVersion, currentOwner, currentToken, newOwner, now, ttl)
 	})
