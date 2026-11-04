@@ -61,7 +61,7 @@ func TestSPIFFEWorkloadAuthenticatorRejectsMissingAmbiguousAndUntrustedIDs(t *te
 	}
 	cases := []struct {
 		name string
-		ids []string
+		ids  []string
 	}{
 		{name: "no identity"},
 		{name: "wrong trust domain", ids: []string{"spiffe://other.example/ns/agent/sa/runtime"}},
