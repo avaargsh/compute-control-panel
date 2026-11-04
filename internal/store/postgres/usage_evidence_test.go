@@ -51,7 +51,7 @@ func typedUsageEvidence(a WorkloadAcceptance) PersistUsageEvidenceParams {
 	}
 	e.Provider = economics.ProviderUsageEvidence{
 		Operation: economics.ComputeOperationUsageEvidence{
-			ID: a.Operation.ID, TenantID:      a.Workload.TenantID, ProjectID: a.Workload.ProjectID,
+			ID: a.Operation.ID, TenantID: a.Workload.TenantID, ProjectID: a.Workload.ProjectID,
 			WorkloadID: a.Workload.WorkloadID, AllocationID: id,
 			DesiredGeneration: a.Allocation.DesiredGeneration, ProviderID: a.Allocation.ProviderID,
 			Status: "SUCCEEDED", RequestDigest: a.Operation.RequestDigest,
@@ -278,7 +278,7 @@ func TestPersistUsageEvidenceSetRejectsIncompleteOrForgedSourceFacts(t *testing.
 	a := WorkloadAcceptance{
 		Workload:   Workload{TenantID: "tenant-1", ProjectID: "project-1", WorkloadID: "workload-1"},
 		Allocation: Allocation{AllocationID: "allocation-1", DesiredGeneration: 7, ProviderID: "provider-1", PoolID: "pool-h100"},
-		Operation: operation.Operation{ID: "compute-operation-1", RequestDigest: "sha256:" + strings.Repeat("d", 64)},
+		Operation:  operation.Operation{ID: "compute-operation-1", RequestDigest: "sha256:" + strings.Repeat("d", 64)},
 	}
 	valid := typedUsageEvidence(a)
 	cases := []struct {
@@ -317,7 +317,6 @@ func TestPersistUsageEvidenceSetRejectsIncompleteOrForgedSourceFacts(t *testing.
 		})
 	}
 }
-
 
 func TestPersistUsageEvidenceSetRequiresExactProviderRequestDigest(t *testing.T) {
 	db := openIntegrationDB(t)
