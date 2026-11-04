@@ -12,6 +12,10 @@ import (
 )
 
 func setupReconciliation(t *testing.T) (*Repository, *sql.DB, context.Context, operation.Operation) {
+	return setupReconciliationForKind(t, operation.Create)
+}
+
+func setupReconciliationForKind(t *testing.T, kind operation.Kind) (*Repository, *sql.DB, context.Context, operation.Operation) {
 	t.Helper()
 	db := openIntegrationDB(t)
 	repo, err := NewRepository(db)
@@ -20,6 +24,11 @@ func setupReconciliation(t *testing.T) (*Repository, *sql.DB, context.Context, o
 	}
 	ctx := context.Background()
 	initial := operationFixture(t, repo, ctx, "tenant-reconcile-"+randomSuffix(t))
+	initial.Kind = kind
+	if kind == operation.Delete {
+		initial.TargetResourceID = "resource-to-delete-" + randomSuffix(t)
+		initial.TargetResourceUID = "resource-uid-" + randomSuffix(t)
+	}
 	if _, _, err := repo.CreateOperation(ctx, initial, "event-initial-"+randomSuffix(t), "correlation-initial"); err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +55,7 @@ func trustedObservation(o operation.Operation, result operation.ObservationResul
 	obs := operation.Observation{
 		OperationID: o.ID, TenantID: o.TenantID, WorkloadID: o.WorkloadID,
 		ProviderID: o.ProviderID, DesiredGeneration: o.Generation, Result: result,
-		ResourceVersion: "provider-rv-1", ObservedAt: time.Now().Add(-time.Second),
+		ResourceVersion: "provider-rv-1", ObservedAt: time.Now().UTC(),
 	}
 	if result == operation.ResourcePresent {
 		obs.ResourceID = "job-" + o.ID
@@ -198,5 +207,105 @@ func TestReconcileRejectsPreLeaseNoEffectFinality(t *testing.T) {
 	var count int
 	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM compute_resource_observations WHERE observation_id=$1", evidence.ObservationID).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("stale evidence was appended: count=%d err=%v", count, err)
+	}
+}
+
+// TestReconcileRejectsStaleTerminalObservations ensures a provider result
+// collected before the current reconciliation claim cannot finalize an
+// ambiguous operation. Rejected evidence must leave the lease, operation,
+// observation table and outbox untouched; a fresh Inspect can still succeed.
+func TestReconcileRejectsStaleTerminalObservations(t *testing.T) {
+	cases := []struct {
+		name       string
+		result     operation.ObservationResult
+		wantStatus operation.Status
+	}{
+		{name: "resource present", result: operation.ResourcePresent, wantStatus: operation.Succeeded},
+		{name: "provider operation failed final", result: operation.OperationFailedFinal, wantStatus: operation.Failed},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, db, ctx, current := setupReconciliation(t)
+			var claimedAt time.Time
+			if err := db.QueryRowContext(ctx,
+				"SELECT updated_at FROM compute_operations WHERE tenant_id=$1 AND compute_operation_id=$2",
+				current.TenantID, current.ID).Scan(&claimedAt); err != nil {
+				t.Fatal(err)
+			}
+			observed := trustedObservation(current, tc.result)
+			if tc.result == operation.OperationFailedFinal {
+				observed.ErrorCode = "PROVIDER_OPERATION_FAILED"
+			}
+			observed.ObservedAt = claimedAt.Add(-time.Hour)
+			evidence := inspectionEvidence(current, observed)
+			if _, err := repo.ReconcileOperation(ctx, current.TenantID, current.ID, current.Version,
+				"reconciler", current.FenceToken, evidence); !errors.Is(err, operation.ErrObservation) {
+				t.Fatalf("pre-lease terminal provider evidence was accepted: %v", err)
+			}
+			persisted, err := repo.GetOperation(ctx, current.TenantID, current.ID)
+			if err != nil || persisted.Status != operation.Reconciling ||
+				persisted.Version != current.Version || persisted.FenceToken != current.FenceToken {
+				t.Fatalf("stale evidence mutated operation/lease: %+v, err=%v", persisted, err)
+			}
+			var observations, outbox int
+			if err := db.QueryRowContext(ctx, "SELECT count(*) FROM compute_resource_observations WHERE observation_id=$1",
+				evidence.ObservationID).Scan(&observations); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.QueryRowContext(ctx, "SELECT count(*) FROM compute_outbox_events WHERE event_id=$1",
+				evidence.EventID).Scan(&outbox); err != nil {
+				t.Fatal(err)
+			}
+			if observations != 0 || outbox != 0 {
+				t.Fatalf("rejected terminal evidence emitted durable side effects: observations=%d outbox=%d", observations, outbox)
+			}
+			evidence.Observation.ObservedAt = time.Now().UTC()
+			next, err := repo.ReconcileOperation(ctx, current.TenantID, current.ID, current.Version,
+				"reconciler", current.FenceToken, evidence)
+			if err != nil || next.Status != tc.wantStatus {
+				t.Fatalf("fresh provider result could not finalize existing claim: %+v, err=%v", next, err)
+			}
+		})
+	}
+}
+
+// The DELETE path must not certify the exact target UID as absent from an
+// inspection predating the latest reconciliation lease.
+func TestReconcileDeleteNeedsFreshExactUIDAbsence(t *testing.T) {
+	repo, db, ctx, current := setupReconciliationForKind(t, operation.Delete)
+	var claimedAt time.Time
+	if err := db.QueryRowContext(ctx,
+		"SELECT updated_at FROM compute_operations WHERE tenant_id=$1 AND compute_operation_id=$2",
+		current.TenantID, current.ID).Scan(&claimedAt); err != nil {
+		t.Fatal(err)
+	}
+	obs := trustedObservation(current, operation.TargetAbsent)
+	obs.TargetResourceID = current.TargetResourceID
+	obs.TargetResourceUID = current.TargetResourceUID
+	obs.ObservedAt = claimedAt.Add(-time.Hour)
+	evidence := inspectionEvidence(current, obs)
+	if _, err := repo.ReconcileOperation(ctx, current.TenantID, current.ID, current.Version,
+		"reconciler", current.FenceToken, evidence); !errors.Is(err, operation.ErrObservation) {
+		t.Fatalf("old exact-UID absence was treated as delete finality: %v", err)
+	}
+	got, err := repo.GetOperation(ctx, current.TenantID, current.ID)
+	if err != nil || got.Status != operation.Reconciling || got.FenceToken != current.FenceToken {
+		t.Fatalf("stale delete absence mutated current reconciliation: %+v, %v", got, err)
+	}
+	var rows int
+	if err := db.QueryRowContext(ctx,
+		"SELECT count(*) FROM compute_resource_observations WHERE observation_id=$1",
+		evidence.ObservationID).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 0 {
+		t.Fatalf("pre-lease delete evidence was persisted: %d", rows)
+	}
+	evidence.Observation.ObservedAt = time.Now().UTC()
+	after, err := repo.ReconcileOperation(ctx, current.TenantID, current.ID, current.Version,
+		"reconciler", current.FenceToken, evidence)
+	if err != nil || after.Status != operation.Succeeded ||
+		after.TargetResourceID != current.TargetResourceID || after.TargetResourceUID != current.TargetResourceUID {
+		t.Fatalf("fresh exact-UID absence failed delete reconciliation: %+v, %v", after, err)
 	}
 }
