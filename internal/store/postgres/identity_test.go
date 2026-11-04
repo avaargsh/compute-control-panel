@@ -106,6 +106,83 @@ func TestResolveWorkloadPrincipalReturnsActiveTenantAndProjectGrants(t *testing.
 	}
 }
 
+
+func TestIdentityDirectoryAuditRollsBackWithIdentityMutation(t *testing.T) {
+	db := openIntegrationDB(t)
+	ctx := context.Background()
+	spiffeID := "spiffe://example.org/ns/agent-runtime/sa/" + randomSuffix(t)
+	tenantID := "tenant-identity-rollback-" + randomSuffix(t)
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO compute_service_identities (spiffe_id, tenant_id, service_name, status)
+		VALUES ($1,$2,'agent-runtime','ACTIVE')`, spiffeID, tenantID); err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	var inTransaction int
+	if err := tx.QueryRowContext(ctx,
+		"SELECT count(*) FROM compute_identity_directory_audit WHERE spiffe_id=$1", spiffeID,
+	).Scan(&inTransaction); err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	if inTransaction != 1 {
+		_ = tx.Rollback()
+		t.Fatalf("audit event count inside identity transaction = %d, want 1", inTransaction)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+
+	var identities, auditEvents int
+	if err := db.QueryRowContext(ctx,
+		"SELECT count(*) FROM compute_service_identities WHERE spiffe_id=$1", spiffeID,
+	).Scan(&identities); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx,
+		"SELECT count(*) FROM compute_identity_directory_audit WHERE spiffe_id=$1", spiffeID,
+	).Scan(&auditEvents); err != nil {
+		t.Fatal(err)
+	}
+	if identities != 0 || auditEvents != 0 {
+		t.Fatalf("rolled-back identity/audit rows = %d/%d, want 0/0", identities, auditEvents)
+	}
+}
+
+func TestIdentityProjectGrantCannotCrossTenantBinding(t *testing.T) {
+	db := openIntegrationDB(t)
+	ctx := context.Background()
+	spiffeID := "spiffe://example.org/ns/agent-runtime/sa/" + randomSuffix(t)
+	tenantID := "tenant-identity-fk-" + randomSuffix(t)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO compute_service_identities (spiffe_id, tenant_id, service_name, status)
+		VALUES ($1,$2,'agent-runtime','ACTIVE')`, spiffeID, tenantID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO compute_service_project_grants
+			(spiffe_id, tenant_id, project_id, status, granted_by)
+		VALUES ($1,$2,'project-cross-tenant','ACTIVE','identity-admin')`,
+		spiffeID, "different-tenant"); err == nil {
+		t.Fatal("cross-Tenant Project grant unexpectedly satisfied the identity foreign key")
+	}
+	var grantCount int
+	if err := db.QueryRowContext(ctx,
+		"SELECT count(*) FROM compute_service_project_grants WHERE spiffe_id=$1", spiffeID,
+	).Scan(&grantCount); err != nil {
+		t.Fatal(err)
+	}
+	if grantCount != 0 {
+		t.Fatalf("cross-Tenant grant count = %d, want 0", grantCount)
+	}
+}
+
 func TestResolveWorkloadPrincipalRejectsUnknownOrMalformedIdentity(t *testing.T) {
 	db := openIntegrationDB(t)
 	repo, err := NewRepository(db)
