@@ -334,14 +334,14 @@ func (r *Repository) readAcceptanceReplay(ctx context.Context, tx *sql.Tx, p Acc
 	}
 
 	var wPayload struct {
-		WorkloadID   string `json:"workload_id"
-		AllocationID string `json:"allocation_id"
-		OperationID  string `json:"operation_id"
+		WorkloadID   string `json:"workload_id"`
+		AllocationID string `json:"allocation_id"`
+		OperationID  string `json:"operation_id"`
 	}
 	var oPayload struct {
-		OperationID  string `json:"operation_id"
-		WorkloadID   string `json:"workload_id"
-		AllocationID string `json:"allocation_id"
+		OperationID  string `json:"operation_id"`
+		WorkloadID   string `json:"workload_id"`
+		AllocationID string `json:"allocation_id"`
 	}
 	if json.Unmarshal(workloadPayload, &wPayload) != nil ||
 		json.Unmarshal(operationPayload, &oPayload) != nil ||
