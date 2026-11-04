@@ -18,7 +18,7 @@ var currencyMetadataRegistryJSON []byte
 
 type currencyMetadataSnapshot struct {
 	RegistryVersion      string         `json:"registryVersion"`
-	SupportedCurrencies map[string]int `json:"supportedCurrencies"`
+	SupportedCurrencies  map[string]int `json:"supportedCurrencies"`
 }
 
 var currencyMetadataSnapshots = loadCurrencyMetadataSnapshots()
