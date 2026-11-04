@@ -18,4 +18,4 @@ The [golden fixture](examples/workload-cost-allocation-rate-boundary-v1.json) an
 - Commercial billable usage, customer sell prices, revenue recognition, invoices and collection remain separate future contracts.
 - Missing source coverage or missing/overlapping rate windows produces an incomplete calculation outcome; it must not create a zero or partial final WorkloadCostEntry.
 
-These are proposed contracts under review in PR #9. They are not yet merged into main and are not consumed by the runtime.
+Retention and audit lineage are specified in [Retention and Evidence Policy](../../docs/architecture/compute-economics/RETENTION-AND-EVIDENCE-POLICY.md). These are proposed contracts under review in PR #9. They are not yet merged into main and are not consumed by the runtime.
