@@ -21,7 +21,7 @@ var (
 
 const (
 	producerName       = "compute-control-panel"
-	workloadAcceptedV1 = "compute.workload.accepted.v1"
+	workloadRecordedV1 = "compute.workload.recorded.v1"
 )
 
 type Repository struct {
@@ -112,7 +112,7 @@ func (r *Repository) CreateWorkload(ctx context.Context, p CreateWorkloadParams)
 			correlation_id, causation_id, payload, delivery_state
 		) VALUES ($1,$2,$3,1,$4,'compute_workload',$5,$6,now(),$7,$8,$9::jsonb,'PENDING')`
 		if _, err := tx.ExecContext(ctx, insertOutbox, p.EventID, producerName,
-			workloadAcceptedV1, p.TenantID, workload.WorkloadID, workload.Version,
+			workloadRecordedV1, p.TenantID, workload.WorkloadID, workload.Version,
 			p.CorrelationID, nullableString(p.CausationID), payload); err != nil {
 			return Workload{}, false, fmt.Errorf("insert workload outbox event: %w", err)
 		}
