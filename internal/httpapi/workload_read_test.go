@@ -96,6 +96,76 @@ func performWorkloadRead(handler http.Handler, method, path string) *httptest.Re
 	return recorder
 }
 
+
+func TestWorkloadAPIHandlerComposesCreateAndAuthenticatedReadRoutes(t *testing.T) {
+	principal, createAuthorizer, selector, acceptanceRepo := newAcceptanceFixture()
+	readAuthorizer := &testWorkloadReadAuthorizer{}
+	readRepository := &testWorkloadReadRepository{
+		details: postgres.WorkloadDetails{
+			Workload: postgres.Workload{
+				WorkloadID: "workload-stable",
+				TenantID: principal.TenantID,
+				ProjectID: "project-001",
+				DesiredGeneration: 1,
+				Version: 1,
+				DesiredState: "ACTIVE",
+				ObservedPhase: "ACCEPTED",
+				LatestAllocationID: sql.NullString{String: "allocation-stable", Valid: true},
+				CreatedAt: time.Date(2026, 11, 4, 8, 0, 0, 0, time.UTC),
+				UpdatedAt: time.Date(2026, 11, 4, 8, 1, 0, 0, time.UTC),
+			},
+			Allocations: []postgres.Allocation{
+				{AllocationID: "allocation-stable", ProviderID: "provider-server-selected", PoolID: "pool-server-selected", DesiredGeneration: 1, Phase: "PENDING", Version: 1},
+			},
+		},
+	}
+	authenticator := testPrincipalAuthenticator{principal: principal}
+	handler, err := NewWorkloadAPIHandler(
+		WorkloadCreateDependencies{
+			Authenticator: authenticator,
+			Authorizer: createAuthorizer,
+			ProviderSelector: selector,
+			Repository: acceptanceRepo,
+			IDs: &sequentialWorkloadIDs{},
+		},
+		WorkloadReadDependencies{
+			Authenticator: authenticator,
+			Authorizer: readAuthorizer,
+			Repository: readRepository,
+		},
+	)
+	if err != nil {
+		t.Fatalf("NewWorkloadAPIHandler: %v", err)
+	}
+
+	created := performCreate(handler, validCreateBody(), "request-001")
+	if created.Code != http.StatusAccepted {
+		t.Fatalf("POST status = %d, want 202; body=%s", created.Code, created.Body.String())
+	}
+	const expectedLocation = "/api/v1/workloads/workload-stable"
+	if created.Header().Get("Location") != expectedLocation {
+		t.Fatalf("Location = %q, want %q", created.Header().Get("Location"), expectedLocation)
+	}
+	var accepted map[string]any
+	if err := json.Unmarshal(created.Body.Bytes(), &accepted); err != nil {
+		t.Fatal(err)
+	}
+	if accepted["status_url"] != expectedLocation {
+		t.Fatalf("status_url = %v, want %q", accepted["status_url"], expectedLocation)
+	}
+
+	read := performWorkloadRead(handler, http.MethodGet, created.Header().Get("Location"))
+	if read.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, want 200; body=%s", read.Code, read.Body.String())
+	}
+	if readRepository.tenantID != principal.TenantID ||
+		readRepository.workloadID != "workload-stable" ||
+		readAuthorizer.calls != 1 {
+		t.Fatalf("GET did not stay in authenticated read scope: tenant=%q workload=%q authorizer=%d",
+			readRepository.tenantID, readRepository.workloadID, readAuthorizer.calls)
+	}
+}
+
 func TestGetWorkloadRequiresAuthenticatedPrincipal(t *testing.T) {
 	principal, authorizer, repository := newReadFixture()
 	handler := newWorkloadReadTestHandler(t, principal, errors.New("invalid certificate"), authorizer, repository)
