@@ -37,8 +37,11 @@ var (
 	ErrInvalidRate               = errors.New("invalid provider rate card")
 	ErrAmbiguousRate             = errors.New("multiple provider rates cover the same interval")
 	ErrCurrencyMismatch          = errors.New("currency changes inside one usage interval")
-	ErrCurrencyPrecisionMismatch = errors.New("currency precision changes inside one usage interval")
-	ErrUnsupportedRateBasis      = errors.New("unsupported provider rate basis")
+	ErrCurrencyPrecisionMismatch       = errors.New("currency precision changes inside one usage interval")
+	ErrCurrencyMetadataVersionMismatch = errors.New("currency metadata version changes inside one usage interval")
+	ErrUnsupportedCurrency             = errors.New("unsupported currency code")
+	ErrUnsupportedCurrencyMetadata     = errors.New("unsupported currency metadata version")
+	ErrUnsupportedRateBasis            = errors.New("unsupported provider rate basis")
 	ErrUnsupportedRateUnit       = errors.New("unsupported provider rate unit")
 )
 
@@ -76,8 +79,9 @@ type ProviderRateCard struct {
 	RateBasis         string
 	Unit              string
 	RateAmount        string
-	Currency          string
-	EffectiveFrom     time.Time
+	Currency                string
+	CurrencyMetadataVersion string
+	EffectiveFrom            time.Time
 	EffectiveTo       *time.Time
 	SourceRef         string
 	CurrencyMinorUnit int
@@ -105,6 +109,7 @@ type CalculationResult struct {
 	TotalAllocatedGPUHours  string
 	TotalDirectWorkloadCost string
 	Currency                string
+	CurrencyMetadataVersion string
 	Segments                []CostSegment
 }
 
@@ -160,6 +165,7 @@ func Calculate(usage UsageInterval, rates []ProviderRateCard) (CalculationResult
 	}
 	var selectedCurrency string
 	var selectedMinorUnit int
+	var selectedCurrencyMetadataVersion string
 	totalQuantity := new(big.Rat)
 	totalCost := new(big.Rat)
 	segments := make([]CostSegment, 0, len(boundaries)-1)
@@ -190,6 +196,9 @@ func Calculate(usage UsageInterval, rates []ProviderRateCard) (CalculationResult
 		if selectedCurrency == "" {
 			selectedCurrency = selected.Currency
 			selectedMinorUnit = selected.CurrencyMinorUnit
+			selectedCurrencyMetadataVersion = selected.CurrencyMetadataVersion
+		} else if selected.CurrencyMetadataVersion != selectedCurrencyMetadataVersion {
+			return CalculationResult{}, ErrCurrencyMetadataVersionMismatch
 		} else if selected.Currency != selectedCurrency {
 			return CalculationResult{}, ErrCurrencyMismatch
 		} else if selected.CurrencyMinorUnit != selectedMinorUnit {
@@ -246,6 +255,7 @@ func Calculate(usage UsageInterval, rates []ProviderRateCard) (CalculationResult
 	}
 	result.Status = StatusFinal
 	result.Currency = selectedCurrency
+	result.CurrencyMetadataVersion = selectedCurrencyMetadataVersion
 	result.TotalAllocatedGPUHours = formatTrimmed(roundHalfUp(totalQuantity, quantityScale), quantityScale, 1)
 	result.TotalDirectWorkloadCost = formatFixed(roundHalfUp(totalCost, selectedMinorUnit), selectedMinorUnit)
 	result.Segments = segments
@@ -285,11 +295,21 @@ func validateUsage(usage UsageInterval) error {
 func validateRate(rate ProviderRateCard) error {
 	if rate.SchemaVersion != rateSchemaVersion ||
 		!nonBlank(rate.RateCardID, rate.ProviderID, rate.ProfileID, rate.RateAmount,
-			rate.Currency, rate.SourceRef) ||
+			rate.Currency, rate.CurrencyMetadataVersion, rate.SourceRef) ||
 		rate.Version < 1 || rate.EffectiveFrom.IsZero() ||
-		(rate.EffectiveTo != nil && (rate.EffectiveTo.IsZero() || !rate.EffectiveTo.After(rate.EffectiveFrom))) ||
-		!validCurrency(rate.Currency) || rate.CurrencyMinorUnit < 0 || rate.CurrencyMinorUnit > 4 {
+		(rate.EffectiveTo != nil && (rate.EffectiveTo.IsZero() || !rate.EffectiveTo.After(rate.EffectiveFrom))) {
 		return ErrInvalidRate
+	}
+	snapshot, supportedVersion := currencyMetadataSnapshots[rate.CurrencyMetadataVersion]
+	if !supportedVersion {
+		return ErrUnsupportedCurrencyMetadata
+	}
+	minorUnit, supportedCurrency := snapshot[rate.Currency]
+	if !supportedCurrency {
+		return ErrUnsupportedCurrency
+	}
+	if rate.CurrencyMinorUnit != minorUnit {
+		return ErrCurrencyPrecisionMismatch
 	}
 	if _, err := parsePositiveDecimal(rate.RateAmount); err != nil {
 		return fmt.Errorf("%w: invalid rate amount: %v", ErrInvalidRate, err)
@@ -340,8 +360,9 @@ func calculationDigest(usage UsageInterval, rate ProviderRateCard, start, end st
 		RateBasis             string   `json:"rateBasis"`
 		RateUnit              string   `json:"rateUnit"`
 		RateAmount            string   `json:"rateAmount"`
-		Currency              string   `json:"currency"`
-		CurrencyMinorUnit     int      `json:"currencyMinorUnit"`
+		Currency                string   `json:"currency"`
+		CurrencyMetadataVersion string   `json:"currencyMetadataVersion"`
+		CurrencyMinorUnit       int      `json:"currencyMinorUnit"`
 		EffectiveFrom         string   `json:"effectiveFrom"`
 		EffectiveTo           string   `json:"effectiveTo"`
 		SegmentStart          string   `json:"segmentStart"`
@@ -377,8 +398,9 @@ func calculationDigest(usage UsageInterval, rate ProviderRateCard, start, end st
 		RateBasis:             rate.RateBasis,
 		RateUnit:              rate.Unit,
 		RateAmount:            canonicalRate,
-		Currency:              rate.Currency,
-		CurrencyMinorUnit:     rate.CurrencyMinorUnit,
+		Currency:                rate.Currency,
+		CurrencyMetadataVersion: rate.CurrencyMetadataVersion,
+		CurrencyMinorUnit:       rate.CurrencyMinorUnit,
 		EffectiveFrom:         from,
 		EffectiveTo:           to,
 		SegmentStart:          start,
@@ -513,18 +535,6 @@ func validWholePositiveInteger(value string) bool {
 
 func validCoverage(value float64) bool {
 	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0 && value <= 1
-}
-
-func validCurrency(value string) bool {
-	if len(value) != 3 {
-		return false
-	}
-	for _, char := range value {
-		if char < 'A' || char > 'Z' {
-			return false
-		}
-	}
-	return true
 }
 
 func nonBlank(values ...string) bool {

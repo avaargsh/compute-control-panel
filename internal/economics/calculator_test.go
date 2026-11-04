@@ -38,6 +38,7 @@ func goldenInputs(t *testing.T) (UsageInterval, []ProviderRateCard) {
 			EffectiveFrom: parseTestTime(t, "2026-01-01T00:00:00Z"),
 			EffectiveTo:   testTimePtr(parseTestTime(t, "2026-11-01T10:30:00Z")),
 			SourceRef:     "contract-demo#rate-1", CurrencyMinorUnit: 2,
+			CurrencyMetadataVersion: CurrencyMetadataVersion,
 		},
 		{
 			SchemaVersion: rateSchemaVersion, RateCardID: "rate-h100-v2", Version: 2,
@@ -45,6 +46,7 @@ func goldenInputs(t *testing.T) (UsageInterval, []ProviderRateCard) {
 			RateBasis: rateBasis, Unit: rateUnit, RateAmount: "12.00", Currency: "CNY",
 			EffectiveFrom: parseTestTime(t, "2026-11-01T10:30:00Z"),
 			SourceRef:     "contract-demo#rate-2", CurrencyMinorUnit: 2,
+			CurrencyMetadataVersion: CurrencyMetadataVersion,
 		},
 	}
 	return usage, rates
@@ -57,7 +59,8 @@ func TestCalculateSplitsEffectiveRateBoundaryAndMatchesGoldenCost(t *testing.T) 
 		t.Fatal(err)
 	}
 	if got.Status != StatusFinal || got.TotalAllocatedGPUHours != "6.0" ||
-		got.TotalDirectWorkloadCost != "66.00" || got.Currency != "CNY" {
+		got.TotalDirectWorkloadCost != "66.00" || got.Currency != "CNY" ||
+		got.CurrencyMetadataVersion != CurrencyMetadataVersion {
 		t.Fatalf("unexpected result: %+v", got)
 	}
 	if len(got.Segments) != 2 {
@@ -107,6 +110,56 @@ func TestCurrencyAndPrecisionDriftFailClosed(t *testing.T) {
 	rates[1].CurrencyMinorUnit = 3
 	if _, err := Calculate(usage, rates); !errors.Is(err, ErrCurrencyPrecisionMismatch) {
 		t.Fatalf("precision error = %v", err)
+	}
+}
+
+func TestCurrencyRegistryRejectsUnknownCodesPrecisionAndVersions(t *testing.T) {
+	usage, rates := goldenInputs(t)
+	usage.End = parseTestTime(t, "2026-11-01T10:00:00Z")
+	usage.GPUCount = "1"
+
+	tests := []struct {
+		name      string
+		currency  string
+		minorUnit int
+		version   string
+		want      error
+	}{
+		{name: "CNY cannot use three decimals", currency: "CNY", minorUnit: 3, version: CurrencyMetadataVersion, want: ErrCurrencyPrecisionMismatch},
+		{name: "JPY cannot use two decimals", currency: "JPY", minorUnit: 2, version: CurrencyMetadataVersion, want: ErrCurrencyPrecisionMismatch},
+		{name: "unknown currency is rejected", currency: "ZZZ", minorUnit: 2, version: CurrencyMetadataVersion, want: ErrUnsupportedCurrency},
+		{name: "unknown metadata version is rejected", currency: "CNY", minorUnit: 2, version: "unregistered-snapshot-v9", want: ErrUnsupportedCurrencyMetadata},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			rate := rates[0]
+			rate.EffectiveTo = nil
+			rate.Currency = test.currency
+			rate.CurrencyMinorUnit = test.minorUnit
+			rate.CurrencyMetadataVersion = test.version
+			if _, err := Calculate(usage, []ProviderRateCard{rate}); !errors.Is(err, test.want) {
+				t.Fatalf("Calculate error = %v, want %v", err, test.want)
+			}
+		})
+	}
+}
+
+func TestDigestBindsCurrencyMetadataVersion(t *testing.T) {
+	usage, rates := goldenInputs(t)
+	start := usage.Start.UTC().Format(time.RFC3339Nano)
+	end := parseTestTime(t, "2026-11-01T10:30:00Z").Format(time.RFC3339Nano)
+	first, err := calculationDigest(usage, rates[0], start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := rates[0]
+	changed.CurrencyMetadataVersion = "different-pinned-registry-snapshot"
+	second, err := calculationDigest(usage, changed, start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Fatal("changing currency metadata version did not change calculation digest")
 	}
 }
 
