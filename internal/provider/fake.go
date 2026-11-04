@@ -81,6 +81,7 @@ type fakeResource struct {
 	tenantID   string
 	workloadID string
 	providerID string
+	generation uint64
 }
 
 type fakeRecord struct {
@@ -167,6 +168,7 @@ func (f *FakeProvider) Apply(ctx context.Context, req Request) (Acknowledgement,
 				tenantID:   req.TenantID,
 				workloadID: req.WorkloadID,
 				providerID: req.ProviderID,
+				generation: req.DesiredGeneration,
 			}
 		case operation.Update, operation.Delete:
 			// Never act on a name alone: the exact live UID and all
@@ -176,13 +178,20 @@ func (f *FakeProvider) Apply(ctx context.Context, req Request) (Acknowledgement,
 			if !exists || live.uid != req.TargetResourceUID ||
 				live.tenantID != req.TenantID ||
 				live.workloadID != req.WorkloadID ||
-				live.providerID != req.ProviderID {
+				live.providerID != req.ProviderID ||
+				req.DesiredGeneration < live.generation {
+				// The resource may have the same UID after a newer Workload
+				// generation was applied. An old controller must not roll
+				// it back or delete it even with the original target UID.
 				return Acknowledgement{}, ErrOperationConflict
 			}
 			rec.resourceID = req.TargetResourceID
 			rec.resourceUID = req.TargetResourceUID
 			if req.Kind == operation.Delete {
 				delete(f.resources, req.TargetResourceID)
+			} else {
+				live.generation = req.DesiredGeneration
+				f.resources[req.TargetResourceID] = live
 			}
 			// Fake UPDATE proves identity and idempotence only; it does not
 			// model a provider-specific change to a Job or Pod specification.
