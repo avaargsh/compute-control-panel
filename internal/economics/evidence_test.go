@@ -360,3 +360,39 @@ func TestDeriveUsageIntervalRejectsEvidenceFromWrongAuthority(t *testing.T) {
 		t.Fatalf("unexpected result=%+v err=%v", got, err)
 	}
 }
+
+
+func TestEvidenceDigestBindsNormalizedAdmissionAndPlacementFacts(t *testing.T) {
+	evidence, policy := validAllocationUsageEvidence(t)
+	first, err := DeriveUsageInterval(evidence, policy)
+	if err != nil || first.Status != EvidenceStatusFinal {
+		t.Fatalf("first derivation=%+v err=%v", first, err)
+	}
+
+	evidence.Kueue.ClusterQueue = "different-cluster-queue"
+	second, err := DeriveUsageInterval(evidence, policy)
+	if err != nil || second.Status != EvidenceStatusFinal {
+		t.Fatalf("second derivation=%+v err=%v", second, err)
+	}
+	if first.EvidenceDigest == second.EvidenceDigest {
+		t.Fatal("changing normalized admission facts did not change evidence digest")
+	}
+
+	evidence.Kueue.ClusterQueue = "gpu-cluster-queue"
+	evidence.Pod.NodeName = "different-gpu-node"
+	third, err := DeriveUsageInterval(evidence, policy)
+	if err != nil || third.Status != EvidenceStatusFinal {
+		t.Fatalf("third derivation=%+v err=%v", third, err)
+	}
+	if first.EvidenceDigest == third.EvidenceDigest {
+		t.Fatal("changing normalized Pod placement did not change evidence digest")
+	}
+}
+
+func TestEvidenceGenerationMustBePositive(t *testing.T) {
+	evidence, policy := validAllocationUsageEvidence(t)
+	evidence.AllocationGeneration = 0
+	if _, err := DeriveUsageInterval(evidence, policy); !errors.Is(err, ErrInvalidEvidence) {
+		t.Fatalf("DeriveUsageInterval error = %v, want ErrInvalidEvidence", err)
+	}
+}
