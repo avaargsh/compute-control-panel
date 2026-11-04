@@ -1,0 +1,203 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/avaargsh/compute-control-panel/blob/main/schemas/compute-economics/workload-cost-entry.schema.json",
+  "title": "Compute Economics WorkloadCostEntry v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "costEntryId",
+    "entryType",
+    "tenantId",
+    "projectId",
+    "workloadId",
+    "allocationId",
+    "providerId",
+    "poolId",
+    "profileId",
+    "usageIntervalId",
+    "pricedWindow",
+    "pricedQuantity",
+    "unit",
+    "rateCardId",
+    "rateCardVersion",
+    "rateAmount",
+    "currency",
+    "amount",
+    "calculationVersion",
+    "roundingMode",
+    "calculationStatus",
+    "recordedAt"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "compute.economics.workload-cost-entry.v1"
+    },
+    "costEntryId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "entryType": {
+      "enum": [
+        "CHARGE",
+        "REVERSAL"
+      ]
+    },
+    "tenantId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "projectId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workloadId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "allocationId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "providerId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "poolId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "profileId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "usageIntervalId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "pricedWindow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start",
+        "end"
+      ],
+      "properties": {
+        "start": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "end": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "pricedQuantity": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)(\\\\.[0-9]+)?$",
+      "description": "Non-negative base-10 decimal string. Never use binary floating point for accounting values.",
+      "not": {
+        "const": "0"
+      }
+    },
+    "unit": {
+      "const": "GPU_HOUR"
+    },
+    "rateCardId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "rateCardVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "rateAmount": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)(\\\\.[0-9]+)?$",
+      "description": "Non-negative base-10 decimal string. Never use binary floating point for accounting values.",
+      "not": {
+        "const": "0"
+      }
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$"
+    },
+    "amount": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)(\\\\.[0-9]+)?$",
+      "description": "Non-negative base-10 decimal string. Never use binary floating point for accounting values.",
+      "not": {
+        "const": "0"
+      }
+    },
+    "calculationVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "calculationInputDigest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "roundingMode": {
+      "const": "CURRENCY_MINOR_UNIT_HALF_UP"
+    },
+    "calculationStatus": {
+      "enum": [
+        "FINAL",
+        "INCOMPLETE"
+      ]
+    },
+    "reversesEntryId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "recordedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sourceCoverage": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "entryType": {
+            "const": "REVERSAL"
+          }
+        },
+        "required": [
+          "entryType"
+        ]
+      },
+      "then": {
+        "required": [
+          "reversesEntryId"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "calculationStatus": {
+            "const": "INCOMPLETE"
+          }
+        },
+        "required": [
+          "calculationStatus"
+        ]
+      },
+      "then": {
+        "required": [
+          "sourceCoverage"
+        ]
+      }
+    }
+  ],
+  "description": "Append-only direct cost posting for one usage interval segment and one effective-dated rate. Reversals are new entries; amounts are unsigned magnitudes and entryType determines accounting direction."
+}
