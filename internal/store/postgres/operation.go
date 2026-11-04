@@ -17,7 +17,7 @@ import (
 // token. All temporal checks use PostgreSQL clock_timestamp(), not worker time.
 // The repository does NOT invoke a provider; UNKNOWN must be inspected before
 // any retry and its authoritative observation is deliberately not exposed here.
-const operationColumns = `compute_operation_id, tenant_id, workload_id,
+const operationColumns = `compute_operation_id, tenant_id, workload_id, allocation_id,
     provider_id, idempotency_key, provider_request_digest, desired_generation,
     version, fence_token, operation_kind, status, lease_owner, lease_expires_at,
     target_resource_id, target_resource_uid, provider_resource_id,
@@ -29,11 +29,11 @@ type operationScanner interface{ Scan(...any) error }
 func scanOperation(row operationScanner) (operation.Operation, error) {
 	var o operation.Operation
 	var generation, version, fence int64
-	var leaseOwner, targetID, targetUID, resourceID, resourceUID sql.NullString
+	var allocationID, leaseOwner, targetID, targetUID, resourceID, resourceUID sql.NullString
 	var errorCode, manualCode sql.NullString
 	var leaseUntil sql.NullTime
 	err := row.Scan(
-		&o.ID, &o.TenantID, &o.WorkloadID, &o.ProviderID,
+		&o.ID, &o.TenantID, &o.WorkloadID, &allocationID, &o.ProviderID,
 		&o.IdempotencyKey, &o.RequestDigest, &generation, &version, &fence,
 		&o.Kind, &o.Status, &leaseOwner, &leaseUntil,
 		&targetID, &targetUID, &resourceID, &resourceUID,
@@ -45,6 +45,7 @@ func scanOperation(row operationScanner) (operation.Operation, error) {
 	if generation <= 0 || version <= 0 || fence < 0 {
 		return operation.Operation{}, errors.New("invalid persisted operation counters")
 	}
+	o.AllocationID = allocationID.String
 	o.Generation, o.Version, o.FenceToken = uint64(generation), uint64(version), uint64(fence)
 	o.LeaseOwner, o.LeaseExpiresAt = leaseOwner.String, leaseUntil.Time
 	o.TargetResourceID, o.TargetResourceUID = targetID.String, targetUID.String
@@ -72,7 +73,7 @@ func (r *Repository) GetOperation(ctx context.Context, tenantID, operationID str
 
 func sameOperationIntent(a, b operation.Operation) bool {
 	return a.TenantID == b.TenantID && a.WorkloadID == b.WorkloadID &&
-		a.ProviderID == b.ProviderID && a.IdempotencyKey == b.IdempotencyKey &&
+		a.AllocationID == b.AllocationID && a.ProviderID == b.ProviderID && a.IdempotencyKey == b.IdempotencyKey &&
 		a.RequestDigest == b.RequestDigest && a.Generation == b.Generation &&
 		a.Kind == b.Kind && a.TargetResourceID == b.TargetResourceID &&
 		a.TargetResourceUID == b.TargetResourceUID
@@ -126,19 +127,19 @@ func (r *Repository) CreateOperation(ctx context.Context, o operation.Operation,
 	}
 
 	const insert = `INSERT INTO compute_operations(
-        compute_operation_id,tenant_id,workload_id,provider_id,operation_kind,
+        compute_operation_id,tenant_id,workload_id,allocation_id,provider_id,operation_kind,
         desired_generation,provider_request_digest,idempotency_key,version,fence_token,
         status,target_resource_id,target_resource_uid)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,1,0,'PENDING',$9,$10)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,1,0,'PENDING',$10,$11)
         ON CONFLICT(tenant_id,idempotency_key) DO NOTHING
         RETURNING ` + operationColumns
 	got, err := scanOperation(tx.QueryRowContext(ctx, insert, o.ID, o.TenantID, o.WorkloadID,
-		o.ProviderID, o.Kind, int64(o.Generation), o.RequestDigest, o.IdempotencyKey,
+		nullableString(o.AllocationID), o.ProviderID, o.Kind, int64(o.Generation), o.RequestDigest, o.IdempotencyKey,
 		nullableString(o.TargetResourceID), nullableString(o.TargetResourceUID)))
 	if err == nil {
 		payload, err := json.Marshal(map[string]any{
 			"operation_id": got.ID, "workload_id": got.WorkloadID,
-			"provider_id": got.ProviderID, "desired_generation": got.Generation,
+			"allocation_id": got.AllocationID, "provider_id": got.ProviderID, "desired_generation": got.Generation,
 			"operation_kind": got.Kind, "request_digest": got.RequestDigest,
 		})
 		if err != nil {
@@ -148,7 +149,7 @@ func (r *Repository) CreateOperation(ctx context.Context, o operation.Operation,
             event_id,producer,event_type,schema_version,tenant_id,
             aggregate_type,aggregate_id,aggregate_version,occurred_at,
             correlation_id,payload,delivery_state)
-            VALUES($1,$2,'compute.operation.pending.v1',1,$3,
+            VALUES($1,$2,'compute.operation.recorded.v1',1,$3,
                 'compute_operation',$4,1,clock_timestamp(),$5,$6::jsonb,'PENDING')`,
 			eventID, producerName, o.TenantID, o.ID, correlationID, payload)
 		if err != nil {
