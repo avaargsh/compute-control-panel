@@ -17,20 +17,20 @@ const (
 	EvidenceStatusFinal                  = "FINAL"
 	EvidenceStatusIncomplete             = "INCOMPLETE"
 	DeviceEvidenceModeDRA                = "DRA"
-	DeviceEvidenceModeCertifiedAdapter   = "CERTIFIED_DEVICE_ADAPTER"
+	DeviceEvidenceModeCertifiedAdapter = "CERTIFIED_DEVICE_ADAPTER"
 
 	ReasonProviderBindingMissing   = "PROVIDER_BINDING_MISSING"
 	ReasonProviderIdentityMismatch = "PROVIDER_IDENTITY_MISMATCH"
-	ReasonKueueNotAdmitted          = "KUEUE_NOT_ADMITTED"
-	ReasonKueueIdentityMismatch     = "KUEUE_IDENTITY_MISMATCH"
-	ReasonPodNotScheduled           = "POD_NOT_SCHEDULED"
-	ReasonDeviceAssignmentMissing   = "DEVICE_ASSIGNMENT_MISSING"
-	ReasonDeviceCountMismatch       = "DEVICE_COUNT_MISMATCH"
-	ReasonGenerationMismatch        = "GENERATION_MISMATCH"
-	ReasonSourceStale               = "SOURCE_STALE"
-	ReasonSourceConflict            = "SOURCE_CONFLICT"
-	ReasonTimestampUntrusted        = "TIMESTAMP_UNTRUSTED"
-	ReasonReleaseUnconfirmed        = "RELEASE_UNCONFIRMED"
+	ReasonKueueNotAdmitted         = "KUEUE_NOT_ADMITTED"
+	ReasonKueueIdentityMismatch    = "KUEUE_IDENTITY_MISMATCH"
+	ReasonPodNotScheduled          = "POD_NOT_SCHEDULED"
+	ReasonDeviceAssignmentMissing  = "DEVICE_ASSIGNMENT_MISSING"
+	ReasonDeviceCountMismatch      = "DEVICE_COUNT_MISMATCH"
+	ReasonGenerationMismatch       = "GENERATION_MISMATCH"
+	ReasonSourceStale              = "SOURCE_STALE"
+	ReasonSourceConflict           = "SOURCE_CONFLICT"
+	ReasonTimestampUntrusted       = "TIMESTAMP_UNTRUSTED"
+	ReasonReleaseUnconfirmed       = "RELEASE_UNCONFIRMED"
 )
 
 var (
@@ -529,17 +529,17 @@ func allocationUsageEvidenceDigest(
 		ProviderComputeOperationID     string
 		ProviderOperationTenantID      string
 		ProviderOperationProjectID     string
-		ProviderOperationWorkloadID     string
-		ProviderOperationAllocationID   string
-		ProviderOperationGeneration     int64
-		ProviderOperationProviderID     string
-		ProviderOperationStatus         string
-		ProviderOperationRequestDigest  string
-		ProviderBindingOperationID      string
-		KueueGPUResourceName            string
+		ProviderOperationWorkloadID    string
+		ProviderOperationAllocationID  string
+		ProviderOperationGeneration    int64
+		ProviderOperationProviderID    string
+		ProviderOperationStatus        string
+		ProviderOperationRequestDigest string
+		ProviderBindingOperationID     string
+		KueueGPUResourceName           string
 		Records                        []canonicalEvidenceRecord
-		CostableStart         string
-		CostableEnd           string
+		CostableStart                  string
+		CostableEnd                    string
 	}{
 		SchemaVersion: evidence.SchemaVersion, EvidenceSetID: evidence.EvidenceSetID,
 		EvidencePolicyVersion: policy.Version,
