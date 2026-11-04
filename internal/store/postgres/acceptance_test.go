@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -145,6 +146,48 @@ func TestAcceptWorkloadCommitsWorkloadAllocationOperationAndEventsAtomically(t *
 	}
 }
 
+func TestGetWorkloadDetailsReturnsTenantScopedConsistentHistory(t *testing.T) {
+	db := openIntegrationDB(t)
+	repo, err := NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	params := acceptanceFixture(t,
+		"tenant-read-details-"+randomSuffix(t),
+		"workload-read-key-"+randomSuffix(t),
+		"operation-read-key-"+randomSuffix(t),
+		"event-operation-read-"+randomSuffix(t))
+	accepted, created, err := repo.AcceptWorkload(ctx, params)
+	if err != nil || !created {
+		t.Fatalf("AcceptWorkload: created=%t err=%v", created, err)
+	}
+
+	details, err := repo.GetWorkloadDetails(ctx, accepted.Workload.TenantID, accepted.Workload.WorkloadID)
+	if err != nil {
+		t.Fatalf("GetWorkloadDetails: %v", err)
+	}
+	if details.Workload.WorkloadID != accepted.Workload.WorkloadID ||
+		details.Workload.ProjectID != params.Workload.ProjectID ||
+		len(details.Allocations) != 1 || len(details.Operations) != 1 {
+		t.Fatalf("unexpected Workload detail snapshot: %+v", details)
+	}
+	if details.Allocations[0].AllocationID != accepted.Allocation.AllocationID ||
+		details.Operations[0].ID != accepted.Operation.ID ||
+		details.Operations[0].AllocationID != accepted.Allocation.AllocationID {
+		t.Fatalf("history lost the accepted identity chain: %+v", details)
+	}
+
+	if _, err := repo.GetWorkloadDetails(ctx, "different-tenant", accepted.Workload.WorkloadID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("cross-tenant read error = %v, want sql.ErrNoRows", err)
+	}
+	if _, err := repo.GetWorkloadDetails(ctx, accepted.Workload.TenantID, "missing-workload"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("missing Workload read error = %v, want sql.ErrNoRows", err)
+	}
+}
+
 func TestAcceptWorkloadReplayReturnsStableIdentitiesAndEvents(t *testing.T) {
 	db := openIntegrationDB(t)
 	repo, _ := NewRepository(db)
@@ -159,6 +202,30 @@ func TestAcceptWorkloadReplayReturnsStableIdentitiesAndEvents(t *testing.T) {
 		t.Fatalf("first acceptance: created=%t err=%v", created, err)
 	}
 
+	lookup := AcceptanceLookup{
+		TenantID:                params.Workload.TenantID,
+		IdempotencyKey:          params.Workload.IdempotencyKey,
+		RequestDigest:           params.Workload.RequestDigest,
+		ProjectID:               params.Workload.ProjectID,
+		OwnerService:            params.Workload.OwnerService,
+		OwnerResourceType:       params.Workload.OwnerResourceType,
+		OwnerResourceID:         params.Workload.OwnerResourceID,
+		ComputeProfileID:        params.Workload.ComputeProfileID,
+		ComputeProfileRevision:  params.Workload.ComputeProfileRevision,
+		OperationIdempotencyKey: params.Operation.IdempotencyKey,
+		OperationRequestDigest:  params.Operation.RequestDigest,
+	}
+	lookedUp, found, err := repo.GetAcceptanceByIdempotency(ctx, lookup)
+	if err != nil || !found {
+		t.Fatalf("lookup accepted Workload: found=%t err=%v", found, err)
+	}
+	if lookedUp.Workload.WorkloadID != first.Workload.WorkloadID ||
+		lookedUp.Allocation.AllocationID != first.Allocation.AllocationID ||
+		lookedUp.Operation.ID != first.Operation.ID ||
+		lookedUp.Allocation.ProviderID != first.Allocation.ProviderID {
+		t.Fatalf("lookup did not return original acceptance identities: first=%+v lookup=%+v", first, lookedUp)
+	}
+
 	replay := params
 	replay.Workload.WorkloadID = "new-candidate-workload-" + randomSuffix(t)
 	replay.Workload.EventID = "new-candidate-workload-event-" + randomSuffix(t)
@@ -167,6 +234,11 @@ func TestAcceptWorkloadReplayReturnsStableIdentitiesAndEvents(t *testing.T) {
 	replay.Operation.WorkloadID = replay.Workload.WorkloadID
 	replay.Operation.AllocationID = replay.AllocationID
 	replay.OperationEventID = "new-candidate-operation-event-" + randomSuffix(t)
+	// A new retry may observe a different provider/Pool candidate. The
+	// original accepted Allocation remains authoritative and must be replayed.
+	replay.ProviderID = "provider-newly-selected"
+	replay.PoolID = "pool-newly-selected"
+	replay.Operation.ProviderID = replay.ProviderID
 
 	got, created, err := repo.AcceptWorkload(ctx, replay)
 	if err != nil || created {
@@ -221,6 +293,9 @@ func TestAcceptWorkloadConcurrentReplayHasOneWinner(t *testing.T) {
 			params.Operation.WorkloadID = params.Workload.WorkloadID
 			params.Operation.AllocationID = params.AllocationID
 			params.OperationEventID = fmt.Sprintf("candidate-operation-event-%d-%s", i, randomSuffix(t))
+			params.ProviderID = fmt.Sprintf("provider-candidate-%d", i)
+			params.PoolID = fmt.Sprintf("pool-candidate-%d", i)
+			params.Operation.ProviderID = params.ProviderID
 			results[i], created[i], errs[i] = repo.AcceptWorkload(ctx, params)
 		}()
 	}
@@ -236,7 +311,9 @@ func TestAcceptWorkloadConcurrentReplayHasOneWinner(t *testing.T) {
 		}
 		if results[i].Workload.WorkloadID != results[0].Workload.WorkloadID ||
 			results[i].Allocation.AllocationID != results[0].Allocation.AllocationID ||
-			results[i].Operation.ID != results[0].Operation.ID {
+			results[i].Operation.ID != results[0].Operation.ID ||
+			results[i].Allocation.ProviderID != results[0].Allocation.ProviderID ||
+			results[i].Operation.ProviderID != results[0].Operation.ProviderID {
 			t.Fatalf("concurrent callers received different accepted identities: %+v vs %+v", results[i], results[0])
 		}
 	}
