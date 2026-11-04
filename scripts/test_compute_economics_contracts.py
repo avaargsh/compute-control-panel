@@ -126,8 +126,10 @@ def calculate_direct_cost(
 
         hours = duration_hours(segment_start, segment_end)
         quantity = gpu_count * hours
+        currency_minor_unit = int(rate["currencyMinorUnit"])
+        rounding_quantum = Decimal(1).scaleb(-currency_minor_unit)
         amount = (quantity * Decimal(rate["rateAmount"])).quantize(
-            Decimal("0.01"), rounding=ROUND_HALF_UP
+            rounding_quantum, rounding=ROUND_HALF_UP
         )
         segments.append(
             {
@@ -136,8 +138,9 @@ def calculate_direct_cost(
                 "priced_quantity_gpu_hours": format(quantity, "f"),
                 "rate_card_id": rate["rateCardId"],
                 "rate_card_version": rate["version"],
-                "amount": format(amount, ".2f"),
+                "amount": format(amount, f".{currency_minor_unit}f"),
                 "currency": currency,
+                "currency_minor_unit": currency_minor_unit,
             }
         )
     return segments
@@ -217,7 +220,9 @@ class ComputeEconomicsContractTests(unittest.TestCase):
                 "rateCardVersion": segment["rateCardVersion"],
                 "rateAmount": segment["rateAmountPerGpuHour"],
                 "currency": "CNY",
+                "currencyMinorUnit": segment["currencyMinorUnit"],
                 "amount": segment["amount"],
+                "calculationInputDigest": "sha256:" + "a" * 64,
                 "calculationVersion": "cost-v1",
                 "roundingMode": "CURRENCY_MINOR_UNIT_HALF_UP",
                 "calculationStatus": "FINAL",
@@ -241,6 +246,7 @@ class ComputeEconomicsContractTests(unittest.TestCase):
                     "rate_card_version": 1,
                     "amount": "30.00",
                     "currency": "CNY",
+                    "currency_minor_unit": 2,
                 },
                 {
                     "start": "2026-11-01T10:30:00Z",
@@ -250,6 +256,7 @@ class ComputeEconomicsContractTests(unittest.TestCase):
                     "rate_card_version": 2,
                     "amount": "36.00",
                     "currency": "CNY",
+                    "currency_minor_unit": 2,
                 },
             ],
             segments,
@@ -313,7 +320,9 @@ class ComputeEconomicsContractTests(unittest.TestCase):
             "rateCardVersion": segment["rateCardVersion"],
             "rateAmount": segment["rateAmountPerGpuHour"],
             "currency": "CNY",
+            "currencyMinorUnit": segment["currencyMinorUnit"],
             "amount": segment["amount"],
+            "calculationInputDigest": "sha256:" + "b" * 64,
             "calculationVersion": "cost-v1",
             "roundingMode": "CURRENCY_MINOR_UNIT_HALF_UP",
             "calculationStatus": "FINAL",
