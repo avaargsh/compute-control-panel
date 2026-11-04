@@ -193,8 +193,8 @@ func TestFakeProviderCannotDeleteForeignStaleOrAlreadyReclaimedUID(t *testing.T)
 	remove.TargetResourceUID = created.ResourceUID
 
 	for name, mutate := range map[string]func(*Request){
-		"stale uid": func(r *Request) { r.TargetResourceUID = "uid-replaced" },
-		"foreign tenant": func(r *Request) { r.TenantID = "tenant-other" },
+		"stale uid":        func(r *Request) { r.TargetResourceUID = "uid-replaced" },
+		"foreign tenant":   func(r *Request) { r.TenantID = "tenant-other" },
 		"foreign workload": func(r *Request) { r.WorkloadID = "workload-other" },
 		"foreign provider": func(r *Request) { r.ProviderID = "provider-other" },
 	} {
