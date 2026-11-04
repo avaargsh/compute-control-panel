@@ -20,7 +20,7 @@ CREATE TABLE compute_allocation_usage_evidence_sets (
     profile_id TEXT NOT NULL,
     gpu_model TEXT NOT NULL,
     capability_profile_id TEXT NOT NULL,
-    evidence_policy_version TEXT NOT NULL,
+    evidence_policy_version TEXT NOT NULL CHECK (btrim(evidence_policy_version) <> ''),
     metering_policy_version TEXT NOT NULL,
     evidence_digest TEXT NOT NULL
         CHECK (evidence_digest ~ '^sha256:[a-f0-9]{64}$'),
