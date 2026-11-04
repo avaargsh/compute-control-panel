@@ -35,7 +35,7 @@ func (r *Repository) ResolveWorkloadPrincipal(ctx context.Context, spiffeID stri
 	err = tx.QueryRowContext(ctx, `SELECT tenant_id, service_name
 		FROM compute_service_identities
 		WHERE spiffe_id=$1
-		  AND status=\'ACTIVE\'
+		  AND status='ACTIVE'
 		  AND not_before <= transaction_timestamp()
 		  AND (expires_at IS NULL OR expires_at > transaction_timestamp())`,
 		spiffeID,
@@ -52,7 +52,7 @@ func (r *Repository) ResolveWorkloadPrincipal(ctx context.Context, spiffeID stri
 		FROM compute_service_project_grants
 		WHERE spiffe_id=$1
 		  AND tenant_id=$2
-		  AND status=\'ACTIVE\'
+		  AND status='ACTIVE'
 		  AND not_before <= transaction_timestamp()
 		  AND (expires_at IS NULL OR expires_at > transaction_timestamp())
 		ORDER BY project_id`,
