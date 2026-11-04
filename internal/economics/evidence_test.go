@@ -306,3 +306,32 @@ func TestEvidenceDigestIsDeterministicAndBindsSourceFacts(t *testing.T) {
 		t.Fatal("changed device identity reused the prior evidence digest")
 	}
 }
+
+
+func TestCalculatorDigestBindsEvidenceSetAndCapabilityProfile(t *testing.T) {
+	usage, rates := goldenInputs(t)
+	usage.EvidenceSetID = "evidence-set-1"
+	usage.EvidenceDigest = "sha256:" + strings.Repeat("b", 64)
+	usage.CapabilityProfileID = "k8s-kueue-dra-profile-v1"
+
+	first, err := Calculate(usage, rates)
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage.EvidenceDigest = "sha256:" + strings.Repeat("c", 64)
+	second, err := Calculate(usage, rates)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Segments[0].CalculationInputDigest == second.Segments[0].CalculationInputDigest {
+		t.Fatal("calculator digest did not bind the evidence set digest")
+	}
+}
+
+func TestCalculatorRejectsPartialEvidenceProvenance(t *testing.T) {
+	usage, rates := goldenInputs(t)
+	usage.EvidenceSetID = "evidence-set-1"
+	if _, err := Calculate(usage, rates); !errors.Is(err, ErrInvalidUsage) {
+		t.Fatalf("Calculate error = %v, want ErrInvalidUsage for partial evidence provenance", err)
+	}
+}
