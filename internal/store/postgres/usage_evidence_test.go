@@ -42,7 +42,7 @@ func typedUsageEvidence(a WorkloadAcceptance) PersistUsageEvidenceParams {
 	e := economics.AllocationUsageEvidence{
 		SchemaVersion: economics.AllocationUsageEvidenceSchemaVersion,
 		EvidenceSetID: "evidence-set-" + id,
-		TenantID: a.Workload.TenantID, ProjectID: a.Workload.ProjectID,
+		TenantID:      a.Workload.TenantID, ProjectID: a.Workload.ProjectID,
 		WorkloadID: a.Workload.WorkloadID, AllocationID: id,
 		AllocationGeneration: a.Allocation.DesiredGeneration, ProviderID: a.Allocation.ProviderID,
 		PoolID: a.Allocation.PoolID, ProfileID: "profile-h100",
@@ -51,7 +51,7 @@ func typedUsageEvidence(a WorkloadAcceptance) PersistUsageEvidenceParams {
 	}
 	e.Provider = economics.ProviderUsageEvidence{
 		Operation: economics.ComputeOperationUsageEvidence{
-			ID: a.Operation.ID, TenantID: a.Workload.TenantID, ProjectID: a.Workload.ProjectID,
+			ID: a.Operation.ID, TenantID:      a.Workload.TenantID, ProjectID: a.Workload.ProjectID,
 			WorkloadID: a.Workload.WorkloadID, AllocationID: id,
 			DesiredGeneration: a.Allocation.DesiredGeneration, ProviderID: a.Allocation.ProviderID,
 			Status: "SUCCEEDED", RequestDigest: "sha256:" + strings.Repeat("b", 64),
@@ -155,14 +155,18 @@ func TestPersistUsageEvidenceSetRequiresSuccessfulProviderOperation(t *testing.T
 func TestPersistUsageEvidenceSetIsImmutableIdempotentAndTenantScoped(t *testing.T) {
 	db := openIntegrationDB(t)
 	repo, err := NewRepository(db)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
 	p := acceptanceFixture(t, "tenant-evidence-"+randomSuffix(t),
 		"workload-key-"+randomSuffix(t), "operation-key-"+randomSuffix(t), "operation-event-"+randomSuffix(t))
 	a, created, err := repo.AcceptWorkload(ctx, p)
-	if err != nil || !created { t.Fatalf("AcceptWorkload: created=%t err=%v", created, err) }
+	if err != nil || !created {
+		t.Fatalf("AcceptWorkload: created=%t err=%v", created, err)
+	}
 	markUsageEvidenceProviderOperationSucceeded(t, db, a)
 
 	params := typedUsageEvidence(a)
@@ -193,7 +197,9 @@ func TestPersistUsageEvidenceSetIsImmutableIdempotentAndTenantScoped(t *testing.
 		t.Fatalf("cross-tenant read = %v, want sql.ErrNoRows", err)
 	}
 	got, err := repo.GetUsageEvidenceSet(ctx, params.Evidence.TenantID, first.EvidenceSetID)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got.AllocationID != params.Evidence.AllocationID ||
 		got.ProviderResourceUID != params.Evidence.Provider.ResourceUID ||
 		got.EvidenceDigest != first.EvidenceDigest || got.GPUCount != 1 ||
@@ -213,14 +219,18 @@ func TestPersistUsageEvidenceSetIsImmutableIdempotentAndTenantScoped(t *testing.
 func TestPersistUsageEvidenceSetConcurrentReplayHasOneWinner(t *testing.T) {
 	db := openIntegrationDB(t)
 	repo, err := NewRepository(db)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	p := acceptanceFixture(t, "tenant-evidence-race-"+randomSuffix(t),
 		"workload-key-"+randomSuffix(t), "operation-key-"+randomSuffix(t), "operation-event-"+randomSuffix(t))
 	a, created, err := repo.AcceptWorkload(ctx, p)
-	if err != nil || !created { t.Fatalf("AcceptWorkload: created=%t err=%v", created, err) }
+	if err != nil || !created {
+		t.Fatalf("AcceptWorkload: created=%t err=%v", created, err)
+	}
 	markUsageEvidenceProviderOperationSucceeded(t, db, a)
 	params := typedUsageEvidence(a)
 
