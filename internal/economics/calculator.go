@@ -33,16 +33,16 @@ const (
 )
 
 var (
-	ErrInvalidUsage                    errors.New("invalid usage interval")
-	ErrInvalidRate                     errors.New("invalid provider rate card")
-	ErrAmbiguousRate                   errors.New("multiple provider rates cover the same interval")
-	ErrCurrencyMismatch                errors.New("currency changes inside one usage interval")
-	ErrCurrencyPrecisionMismatch       errors.New("currency precision changes inside one usage interval")
-	ErrCurrencyMetadataVersionMismatch errors.New("currency metadata version changes inside one usage interval")
-	ErrUnsupportedCurrency             errors.New("unsupported currency code")
-	ErrUnsupportedCurrencyMetadata     errors.New("unsupported currency metadata version")
-	ErrUnsupportedRateBasis            errors.New("unsupported provider rate basis")
-	ErrUnsupportedRateUnit             errors.New("unsupported provider rate unit")
+	ErrInvalidUsage                    = errors.New("invalid usage interval")
+	ErrInvalidRate                     = errors.New("invalid provider rate card")
+	ErrAmbiguousRate                   = errors.New("multiple provider rates cover the same interval")
+	ErrCurrencyMismatch                = errors.New("currency changes inside one usage interval")
+	ErrCurrencyPrecisionMismatch       = errors.New("currency precision changes inside one usage interval")
+	ErrCurrencyMetadataVersionMismatch = errors.New("currency metadata version changes inside one usage interval")
+	ErrUnsupportedCurrency             = errors.New("unsupported currency code")
+	ErrUnsupportedCurrencyMetadata     = errors.New("unsupported currency metadata version")
+	ErrUnsupportedRateBasis            = errors.New("unsupported provider rate basis")
+	ErrUnsupportedRateUnit             = errors.New("unsupported provider rate unit")
 )
 
 type UsageInterval struct {
