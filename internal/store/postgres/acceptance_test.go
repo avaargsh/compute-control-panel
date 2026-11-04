@@ -160,17 +160,17 @@ func TestAcceptWorkloadReplayReturnsStableIdentitiesAndEvents(t *testing.T) {
 	}
 
 	lookup := AcceptanceLookup{
-		TenantID: params.Workload.TenantID,
-		IdempotencyKey: params.Workload.IdempotencyKey,
-		RequestDigest: params.Workload.RequestDigest,
-		ProjectID: params.Workload.ProjectID,
-		OwnerService: params.Workload.OwnerService,
-		OwnerResourceType: params.Workload.OwnerResourceType,
-		OwnerResourceID: params.Workload.OwnerResourceID,
-		ComputeProfileID: params.Workload.ComputeProfileID,
-		ComputeProfileRevision: params.Workload.ComputeProfileRevision,
+		TenantID:                params.Workload.TenantID,
+		IdempotencyKey:          params.Workload.IdempotencyKey,
+		RequestDigest:           params.Workload.RequestDigest,
+		ProjectID:               params.Workload.ProjectID,
+		OwnerService:            params.Workload.OwnerService,
+		OwnerResourceType:       params.Workload.OwnerResourceType,
+		OwnerResourceID:         params.Workload.OwnerResourceID,
+		ComputeProfileID:        params.Workload.ComputeProfileID,
+		ComputeProfileRevision:  params.Workload.ComputeProfileRevision,
 		OperationIdempotencyKey: params.Operation.IdempotencyKey,
-		OperationRequestDigest: params.Operation.RequestDigest,
+		OperationRequestDigest:  params.Operation.RequestDigest,
 	}
 	lookedUp, found, err := repo.GetAcceptanceByIdempotency(ctx, lookup)
 	if err != nil || !found {
