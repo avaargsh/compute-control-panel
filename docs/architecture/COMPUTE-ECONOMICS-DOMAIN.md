@@ -293,6 +293,18 @@ Recommendations (acquire, reduce, rebalance, discount or retire capacity) are ad
 8. Revenue and margin require commercial source facts and direct-cost coverage; incomplete values remain explicitly incomplete.
 9. Capacity analytics distinguish healthy/schedulable supply, allocation, pending demand and idle capacity without changing scheduler authority.
 
+## 14. E0 machine-readable contract assets
+
+The initial schemas and examples are cataloged in [schemas/compute-economics](../../schemas/compute-economics/README.md):
+
+- UsageSample and tenant-scoped Event Envelope;
+- UsageInterval, ProviderRateCard and WorkloadCostEntry;
+- golden device-telemetry event and effective-rate-boundary cost fixture.
+
+The cost calculation contract is [Workload Cost Calculation v1](compute-economics/WORKLOAD-COST-CALCULATION-V1.md). Data lifecycle and audit lineage are defined in [Retention and Evidence Policy](compute-economics/RETENTION-AND-EVIDENCE-POLICY.md).
+
+These files are proposed contracts under PR #9. They do not imply production ingestion, a live broker, a billing integration or accepted Allocation projection.
+
 ## 13. Dependencies and non-goals
 
 **P0 blockers:** stable Allocation identity/projection; authenticated Provider and Kubernetes/Kueue/DRA evidence; trusted tenant/project scope; durable event delivery and replay semantics. Track these in [Issue #3](https://github.com/avaargsh/compute-control-panel/issues/3).
