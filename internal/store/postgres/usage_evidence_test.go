@@ -202,6 +202,7 @@ func TestPersistUsageEvidenceSetIsImmutableIdempotentAndTenantScoped(t *testing.
 	}
 	if got.AllocationID != params.Evidence.AllocationID ||
 		got.ProviderResourceUID != params.Evidence.Provider.ResourceUID ||
+		got.ProviderRequestDigest != params.Evidence.Provider.Operation.RequestDigest ||
 		got.EvidenceDigest != first.EvidenceDigest || got.GPUCount != 1 ||
 		got.EvidencePolicyVersion != params.Policy.Version {
 		t.Fatalf("persisted evidence scope mismatch: %+v", got)
@@ -277,7 +278,7 @@ func TestPersistUsageEvidenceSetRejectsIncompleteOrForgedSourceFacts(t *testing.
 	a := WorkloadAcceptance{
 		Workload:   Workload{TenantID: "tenant-1", ProjectID: "project-1", WorkloadID: "workload-1"},
 		Allocation: Allocation{AllocationID: "allocation-1", DesiredGeneration: 7, ProviderID: "provider-1", PoolID: "pool-h100"},
-		Operation:  operation.Operation{ID: "compute-operation-1"},
+		Operation: operation.Operation{ID: "compute-operation-1", RequestDigest: "sha256:" + strings.Repeat("d", 64)},
 	}
 	valid := typedUsageEvidence(a)
 	cases := []struct {
