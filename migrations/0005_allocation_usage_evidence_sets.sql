@@ -92,6 +92,18 @@ BEGIN
           AND o.operation_kind IN ('CREATE', 'UPDATE')
           AND o.status = 'SUCCEEDED'
           AND o.provider_request_digest = NEW.provider_request_digest
+          AND NEW.evidence_payload #>> '{Evidence,SchemaVersion}' = NEW.schema_version
+          AND NEW.evidence_payload #>> '{Evidence,EvidenceSetID}' = NEW.evidence_set_id
+          AND NEW.evidence_payload #>> '{Evidence,TenantID}' = NEW.tenant_id
+          AND NEW.evidence_payload #>> '{Evidence,ProjectID}' = NEW.project_id
+          AND NEW.evidence_payload #>> '{Evidence,WorkloadID}' = NEW.workload_id
+          AND NEW.evidence_payload #>> '{Evidence,AllocationID}' = NEW.allocation_id
+          AND NEW.evidence_payload #>> '{Evidence,ProviderID}' = NEW.provider_id
+          AND NEW.evidence_payload #>> '{Evidence,Provider,Operation,ID}' = NEW.compute_operation_id
+          AND NEW.evidence_payload #>> '{Evidence,Provider,Operation,RequestDigest}' = NEW.provider_request_digest
+          AND NEW.evidence_payload #>> '{Evidence,Provider,Operation,Status}' = 'SUCCEEDED'
+          AND NEW.evidence_payload #>> '{Evidence,Provider,ResourceID}' = NEW.provider_resource_id
+          AND NEW.evidence_payload #>> '{Evidence,Provider,ResourceUID}' = NEW.provider_resource_uid
           AND a.phase IN ('BOUND', 'RELEASING', 'RELEASED')
           AND o.provider_resource_id = NEW.provider_resource_id
           AND o.provider_resource_uid = NEW.provider_resource_uid
