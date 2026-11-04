@@ -116,7 +116,6 @@ func TestFakeProviderObservationDrivesExistingDomainReconciliation(t *testing.T)
 	}
 }
 
-
 func TestFakeProviderTargetBoundUpdateDeleteAndLostReleaseACK(t *testing.T) {
 	ctx := context.Background()
 	fake := NewFakeProvider()
