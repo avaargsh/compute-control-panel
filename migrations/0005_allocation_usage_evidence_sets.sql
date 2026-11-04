@@ -134,4 +134,8 @@ CREATE TRIGGER compute_usage_evidence_append_only
 BEFORE UPDATE OR DELETE ON compute_allocation_usage_evidence_sets
 FOR EACH ROW EXECUTE FUNCTION compute_reject_usage_evidence_mutation();
 
+CREATE TRIGGER compute_usage_evidence_no_truncate
+BEFORE TRUNCATE ON compute_allocation_usage_evidence_sets
+FOR EACH STATEMENT EXECUTE FUNCTION compute_reject_usage_evidence_mutation();
+
 REVOKE UPDATE, DELETE, TRUNCATE ON compute_allocation_usage_evidence_sets FROM PUBLIC;
