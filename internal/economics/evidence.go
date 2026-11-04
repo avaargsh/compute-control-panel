@@ -49,6 +49,7 @@ type EvidenceRecord struct {
 	AllocationID          string
 	AllocationGeneration  int64
 	ProviderID            string
+	ComputeOperationID    string
 	Source                string
 	AdapterVersion        string
 	NativeUID             string
@@ -60,19 +61,29 @@ type EvidenceRecord struct {
 	EvidenceRef           string
 }
 
+type ComputeOperationUsageEvidence struct {
+	ID                  string
+	TenantID            string
+	ProjectID           string
+	WorkloadID          string
+	AllocationID        string
+	DesiredGeneration   int64
+	ProviderID          string
+	Status              string
+	RequestDigest       string
+}
+
 type ProviderUsageEvidence struct {
-	ComputeOperationID     string
-	OperationRequestDigest string
-	OperationSucceeded     bool
-	ResourceID             string
-	ResourceUID            string
-	PoolID                 string
-	ProfileID              string
-	GPUModel               string
-	GPUCount               int64
-	Binding                EvidenceRecord
-	CostLiabilityStart     EvidenceRecord
-	CostLiabilityEnd       *EvidenceRecord
+	Operation           ComputeOperationUsageEvidence
+	ResourceID          string
+	ResourceUID         string
+	PoolID              string
+	ProfileID           string
+	GPUModel            string
+	GPUCount            int64
+	Binding             EvidenceRecord
+	CostLiabilityStart  EvidenceRecord
+	CostLiabilityEnd    *EvidenceRecord
 }
 
 type KueueUsageEvidence struct {
@@ -170,9 +181,22 @@ func DeriveUsageInterval(evidence AllocationUsageEvidence, policy EvidencePolicy
 	}
 
 	provider := evidence.Provider
-	if !nonBlank(provider.ComputeOperationID, provider.OperationRequestDigest, provider.ResourceID, provider.ResourceUID, provider.Binding.ObservationID, provider.CostLiabilityStart.ObservationID) ||
-		!isSHA256Digest(provider.OperationRequestDigest) || !provider.OperationSucceeded {
+	operation := provider.Operation
+	if !nonBlank(operation.ID, operation.TenantID, operation.ProjectID, operation.WorkloadID,
+		operation.AllocationID, operation.ProviderID, operation.RequestDigest,
+		provider.ResourceID, provider.ResourceUID, provider.Binding.ObservationID,
+		provider.CostLiabilityStart.ObservationID) ||
+		!isSHA256Digest(operation.RequestDigest) || operation.Status != "SUCCEEDED" {
 		return incomplete(ReasonProviderBindingMissing)
+	}
+	if operation.TenantID != evidence.TenantID || operation.ProjectID != evidence.ProjectID ||
+		operation.WorkloadID != evidence.WorkloadID || operation.AllocationID != evidence.AllocationID ||
+		operation.DesiredGeneration != evidence.AllocationGeneration ||
+		operation.ProviderID != evidence.ProviderID {
+		return incomplete(ReasonProviderIdentityMismatch)
+	}
+	if provider.Binding.ComputeOperationID != operation.ID {
+		return incomplete(ReasonProviderIdentityMismatch)
 	}
 	if provider.PoolID != evidence.PoolID || provider.ProfileID != evidence.ProfileID ||
 		provider.GPUModel != evidence.GPUModel || provider.GPUCount != expectedGPUCount ||
@@ -417,6 +441,7 @@ func effectiveEvidenceTime(record EvidenceRecord, policy EvidencePolicy) (time.T
 
 type canonicalEvidenceRecord struct {
 	ObservationID         string
+	ComputeOperationID    string
 	Source                string
 	AdapterVersion        string
 	NativeUID             string
@@ -444,8 +469,8 @@ func allocationUsageEvidenceDigest(
 			sourceTimestamp = record.SourceTimestamp.UTC().Format(time.RFC3339Nano)
 		}
 		canonicalRecords = append(canonicalRecords, canonicalEvidenceRecord{
-			ObservationID: record.ObservationID, Source: record.Source,
-			AdapterVersion: record.AdapterVersion, NativeUID: record.NativeUID,
+			ObservationID: record.ObservationID, ComputeOperationID: record.ComputeOperationID,
+			Source: record.Source, AdapterVersion: record.AdapterVersion, NativeUID: record.NativeUID,
 			NativeResourceVersion: record.NativeResourceVersion,
 			ObservedAt: record.ObservedAt.UTC().Format(time.RFC3339Nano),
 			RecordedAt: record.RecordedAt.UTC().Format(time.RFC3339Nano),
@@ -502,9 +527,16 @@ func allocationUsageEvidenceDigest(
 		DeviceProfileID                string
 		DeviceGPUCount                 int64
 		ProviderComputeOperationID     string
-		ProviderOperationRequestDigest string
-		ProviderOperationSucceeded     bool
-		KueueGPUResourceName           string
+		ProviderOperationTenantID      string
+		ProviderOperationProjectID     string
+		ProviderOperationWorkloadID     string
+		ProviderOperationAllocationID   string
+		ProviderOperationGeneration     int64
+		ProviderOperationProviderID     string
+		ProviderOperationStatus         string
+		ProviderOperationRequestDigest  string
+		ProviderBindingOperationID      string
+		KueueGPUResourceName            string
 		Records                        []canonicalEvidenceRecord
 		CostableStart         string
 		CostableEnd           string
@@ -523,9 +555,16 @@ func allocationUsageEvidenceDigest(
 		KueueWorkloadUID: evidence.Kueue.WorkloadUID, JobUID: evidence.Kueue.JobUID,
 		PodUID: evidence.Pod.PodUID, DeviceMode: evidence.Device.Mode,
 		DeviceResourceUID: evidence.Device.ResourceUID, DeviceIDs: canonicalDevices,
-		ProviderComputeOperationID: evidence.Provider.ComputeOperationID,
-		ProviderOperationRequestDigest: evidence.Provider.OperationRequestDigest,
-		ProviderOperationSucceeded: evidence.Provider.OperationSucceeded,
+		ProviderComputeOperationID: evidence.Provider.Operation.ID,
+		ProviderOperationTenantID: evidence.Provider.Operation.TenantID,
+		ProviderOperationProjectID: evidence.Provider.Operation.ProjectID,
+		ProviderOperationWorkloadID: evidence.Provider.Operation.WorkloadID,
+		ProviderOperationAllocationID: evidence.Provider.Operation.AllocationID,
+		ProviderOperationGeneration: evidence.Provider.Operation.DesiredGeneration,
+		ProviderOperationProviderID: evidence.Provider.Operation.ProviderID,
+		ProviderOperationStatus: evidence.Provider.Operation.Status,
+		ProviderOperationRequestDigest: evidence.Provider.Operation.RequestDigest,
+		ProviderBindingOperationID: evidence.Provider.Binding.ComputeOperationID,
 		KueueGPUResourceName: evidence.Kueue.GPUResourceName,
 		ProviderPoolID: evidence.Provider.PoolID, ProviderProfileID: evidence.Provider.ProfileID,
 		ProviderGPUModel: evidence.Provider.GPUModel, ProviderGPUCount: evidence.Provider.GPUCount,
