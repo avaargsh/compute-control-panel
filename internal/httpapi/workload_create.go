@@ -11,7 +11,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/avaargsh/compute-control-panel/internal/identity"
 	"github.com/avaargsh/compute-control-panel/internal/operation"
@@ -22,6 +24,32 @@ const (
 	workloadCreateAPIVersion = "compute.platform/v1"
 	maxWorkloadCreateBody    = 1 << 20
 )
+
+var workloadCPUDecimal = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?package httpapi
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"regexp"
+	"strings"
+	"unicode/utf8"
+
+	"github.com/avaargsh/compute-control-panel/internal/identity"
+	"github.com/avaargsh/compute-control-panel/internal/operation"
+	"github.com/avaargsh/compute-control-panel/internal/store/postgres"
+)
+
+const (
+	workloadCreateAPIVersion = "compute.platform/v1"
+	)
 
 type WorkloadPrincipal = identity.WorkloadPrincipal
 
@@ -89,12 +117,12 @@ type WorkloadResourcesRequest struct {
 	CPU          string                       `json:"cpu"`
 	Memory       string                       `json:"memory"`
 	Accelerators []WorkloadAcceleratorRequest `json:"accelerators,omitempty"`
-	Storage      string                       `json:"storage,omitempty"`
+	Storage      *string                      `json:"storage,omitempty"`
 }
 
 type WorkloadConstraintsRequest struct {
 	PoolSelector       map[string]string `json:"pool_selector,omitempty"`
-	MaxDurationSeconds int               `json:"max_duration_seconds,omitempty"`
+	MaxDurationSeconds *int              `json:"max_duration_seconds,omitempty"`
 }
 
 type WorkloadAuthorizationRequest struct {
