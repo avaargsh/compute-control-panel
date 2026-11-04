@@ -41,7 +41,7 @@ The create response includes a relative `Location` and `status_url` pointing to 
 
 `GET /api/v1/workloads/{workload_id}` requires the same authenticated service principal. The repository first scopes the lookup by the principal's Tenant ID and reads Workload, Allocation history and ComputeOperation history from one read-only Repeatable Read snapshot. The handler then checks the Project grant and injected Read authorizer before returning the projection.
 
-A missing Workload, another Tenant's Workload or a Workload outside the caller's Project grants all return the same 404 response. A Read-authorizer rejection returns a generic 403. Responses use `Cache-Control: no-store` and omit Tenant ID, request digest, provider resource UID, lease owner, fencing token and raw internal error details. Allocation/Operation IDs and statuses are exposed as scoped control-plane history.
+A missing Workload, another Tenant's Workload or a Workload outside the caller's Project grants all return the same 404 response. A Read-authorizer rejection returns a generic 403. Responses use `Cache-Control: no-store` and omit Tenant ID, request digest, provider resource UID, lease owner, fencing token and raw internal error details. Allocation/Operation IDs and statuses are exposed as scoped control-plane history. Each history collection is bounded to the latest 100 entries in chronological order; `history_truncated=true` signals that older entries exist and are omitted from this v1 response.
 
 The handler intentionally does not claim Provider readiness or Kueue/DRA admission; status fields reflect only the persisted Workload, Allocation and Operation records.
 
