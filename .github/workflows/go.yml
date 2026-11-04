@@ -39,6 +39,9 @@ jobs:
             printf 'Unformatted Go files:\n%s\n' "$unformatted"
             exit 1
           fi
+      - name: Show Go formatting diff on failure
+        if: failure()
+        run: gofmt -d internal/httpapi/workload_create.go internal/httpapi/workload_create_test.go
       - name: Verify module checksums
         run: go mod verify
       - name: Apply PostgreSQL migrations (checksummed runner, run twice for idempotency)
