@@ -200,8 +200,11 @@ func DeriveUsageInterval(evidence AllocationUsageEvidence, policy EvidencePolicy
 	if provider.Binding.ComputeOperationID != operation.ID {
 		return incomplete(ReasonProviderIdentityMismatch)
 	}
+	if provider.GPUCount != expectedGPUCount {
+		return incomplete(ReasonDeviceCountMismatch)
+	}
 	if provider.PoolID != evidence.PoolID || provider.ProfileID != evidence.ProfileID ||
-		provider.GPUModel != evidence.GPUModel || provider.GPUCount != expectedGPUCount ||
+		provider.GPUModel != evidence.GPUModel ||
 		provider.Binding.NativeUID != provider.ResourceUID ||
 		provider.CostLiabilityStart.NativeUID != provider.ResourceUID {
 		return incomplete(ReasonProviderIdentityMismatch)
