@@ -1,5 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.compute-control-panel.dev/v1/owner-ref-v1.schema.json",
   "title": "Compute owner reference v1",
   "description": "Opaque tenant-scoped lifecycle owner; RunIntent and provider-native identities are not accepted here.",
   "oneOf": [
