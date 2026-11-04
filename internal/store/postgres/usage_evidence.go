@@ -3,8 +3,8 @@ package postgres
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
