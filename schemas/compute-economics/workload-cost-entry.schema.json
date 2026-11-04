@@ -28,7 +28,9 @@
     "roundingMode",
     "calculationStatus",
     "recordedAt",
-    "sourceCoverage"
+    "sourceCoverage",
+    "currencyMinorUnit",
+    "calculationInputDigest"
   ],
   "properties": {
     "schemaVersion": {
@@ -117,7 +119,8 @@
     },
     "currency": {
       "type": "string",
-      "pattern": "^[A-Z]{3}$"
+      "pattern": "^[A-Z]{3}$",
+      "description": "ISO 4217 currency code. Validate against the application's versioned currency registry; this regex checks syntax only."
     },
     "amount": {
       "type": "string",
@@ -130,7 +133,8 @@
     },
     "calculationInputDigest": {
       "type": "string",
-      "pattern": "^sha256:[a-f0-9]{64}$"
+      "pattern": "^sha256:[a-f0-9]{64}$",
+      "description": "SHA-256 digest over canonical usage interval content, priced segment, rate-card identity/version, calculation version, currency and currency precision."
     },
     "roundingMode": {
       "const": "CURRENCY_MINOR_UNIT_HALF_UP"
@@ -149,6 +153,12 @@
     },
     "sourceCoverage": {
       "const": 1
+    },
+    "currencyMinorUnit": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4,
+      "description": "Fraction digits from the same versioned currency metadata as the selected ProviderRateCard."
     }
   },
   "allOf": [
