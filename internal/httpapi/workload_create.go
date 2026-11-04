@@ -221,7 +221,11 @@ func (h *WorkloadCreateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	selection, err := h.deps.ProviderSelector.SelectProvider(r.Context(), principal, request)
+	// Authorization references are consumed by the Authorizer only. Do not
+	// pass PermitRef/Guard metadata into Provider capacity-selection code.
+	providerRequest := request
+	providerRequest.Authorization = nil
+	selection, err := h.deps.ProviderSelector.SelectProvider(r.Context(), principal, providerRequest)
 	if err != nil || strings.TrimSpace(selection.ProviderID) == "" || strings.TrimSpace(selection.PoolID) == "" {
 		writeWorkloadAPIError(w, http.StatusServiceUnavailable, "NO_ELIGIBLE_PROVIDER", "No eligible Provider and Pool are currently available")
 		return
@@ -400,7 +404,13 @@ func decodeWorkloadCreate(body []byte) (WorkloadCreateRequest, []byte, string, e
 	if err := validateWorkloadCreateRequest(request); err != nil {
 		return WorkloadCreateRequest{}, nil, "", err
 	}
-	normalized, err := json.Marshal(request)
+	// Authorization is a transient proof over the intent, not part of the
+	// desired Workload state or idempotency identity. It is neither persisted
+	// nor included in the request digest, allowing a renewed Permit to replay
+	// the same idempotent Workload safely.
+	intent := request
+	intent.Authorization = nil
+	normalized, err := json.Marshal(intent)
 	if err != nil {
 		return WorkloadCreateRequest{}, nil, "", err
 	}
