@@ -236,19 +236,19 @@ func Calculate(usage UsageInterval, rates []ProviderRateCard) (CalculationResult
 			costEntryID = ""
 		}
 		segment := CostSegment{
-		CostEntryID:             costEntryID,
-		PostingStatus:           postingStatus,
-		CalculationInputDigest:  digest,
-		Start:                   startText,
-		End:                     endText,
-		PricedQuantity:          formatTrimmed(roundedQuantity, quantityScale, 1),
-		RateCardID:              selected.RateCardID,
-		RateCardVersion:         selected.Version,
-		RateAmount:              selected.RateAmount,
-		Currency:                selected.Currency,
-		CurrencyMinorUnit:       selected.CurrencyMinorUnit,
-		CurrencyMetadataVersion: selected.CurrencyMetadataVersion,
-		Amount:                  amountText,
+			CostEntryID:             costEntryID,
+			PostingStatus:           postingStatus,
+			CalculationInputDigest:  digest,
+			Start:                   startText,
+			End:                     endText,
+			PricedQuantity:          formatTrimmed(roundedQuantity, quantityScale, 1),
+			RateCardID:              selected.RateCardID,
+			RateCardVersion:         selected.Version,
+			RateAmount:              selected.RateAmount,
+			Currency:                selected.Currency,
+			CurrencyMinorUnit:       selected.CurrencyMinorUnit,
+			CurrencyMetadataVersion: selected.CurrencyMetadataVersion,
+			Amount:                  amountText,
 		}
 		segments = append(segments, segment)
 		totalQuantity.Add(totalQuantity, quantity)
