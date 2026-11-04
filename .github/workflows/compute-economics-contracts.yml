@@ -2,7 +2,7 @@ name: Compute Economics Contract Validation
 
 on:
   push:
-    branches: [main, "docs/compute-economics-domain-v0.1"]
+    branches: [main, "docs/compute-economics-domain-v0.1", "fix/economics-currency-registry-contract-20261104"]
     paths:
       - "schemas/compute-economics/**"
       - "docs/architecture/COMPUTE-ECONOMICS-DOMAIN.md"
