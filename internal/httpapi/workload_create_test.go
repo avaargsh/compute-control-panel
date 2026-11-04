@@ -23,23 +23,29 @@ func (a testPrincipalAuthenticator) Authenticate(context.Context, *http.Request)
 }
 
 type testWorkloadAuthorizer struct {
-	err   error
-	calls int
+	err        error
+	calls      int
+	lastRequest WorkloadCreateRequest
+	lastDigest string
 }
 
-func (a *testWorkloadAuthorizer) AuthorizeCreate(context.Context, WorkloadPrincipal, WorkloadCreateRequest, string) error {
+func (a *testWorkloadAuthorizer) AuthorizeCreate(_ context.Context, _ WorkloadPrincipal, request WorkloadCreateRequest, digest string) error {
 	a.calls++
+	a.lastRequest = request
+	a.lastDigest = digest
 	return a.err
 }
 
 type testProviderSelector struct {
-	selection WorkloadProviderSelection
-	err       error
-	calls     int
+	selection   WorkloadProviderSelection
+	err         error
+	calls       int
+	lastRequest WorkloadCreateRequest
 }
 
-func (s *testProviderSelector) SelectProvider(context.Context, WorkloadPrincipal, WorkloadCreateRequest) (WorkloadProviderSelection, error) {
+func (s *testProviderSelector) SelectProvider(_ context.Context, _ WorkloadPrincipal, request WorkloadCreateRequest) (WorkloadProviderSelection, error) {
 	s.calls++
+	s.lastRequest = request
 	return s.selection, s.err
 }
 
@@ -248,6 +254,60 @@ func TestCreateWorkloadPersistsAuthorizedAtomicAcceptance(t *testing.T) {
 		t.Fatalf("response lost acceptance/Allocation state distinction: %+v", response)
 	}
 }
+
+
+func TestDecodeWorkloadCreateExcludesGuardPermitFromPersistedIntent(t *testing.T) {
+	base := validCreateBody()
+	permitA := `"authorization":{"guard_operation_id":"guard-001","permit_ref":"permit-v1","action_hash":"sha256:` + strings.Repeat("a", 64) + `","audience":"compute-control-panel"},`
+	permitB := `"authorization":{"guard_operation_id":"guard-001","permit_ref":"permit-v2","action_hash":"sha256:` + strings.Repeat("b", 64) + `","audience":"compute-control-panel"},`
+	bodyA := strings.Replace(base, `"compute_profile_ref":`, permitA+`"compute_profile_ref":`, 1)
+	bodyB := strings.Replace(base, `"compute_profile_ref":`, permitB+`"compute_profile_ref":`, 1)
+
+	requestA, normalizedA, digestA, err := decodeWorkloadCreate([]byte(bodyA))
+	if err != nil {
+		t.Fatalf("decode Permit A: %v", err)
+	}
+	requestB, normalizedB, digestB, err := decodeWorkloadCreate([]byte(bodyB))
+	if err != nil {
+		t.Fatalf("decode Permit B: %v", err)
+	}
+	if requestA.Authorization == nil || requestB.Authorization == nil {
+		t.Fatal("authorization proof must remain available to the Authorizer")
+	}
+	if digestA != digestB || string(normalizedA) != string(normalizedB) {
+		t.Fatalf("Permit rotation changed persisted Workload intent: %q != %q", digestA, digestB)
+	}
+	if strings.Contains(string(normalizedA), "permit_ref") || strings.Contains(string(normalizedA), "action_hash") {
+		t.Fatalf("transient authorization proof was persisted: %s", normalizedA)
+	}
+}
+
+func TestProviderSelectorDoesNotReceiveGuardPermit(t *testing.T) {
+	principal, authorizer, selector, repo := newAcceptanceFixture()
+	body := strings.Replace(
+		validCreateBody(),
+		`"compute_profile_ref":`,
+		`"authorization":{"guard_operation_id":"guard-001","permit_ref":"secret-permit-ref","action_hash":"sha256:`+strings.Repeat("a", 64)+`","audience":"compute-control-panel"}, "compute_profile_ref":`,
+		1,
+	)
+	handler := newAcceptanceTestHandler(t, testPrincipalAuthenticator{principal: principal}, authorizer, selector, repo)
+
+	recorder := performCreate(handler, body, "request-001")
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if authorizer.lastRequest.Authorization == nil {
+		t.Fatal("Authorizer did not receive delegated authorization proof")
+	}
+	if selector.lastRequest.Authorization != nil {
+		t.Fatal("Provider selector received delegated authorization proof")
+	}
+	if strings.Contains(string(repo.params.Workload.NormalizedRequest), "permit_ref") ||
+		strings.Contains(string(repo.params.Workload.NormalizedRequest), "action_hash") {
+		t.Fatalf("persisted Workload request contains authorization proof: %s", repo.params.Workload.NormalizedRequest)
+	}
+}
+
 
 func TestCreateWorkloadIdempotentReplaySkipsProviderSelection(t *testing.T) {
 	principal, authorizer, selector, repo := newAcceptanceFixture()
