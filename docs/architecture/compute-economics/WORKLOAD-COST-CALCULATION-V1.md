@@ -17,7 +17,7 @@ It does not calculate commercial revenue, billable usage, active GPU time, share
 - Cost posting: [workload-cost-entry.schema.json](../../../schemas/compute-economics/workload-cost-entry.schema.json)
 - Golden fixture: [workload-cost-allocation-rate-boundary-v1.json](../../../schemas/compute-economics/examples/workload-cost-allocation-rate-boundary-v1.json)
 
-For v1, the costable usage interval must be exactly attributed to one tenant, project, Workload, Allocation, Provider, Pool and GPU Profile. Ambiguous or missing identity is not costable input. The accepted Allocation interval must be supported by the P0 projection/evidence contract (including applicable Provider resource, Kueue admission and DRA/device evidence); a Provider acknowledgement alone is insufficient. V1 supports full GPU device counts only. Fractional shares and MIG/device partitions require a separate profile-scoped unit contract.
+For v1, the costable usage interval must be exactly attributed to one tenant, project, Workload, Allocation, Provider, Pool and GPU Profile. Ambiguous or missing identity is not costable input. GPU quantity is a positive whole-device count; fractional GPU/MIG pricing requires a separate profile-scoped contract. The accepted Allocation interval must be supported by the P0 projection/evidence contract (including applicable Provider resource, Kueue admission and DRA/device evidence); a Provider acknowledgement alone is insufficient. V1 supports full GPU device counts only. Fractional shares and MIG/device partitions require a separate profile-scoped unit contract.
 
 ## 3. Calculation
 
@@ -40,7 +40,7 @@ The rate basis must be ALLOCATED_GPU_HOUR and must match the usage quantity. A d
 
 ## 4. Rate selection and coverage
 
-For every instant in the costable interval, exactly one matching ProviderRateCard must exist for Provider + Pool/Profile dimensions and currency.
+For every instant in the costable interval, exactly one matching ProviderRateCard must exist for Provider + Pool/Profile dimensions, currency and currency precision. V1 rates are fixed ALLOCATED_GPU_HOUR prices; tiered/minimum-commitment pricing is deferred.
 
 - A rate gap means the calculation is INCOMPLETE.
 - Overlapping matching rates mean the calculation is ambiguous and must fail closed.
@@ -54,7 +54,7 @@ A final cost entry requires complete time and identity coverage. Incomplete tele
 
 - Parse decimal strings into exact decimal arithmetic; do not use IEEE-754 binary floating point for quantities, rates or currency.
 - Compute duration from timestamp instants, not local wall-clock arithmetic. Store all calculation boundaries as offset-aware timestamps; UTC is preferred for persisted examples.
-- Round each posted segment amount to the currency's minor-unit scale using HALF_UP. Sum the posted segment amounts for the Workload total so the total reconciles exactly to its constituent postings.
+- Resolve the currency's minor-unit scale from a versioned ISO 4217 currency registry at the boundary. ProviderRateCard and WorkloadCostEntry both persist currencyMinorUnit; a currency precision change inside one usage interval fails closed. Round each posted segment amount to that scale using HALF_UP. Sum the posted segment amounts for the Workload total so the total reconciles exactly to its constituent postings.
 - Preserve the calculation version and source facts so a result can be reproduced.
 
 ## 6. Idempotency, correction and replay
@@ -89,8 +89,8 @@ Expected result:
 ## 9. Acceptance checks
 
 1. Split exactly at rate-effective boundaries and price every segment once.
-2. Reject rate gaps, overlaps, currency mismatch and unsupported rate basis.
-3. Reject non-positive interval duration and non-positive GPU quantity.
+2. Reject rate gaps, overlaps, currency mismatch, currency-precision mismatch and unsupported rate basis.
+3. Reject non-positive interval duration, non-positive GPU quantity and fractional GPU device counts.
 4. Repeated source events or calculation attempts do not double-post.
 5. A correction creates a traceable reversal/replacement chain.
 6. Missing identity, incomplete interval coverage or missing rate produces INCOMPLETE, never a fabricated zero.
