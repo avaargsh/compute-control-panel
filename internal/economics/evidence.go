@@ -477,6 +477,23 @@ func allocationUsageEvidenceDigest(
 		DeviceMode            string
 		DeviceResourceUID     string
 		DeviceIDs             []string
+		ProviderPoolID        string
+		ProviderProfileID     string
+		ProviderGPUModel      string
+		ProviderGPUCount      int64
+		KueueProfileID        string
+		KueueLocalQueue       string
+		KueueClusterQueue     string
+		KueueResourceFlavor   string
+		KueueAdmitted         bool
+		KueueGPUCount         int64
+		PodNodeName           string
+		PodScheduled          bool
+		DeviceClaimUID        string
+		DeviceDriver          string
+		DevicePoolID          string
+		DeviceProfileID       string
+		DeviceGPUCount        int64
 		Records               []canonicalEvidenceRecord
 		CostableStart         string
 		CostableEnd           string
@@ -495,6 +512,15 @@ func allocationUsageEvidenceDigest(
 		KueueWorkloadUID: evidence.Kueue.WorkloadUID, JobUID: evidence.Kueue.JobUID,
 		PodUID: evidence.Pod.PodUID, DeviceMode: evidence.Device.Mode,
 		DeviceResourceUID: evidence.Device.ResourceUID, DeviceIDs: canonicalDevices,
+		ProviderPoolID: evidence.Provider.PoolID, ProviderProfileID: evidence.Provider.ProfileID,
+		ProviderGPUModel: evidence.Provider.GPUModel, ProviderGPUCount: evidence.Provider.GPUCount,
+		KueueProfileID: evidence.Kueue.ProfileID, KueueLocalQueue: evidence.Kueue.LocalQueue,
+		KueueClusterQueue: evidence.Kueue.ClusterQueue, KueueResourceFlavor: evidence.Kueue.ResourceFlavor,
+		KueueAdmitted: evidence.Kueue.Admitted, KueueGPUCount: evidence.Kueue.AdmittedGPUCount,
+		PodNodeName: evidence.Pod.NodeName, PodScheduled: evidence.Pod.Scheduled,
+		DeviceClaimUID: evidence.Device.ClaimUID, DeviceDriver: evidence.Device.Driver,
+		DevicePoolID: evidence.Device.PoolID, DeviceProfileID: evidence.Device.ProfileID,
+		DeviceGPUCount: evidence.Device.GPUCount,
 		Records: canonicalRecords,
 		CostableStart: start.UTC().Format(time.RFC3339Nano),
 		CostableEnd: end.UTC().Format(time.RFC3339Nano),
