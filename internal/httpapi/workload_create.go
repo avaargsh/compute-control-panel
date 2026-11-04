@@ -126,7 +126,6 @@ type workloadAcceptedResponse struct {
 	AllocationID       string `json:"allocation_id"`
 	AllocationPhase    string `json:"allocation_phase"`
 	ComputeOperationID string `json:"compute_operation_id"`
-	StatusURL          string `json:"status_url"`
 }
 
 type workloadAPIError struct {
@@ -287,9 +286,7 @@ func workloadOperationIntentDigest(requestDigest string) (string, error) {
 }
 
 func writeWorkloadAccepted(w http.ResponseWriter, acceptance postgres.WorkloadAcceptance) {
-	statusURL := "/api/v1/workloads/" + acceptance.Workload.WorkloadID
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Location", statusURL)
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusAccepted)
 	_ = json.NewEncoder(w).Encode(workloadAcceptedResponse{
@@ -300,7 +297,6 @@ func writeWorkloadAccepted(w http.ResponseWriter, acceptance postgres.WorkloadAc
 		AllocationID:       acceptance.Allocation.AllocationID,
 		AllocationPhase:    acceptance.Allocation.Phase,
 		ComputeOperationID: acceptance.Operation.ID,
-		StatusURL:          statusURL,
 	})
 }
 
