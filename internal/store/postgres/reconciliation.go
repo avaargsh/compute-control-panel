@@ -79,12 +79,16 @@ func (r *Repository) ReconcileOperation(
 		return operation.Operation{}, fmt.Errorf("read database clock: %w", err)
 	}
 
-	// A NOT_APPLIED_FINAL result is permission to retry the exact provider
-	// operation. Reject proof collected before this reconciliation lease:
-	// it could predate a later attempt whose ACK was lost. The provider's
-	// observed timestamp must be comparable with the database clock; an
-	// uncertain or skewed clock fails closed instead of permitting a retry.
-	if evidence.Observation.Result == operation.OperationNotAppliedFinal {
+	// A terminal Provider outcome must be inspected after the current
+	// reconciliation claim. Pre-claim cached RESOURCE_PRESENT/TARGET_ABSENT
+	// or final failure evidence could be stale even when the operation ID and
+	// resource UID match; NOT_APPLIED_FINAL is additionally a retry permission.
+	// Compare against the database lease clock (not a caller-supplied clock).
+	// Uncertain/skewed timestamps fail closed before recording observations,
+	// transitioning state, or appending an Outbox event.
+	switch evidence.Observation.Result {
+	case operation.ResourcePresent, operation.TargetAbsent,
+		operation.OperationNotAppliedFinal, operation.OperationFailedFinal:
 		var claimedAt time.Time
 		if err := tx.QueryRowContext(ctx,
 			"SELECT updated_at FROM compute_operations WHERE tenant_id=$1 AND compute_operation_id=$2",
