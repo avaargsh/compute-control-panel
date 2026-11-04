@@ -17,7 +17,7 @@ It does not calculate commercial revenue, billable usage, active GPU time, share
 - Cost posting: [workload-cost-entry.schema.json](../../../schemas/compute-economics/workload-cost-entry.schema.json)
 - Golden fixture: [workload-cost-allocation-rate-boundary-v1.json](../../../schemas/compute-economics/examples/workload-cost-allocation-rate-boundary-v1.json)
 
-For v1, the costable usage interval must be exactly attributed to one tenant, project, Workload, Allocation, Provider, Pool and GPU Profile. Ambiguous or missing identity is not billable input.
+For v1, the costable usage interval must be exactly attributed to one tenant, project, Workload, Allocation, Provider, Pool and GPU Profile. Ambiguous or missing identity is not costable input. The accepted Allocation interval must be supported by the P0 projection/evidence contract (including applicable Provider resource, Kueue admission and DRA/device evidence); a Provider acknowledgement alone is insufficient. V1 supports full GPU device counts only. Fractional shares and MIG/device partitions require a separate profile-scoped unit contract.
 
 ## 3. Calculation
 
