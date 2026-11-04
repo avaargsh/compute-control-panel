@@ -317,3 +317,38 @@ func TestPersistUsageEvidenceSetRejectsIncompleteOrForgedSourceFacts(t *testing.
 		})
 	}
 }
+
+
+func TestPersistUsageEvidenceSetRequiresExactProviderRequestDigest(t *testing.T) {
+	db := openIntegrationDB(t)
+	repo, err := NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	p := acceptanceFixture(t, "tenant-evidence-digest-"+randomSuffix(t),
+		"workload-key-"+randomSuffix(t), "operation-key-"+randomSuffix(t), "operation-event-"+randomSuffix(t))
+	a, created, err := repo.AcceptWorkload(ctx, p)
+	if err != nil || !created {
+		t.Fatalf("AcceptWorkload: created=%t err=%v", created, err)
+	}
+	markUsageEvidenceProviderOperationSucceeded(t, db, a)
+
+	params := typedUsageEvidence(a)
+	params.Evidence.Provider.Operation.RequestDigest = "sha256:" + strings.Repeat("e", 64)
+	if _, persisted, err := repo.PersistUsageEvidenceSet(ctx, params); !errors.Is(err, ErrUsageEvidenceNotReady) || persisted {
+		t.Fatalf("mismatched Provider request digest: persisted=%t err=%v, want ErrUsageEvidenceNotReady", persisted, err)
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, `
+		SELECT count(*) FROM compute_allocation_usage_evidence_sets
+		WHERE tenant_id=$1 AND allocation_id=$2`,
+		a.Workload.TenantID, a.Allocation.AllocationID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("mismatched Provider request digest created %d evidence rows, want 0", count)
+	}
+}
