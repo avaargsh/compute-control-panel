@@ -30,7 +30,8 @@
     "recordedAt",
     "sourceCoverage",
     "currencyMinorUnit",
-    "calculationInputDigest"
+    "calculationInputDigest",
+    "currencyMetadataVersion"
   ],
   "properties": {
     "schemaVersion": {
@@ -119,8 +120,50 @@
     },
     "currency": {
       "type": "string",
-      "pattern": "^[A-Z]{3}$",
-      "description": "ISO 4217 currency code. Validate against the application's versioned currency registry; this regex checks syntax only."
+      "enum": [
+        "AED",
+        "AUD",
+        "BHD",
+        "BRL",
+        "CAD",
+        "CHF",
+        "CLF",
+        "CLP",
+        "CNY",
+        "CZK",
+        "DKK",
+        "EUR",
+        "GBP",
+        "HKD",
+        "INR",
+        "IQD",
+        "ISK",
+        "JOD",
+        "JPY",
+        "KRW",
+        "KWD",
+        "LYD",
+        "MXN",
+        "MYR",
+        "NOK",
+        "NZD",
+        "OMR",
+        "PHP",
+        "PLN",
+        "SAR",
+        "SEK",
+        "SGD",
+        "THB",
+        "TND",
+        "TWD",
+        "USD",
+        "VND",
+        "XAF",
+        "XOF",
+        "XPF",
+        "ZAR"
+      ],
+      "description": "Must be present in the pinned Compute Economics currency metadata subset."
     },
     "amount": {
       "type": "string",
@@ -156,9 +199,16 @@
     },
     "currencyMinorUnit": {
       "type": "integer",
-      "minimum": 0,
-      "maximum": 4,
-      "description": "Fraction digits from the same versioned currency metadata as the selected ProviderRateCard."
+      "enum": [
+        0,
+        2,
+        3,
+        4
+      ],
+      "description": "Must exactly match the currency's minor unit in currencyMetadataVersion."
+    },
+    "currencyMetadataVersion": {
+      "const": "six-list-one-2026-09-17-subset-v1"
     }
   },
   "allOf": [
@@ -199,5 +249,581 @@
       }
     }
   ],
-  "description": "Append-only direct cost posting for one usage interval segment and one effective-dated rate. Reversals are new entries; amounts are unsigned magnitudes and entryType determines accounting direction."
+  "description": "Append-only direct cost posting for one usage interval segment and one effective-dated rate. Reversals are new entries; amounts are unsigned magnitudes and entryType determines accounting direction.",
+  "oneOf": [
+    {
+      "properties": {
+        "currency": {
+          "const": "AED"
+        },
+        "currencyMinorUnit": {
+          "const": 2
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "AUD"
+        },
+        "currencyMinorUnit": {
+          "const": 2
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "BHD"
+        },
+        "currencyMinorUnit": {
+          "const": 3
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "BRL"
+        },
+        "currencyMinorUnit": {
+          "const": 2
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "CAD"
+        },
+        "currencyMinorUnit": {
+          "const": 2
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "CHF"
+        },
+        "currencyMinorUnit": {
+          "const": 2
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "CLF"
+        },
+        "currencyMinorUnit": {
+          "const": 4
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "CLP"
+        },
+        "currencyMinorUnit": {
+          "const": 0
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "CNY"
+        },
+        "currencyMinorUnit": {
+          "const": 2
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "CZK"
+        },
+        "currencyMinorUnit": {
+          "const": 2
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "DKK"
+        },
+        "currencyMinorUnit": {
+          "const": 2
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "EUR"
+        },
+        "currencyMinorUnit": {
+          "const": 2
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "GBP"
+        },
+        "currencyMinorUnit": {
+          "const": 2
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "HKD"
+        },
+        "currencyMinorUnit": {
+          "const": 2
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "INR"
+        },
+        "currencyMinorUnit": {
+          "const": 2
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "IQD"
+        },
+        "currencyMinorUnit": {
+          "const": 3
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "ISK"
+        },
+        "currencyMinorUnit": {
+          "const": 0
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "JOD"
+        },
+        "currencyMinorUnit": {
+          "const": 3
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "JPY"
+        },
+        "currencyMinorUnit": {
+          "const": 0
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "KRW"
+        },
+        "currencyMinorUnit": {
+          "const": 0
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "KWD"
+        },
+        "currencyMinorUnit": {
+          "const": 3
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "LYD"
+        },
+        "currencyMinorUnit": {
+          "const": 3
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "MXN"
+        },
+        "currencyMinorUnit": {
+          "const": 2
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "MYR"
+        },
+        "currencyMinorUnit": {
+          "const": 2
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "NOK"
+        },
+        "currencyMinorUnit": {
+          "const": 2
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "NZD"
+        },
+        "currencyMinorUnit": {
+          "const": 2
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "OMR"
+        },
+        "currencyMinorUnit": {
+          "const": 3
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "PHP"
+        },
+        "currencyMinorUnit": {
+          "const": 2
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "PLN"
+        },
+        "currencyMinorUnit": {
+          "const": 2
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "SAR"
+        },
+        "currencyMinorUnit": {
+          "const": 2
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "SEK"
+        },
+        "currencyMinorUnit": {
+          "const": 2
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "SGD"
+        },
+        "currencyMinorUnit": {
+          "const": 2
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "THB"
+        },
+        "currencyMinorUnit": {
+          "const": 2
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "TND"
+        },
+        "currencyMinorUnit": {
+          "const": 3
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "TWD"
+        },
+        "currencyMinorUnit": {
+          "const": 2
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "USD"
+        },
+        "currencyMinorUnit": {
+          "const": 2
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "VND"
+        },
+        "currencyMinorUnit": {
+          "const": 0
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "XAF"
+        },
+        "currencyMinorUnit": {
+          "const": 0
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "XOF"
+        },
+        "currencyMinorUnit": {
+          "const": 0
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "XPF"
+        },
+        "currencyMinorUnit": {
+          "const": 0
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    },
+    {
+      "properties": {
+        "currency": {
+          "const": "ZAR"
+        },
+        "currencyMinorUnit": {
+          "const": 2
+        }
+      },
+      "required": [
+        "currency",
+        "currencyMinorUnit"
+      ]
+    }
+  ]
 }
