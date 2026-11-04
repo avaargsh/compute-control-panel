@@ -12,7 +12,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/avaargsh/compute-control-panel/internal/operation"
 	"github.com/avaargsh/compute-control-panel/internal/store/postgres"
@@ -541,5 +540,3 @@ func writeWorkloadAPIError(w http.ResponseWriter, status int, code, message stri
 // Ensure compile-time interface assignments remain visible and intentional.
 var _ WorkloadAcceptanceRepository = (*postgres.Repository)(nil)
 
-// Prevent accidental import pruning if ID-generation observability is extended.
-var _ = time.Second
