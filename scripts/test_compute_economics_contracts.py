@@ -94,6 +94,7 @@ def calculate_direct_cost(
     ordered = sorted(boundaries)
     segments: list[dict[str, str | int]] = []
     selected_currency: str | None = None
+    selected_currency_minor_unit: int | None = None
 
     for segment_start, segment_end in zip(ordered, ordered[1:]):
         matches = []
@@ -119,14 +120,17 @@ def calculate_direct_cost(
         if rate["rateBasis"] != "ALLOCATED_GPU_HOUR" or rate["unit"] != "GPU_HOUR":
             raise ValueError("unsupported_rate_basis")
         currency = rate["currency"]
+        currency_minor_unit = int(rate["currencyMinorUnit"])
         if selected_currency is None:
             selected_currency = currency
+            selected_currency_minor_unit = currency_minor_unit
         elif selected_currency != currency:
             raise ValueError("currency_mismatch")
+        elif selected_currency_minor_unit != currency_minor_unit:
+            raise ValueError("currency_precision_mismatch")
 
         hours = duration_hours(segment_start, segment_end)
         quantity = gpu_count * hours
-        currency_minor_unit = int(rate["currencyMinorUnit"])
         rounding_quantum = Decimal(1).scaleb(-currency_minor_unit)
         amount = (quantity * Decimal(rate["rateAmount"])).quantize(
             rounding_quantum, rounding=ROUND_HALF_UP
@@ -284,6 +288,22 @@ class ComputeEconomicsContractTests(unittest.TestCase):
         rates = [dict(rate) for rate in self.cost_fixture["rateCards"]]
         rates[1]["currency"] = "USD"
         with self.assertRaisesRegex(ValueError, "currency_mismatch"):
+            calculate_direct_cost(self.cost_fixture["usageInterval"], rates)
+
+    def test_currency_minor_unit_controls_segment_rounding(self) -> None:
+        rates = [dict(rate) for rate in self.cost_fixture["rateCards"]]
+        for rate in rates:
+            rate["currency"] = "KWD"
+            rate["currencyMinorUnit"] = 3
+            rate["rateAmount"] = "12.345"
+        segments = calculate_direct_cost(self.cost_fixture["usageInterval"], rates)
+        self.assertEqual(["37.035", "37.035"], [s["amount"] for s in segments])
+        self.assertEqual([3, 3], [s["currency_minor_unit"] for s in segments])
+
+    def test_currency_precision_change_inside_interval_fails_closed(self) -> None:
+        rates = [dict(rate) for rate in self.cost_fixture["rateCards"]]
+        rates[1]["currencyMinorUnit"] = 3
+        with self.assertRaisesRegex(ValueError, "currency_precision_mismatch"):
             calculate_direct_cost(self.cost_fixture["usageInterval"], rates)
 
     def test_invalid_decimal_and_zero_gpu_quantity_are_rejected(self) -> None:
