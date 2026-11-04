@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/avaargsh/compute-control-panel/internal/store/postgres"
 )
 
 var ErrWorkloadAuthentication = errors.New("workload service identity authentication failed")
@@ -100,3 +102,6 @@ func uniqueSPIFFEID(uris []*url.URL, trustDomain string) (string, error) {
 	}
 	return found, nil
 }
+
+// The PostgreSQL identity directory is the default production resolver implementation.
+var _ WorkloadIdentityResolver = (*postgres.Repository)(nil)
