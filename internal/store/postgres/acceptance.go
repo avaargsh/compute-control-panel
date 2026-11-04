@@ -50,17 +50,17 @@ type WorkloadAcceptance struct {
 // asking the Provider selector to resolve capacity again. The original
 // Allocation/Provider decision is returned from durable state.
 type AcceptanceLookup struct {
-	TenantID                 string
-	IdempotencyKey           string
-	RequestDigest            string
-	ProjectID                string
-	OwnerService             string
-	OwnerResourceType        string
-	OwnerResourceID          string
-	ComputeProfileID         string
-	ComputeProfileRevision   string
-	OperationIdempotencyKey  string
-	OperationRequestDigest   string
+	TenantID                string
+	IdempotencyKey          string
+	RequestDigest           string
+	ProjectID               string
+	OwnerService            string
+	OwnerResourceType       string
+	OwnerResourceID         string
+	ComputeProfileID        string
+	ComputeProfileRevision  string
+	OperationIdempotencyKey string
+	OperationRequestDigest  string
 }
 
 type allocationScanner interface {
@@ -281,22 +281,22 @@ func (r *Repository) GetAcceptanceByIdempotency(ctx context.Context, lookup Acce
 	}
 	p := AcceptWorkloadParams{
 		Workload: CreateWorkloadParams{
-			TenantID: lookup.TenantID,
-			IdempotencyKey: lookup.IdempotencyKey,
-			RequestDigest: lookup.RequestDigest,
-			ProjectID: lookup.ProjectID,
-			OwnerService: lookup.OwnerService,
-			OwnerResourceType: lookup.OwnerResourceType,
-			OwnerResourceID: lookup.OwnerResourceID,
-			ComputeProfileID: lookup.ComputeProfileID,
+			TenantID:               lookup.TenantID,
+			IdempotencyKey:         lookup.IdempotencyKey,
+			RequestDigest:          lookup.RequestDigest,
+			ProjectID:              lookup.ProjectID,
+			OwnerService:           lookup.OwnerService,
+			OwnerResourceType:      lookup.OwnerResourceType,
+			OwnerResourceID:        lookup.OwnerResourceID,
+			ComputeProfileID:       lookup.ComputeProfileID,
 			ComputeProfileRevision: lookup.ComputeProfileRevision,
 		},
 		Operation: operation.Operation{
-			TenantID: lookup.TenantID,
+			TenantID:       lookup.TenantID,
 			IdempotencyKey: lookup.OperationIdempotencyKey,
-			RequestDigest: lookup.OperationRequestDigest,
-			Generation: 1,
-			Kind: operation.Create,
+			RequestDigest:  lookup.OperationRequestDigest,
+			Generation:     1,
+			Kind:           operation.Create,
 		},
 	}
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
