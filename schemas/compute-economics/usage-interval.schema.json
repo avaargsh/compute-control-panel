@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/avaargsh/compute-control-panel/blob/main/schemas/compute-economics/usage-interval.schema.json",
+  "$id": "https://raw.githubusercontent.com/avaargsh/compute-control-panel/main/schemas/compute-economics/usage-interval.schema.json",
   "title": "Compute Economics UsageInterval v1",
   "type": "object",
   "additionalProperties": false,
