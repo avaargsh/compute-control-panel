@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Compute owner reference v1",
+  "description": "Opaque tenant-scoped lifecycle owner; RunIntent and provider-native identities are not accepted here.",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "service",
+        "resource_type",
+        "resource_id"
+      ],
+      "properties": {
+        "service": {
+          "const": "agent-runtime"
+        },
+        "resource_type": {
+          "const": "run"
+        },
+        "resource_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "service",
+        "resource_type",
+        "resource_id"
+      ],
+      "properties": {
+        "service": {
+          "const": "sandbox-provider"
+        },
+        "resource_type": {
+          "const": "sandbox-claim"
+        },
+        "resource_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "additionalProperties": false
+    }
+  ]
+}
