@@ -93,7 +93,8 @@ Location: /api/v1/workloads/workload-001
   "workload_id": "workload-001",
   "desired_generation": 1,
   "desired_state": "ACTIVE",
-  "observed_phase": "PENDING",
+  "observed_phase": "ACCEPTED",
+  "allocation_phase": "PENDING",
   "allocation_id": "alloc-001",
   "compute_operation_id": "compute-op-001",
   "status_url": "/api/v1/workloads/workload-001"
