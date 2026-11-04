@@ -589,7 +589,6 @@ func allocationUsageEvidenceDigest(
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
-
 func isSHA256Digest(value string) bool {
 	if !strings.HasPrefix(value, "sha256:") || len(value) != len("sha256:")+64 {
 		return false
