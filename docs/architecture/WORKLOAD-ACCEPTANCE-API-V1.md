@@ -37,6 +37,12 @@ Acceptance means the control plane durably recorded the intent. The initial Allo
 
 The response deliberately does not advertise a status URL until the authenticated Workload read/status endpoint is implemented.
 
+## SPIFFE/mTLS service identity adapter
+
+`SPIFFEWorkloadAuthenticator` accepts requests only when `request.TLS` contains a peer certificate and a verified chain whose leaf matches the peer leaf. It requires exactly one SPIFFE URI SAN under the configured trust domain, then resolves that identity through `WorkloadIdentityResolver` to Tenant, Service and Project grants. The resolver's returned Subject must exactly equal the certificate SPIFFE ID.
+
+The HTTP server must be configured with `tls.Config.ClientAuth = tls.RequireAndVerifyClientCert` and a narrowly scoped trusted Client CA bundle. The adapter deliberately does not parse Tenant or Project claims from URI path segments. Trust-domain provisioning, certificate rotation, resolver storage and production TLS wiring remain deployment responsibilities.
+
 ## Dependency interfaces and rollout
 
 The handler constructor rejects missing authentication, authorization, Provider-selection or repository dependencies. ID generation defaults to cryptographically random identifiers.
