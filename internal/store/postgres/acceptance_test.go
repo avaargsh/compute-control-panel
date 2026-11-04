@@ -167,6 +167,11 @@ func TestAcceptWorkloadReplayReturnsStableIdentitiesAndEvents(t *testing.T) {
 	replay.Operation.WorkloadID = replay.Workload.WorkloadID
 	replay.Operation.AllocationID = replay.AllocationID
 	replay.OperationEventID = "new-candidate-operation-event-" + randomSuffix(t)
+	// A new retry may observe a different provider/Pool candidate. The
+	// original accepted Allocation remains authoritative and must be replayed.
+	replay.ProviderID = "provider-newly-selected"
+	replay.PoolID = "pool-newly-selected"
+	replay.Operation.ProviderID = replay.ProviderID
 
 	got, created, err := repo.AcceptWorkload(ctx, replay)
 	if err != nil || created {
@@ -221,6 +226,9 @@ func TestAcceptWorkloadConcurrentReplayHasOneWinner(t *testing.T) {
 			params.Operation.WorkloadID = params.Workload.WorkloadID
 			params.Operation.AllocationID = params.AllocationID
 			params.OperationEventID = fmt.Sprintf("candidate-operation-event-%d-%s", i, randomSuffix(t))
+			params.ProviderID = fmt.Sprintf("provider-candidate-%d", i)
+			params.PoolID = fmt.Sprintf("pool-candidate-%d", i)
+			params.Operation.ProviderID = params.ProviderID
 			results[i], created[i], errs[i] = repo.AcceptWorkload(ctx, params)
 		}()
 	}
@@ -236,7 +244,9 @@ func TestAcceptWorkloadConcurrentReplayHasOneWinner(t *testing.T) {
 		}
 		if results[i].Workload.WorkloadID != results[0].Workload.WorkloadID ||
 			results[i].Allocation.AllocationID != results[0].Allocation.AllocationID ||
-			results[i].Operation.ID != results[0].Operation.ID {
+			results[i].Operation.ID != results[0].Operation.ID ||
+			results[i].Allocation.ProviderID != results[0].Allocation.ProviderID ||
+			results[i].Operation.ProviderID != results[0].Operation.ProviderID {
 			t.Fatalf("concurrent callers received different accepted identities: %+v vs %+v", results[i], results[0])
 		}
 	}
