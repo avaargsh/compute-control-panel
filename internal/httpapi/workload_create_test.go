@@ -432,7 +432,7 @@ func TestCreateWorkloadMethodBoundary(t *testing.T) {
 // before invoking authorization, Provider selection, or the Repository.
 func TestCreateWorkloadRejectsSchemaIncompatibleInputs(t *testing.T) {
 	withResources := func(resources string) string {
-		return strings.Replace(validCreateBody(), `"compute_profile_ref": {"id": "gpu-inference", "revision": "3"}`, `"resources": ` + resources, 1)
+		return strings.Replace(validCreateBody(), `"compute_profile_ref": {"id": "gpu-inference", "revision": "3"}`, `"resources": `+resources, 1)
 	}
 	cases := []struct {
 		name string
@@ -441,11 +441,11 @@ func TestCreateWorkloadRejectsSchemaIncompatibleInputs(t *testing.T) {
 		{name: "nonnumeric CPU", body: withResources(`{"cpu":"eight","memory":"32Gi"}`)},
 		{name: "negative CPU", body: withResources(`{"cpu":"-2","memory":"32Gi"}`)},
 		{name: "exponent CPU", body: withResources(`{"cpu":"2e3","memory":"32Gi"}`)},
-		{name: "memory over 64 characters", body: withResources(`{"cpu":"8","memory":"` + strings.Repeat("m",65) + `"}`)},
+		{name: "memory over 64 characters", body: withResources(`{"cpu":"8","memory":"` + strings.Repeat("m", 65) + `"}`)},
 		{name: "empty explicitly supplied storage", body: withResources(`{"cpu":"8","memory":"32Gi","storage":""}`)},
-		{name: "owner reference over 256 characters", body: strings.Replace(validCreateBody(), `"resource_id": "run-001"`, `"resource_id": "` + strings.Repeat("r",257) + `"`, 1)},
-		{name: "project reference over 256 characters", body: strings.Replace(validCreateBody(), `"project_id": "project-001"`, `"project_id": "` + strings.Repeat("p",257) + `"`, 1)},
-		{name: "profile revision over 128 characters", body: strings.Replace(validCreateBody(), `"revision": "3"`, `"revision": "` + strings.Repeat("v",129) + `"`, 1)},
+		{name: "owner reference over 256 characters", body: strings.Replace(validCreateBody(), `"resource_id": "run-001"`, `"resource_id": "`+strings.Repeat("r", 257)+`"`, 1)},
+		{name: "project reference over 256 characters", body: strings.Replace(validCreateBody(), `"project_id": "project-001"`, `"project_id": "`+strings.Repeat("p", 257)+`"`, 1)},
+		{name: "profile revision over 128 characters", body: strings.Replace(validCreateBody(), `"revision": "3"`, `"revision": "`+strings.Repeat("v", 129)+`"`, 1)},
 		{name: "explicit zero max duration", body: strings.Replace(validCreateBody(), `"max_duration_seconds": 7200`, `"max_duration_seconds": 0`, 1)},
 	}
 	for _, tc := range cases {
