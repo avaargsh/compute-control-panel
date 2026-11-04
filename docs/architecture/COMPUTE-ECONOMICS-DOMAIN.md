@@ -247,12 +247,14 @@ Recommendations (acquire, reduce, rebalance, discount or retire capacity) are ad
 
 ### E0 — Contract and vocabulary (can begin before P0 closes)
 
-- [ ] Freeze the metric glossary in section 3.
-- [ ] Define schemas and event envelopes for UsageSample, UsageInterval, ProviderRateCard and WorkloadCostEntry.
-- [ ] Freeze provenance, idempotency, correction, retention and completeness rules.
-- [ ] Define direct versus shared/idle overhead treatment.
-- [ ] Define commercial pricing and revenue-recognition boundaries.
-- [ ] Add calculation examples and deterministic golden fixtures.
+- [x] Freeze the metric glossary in section 3.
+- [x] Define schemas and event envelopes for UsageSample, UsageInterval, ProviderRateCard and WorkloadCostEntry.
+- [x] Freeze provenance, idempotency, correction, retention and completeness rules.
+- [x] Define direct versus shared/idle overhead treatment.
+- [x] Define commercial pricing and revenue-recognition boundaries.
+- [x] Add calculation examples and deterministic golden fixtures.
+
+**E0 exit:** the five JSON Schema contracts, two golden fixtures, retention/evidence policy and contract-validation workflow are implemented in Draft [PR #9](https://github.com/avaargsh/compute-control-panel/pull/9). The exact-head CI run [#41773891892](https://github.com/avaargsh/compute-control-panel/actions/runs/41773891892) passed all 12 tests. E1 production ingestion remains gated on accepted P0 Allocation projection and trusted Provider/Kueue/DRA evidence.
 
 ### E1 — Metering foundation (after stable Allocation identity)
 
