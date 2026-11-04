@@ -79,8 +79,9 @@ func sameOperationIntent(a, b operation.Operation) bool {
 		a.TargetResourceUID == b.TargetResourceUID
 }
 
-// CreateOperation creates one immutable pending intent and the dispatchable
-// outbox event in the SAME database transaction. A replay does not emit events.
+// CreateOperation is a low-level repository primitive. It records an immutable
+// pending intent with a non-dispatchable event. Initial provider dispatch must
+// use AcceptWorkload so Allocation and Operation are committed atomically.
 func (r *Repository) CreateOperation(ctx context.Context, o operation.Operation, eventID, correlationID string) (operation.Operation, bool, error) {
 	if err := o.Validate(); err != nil {
 		return operation.Operation{}, false, err
