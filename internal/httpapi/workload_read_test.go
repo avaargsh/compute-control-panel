@@ -287,6 +287,25 @@ func TestGetWorkloadReturnsAllocationAndOperationHistoryWithoutProviderSecrets(t
 	}
 }
 
+
+func TestGetWorkloadReportsWhenHistoryWasTruncated(t *testing.T) {
+	principal, authorizer, repository := newReadFixture()
+	repository.details.HistoryTruncated = true
+	handler := newWorkloadReadTestHandler(t, principal, nil, authorizer, repository)
+
+	recorder := performWorkloadRead(handler, http.MethodGet, "/api/v1/workloads/workload-read-001")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response["history_truncated"] != true {
+		t.Fatalf("history_truncated = %v, want true", response["history_truncated"])
+	}
+}
+
 func TestGetWorkloadMapsMissingRowsToNotFound(t *testing.T) {
 	principal, authorizer, repository := newReadFixture()
 	repository.err = sql.ErrNoRows
