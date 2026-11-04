@@ -1,0 +1,186 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/avaargsh/compute-control-panel/main/schemas/compute-economics/usage-sample.schema.json",
+  "title": "Compute Economics UsageSample v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "usageSampleId",
+    "providerId",
+    "poolId",
+    "resource",
+    "gpuModel",
+    "metricName",
+    "metricValue",
+    "unit",
+    "aggregation",
+    "observedAt",
+    "collectedAt",
+    "source",
+    "quality",
+    "retentionClass"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "compute.economics.usage-sample.v1"
+    },
+    "usageSampleId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tenantId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "projectId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "workloadId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "allocationId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "providerId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "poolId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "providerResourceUid",
+        "nodeUid",
+        "deviceUuid"
+      ],
+      "properties": {
+        "providerResourceUid": {
+          "type": "string",
+          "minLength": 1
+        },
+        "nodeUid": {
+          "type": "string",
+          "minLength": 1
+        },
+        "deviceUuid": {
+          "type": "string",
+          "minLength": 1
+        },
+        "partitionId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        }
+      }
+    },
+    "gpuModel": {
+      "type": "string",
+      "minLength": 1
+    },
+    "metricName": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]*$"
+    },
+    "metricValue": {
+      "type": "string",
+      "pattern": "^-?(?:0|[1-9][0-9]*)(?:\\\\.[0-9]+)?$",
+      "description": "Exact decimal text from the adapter; semantic range validation is metric-specific."
+    },
+    "unit": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]*$"
+    },
+    "aggregation": {
+      "enum": [
+        "GAUGE",
+        "COUNTER",
+        "RATE"
+      ]
+    },
+    "samplePeriodMs": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "observedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "collectedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "adapter",
+        "adapterVersion",
+        "sourceMetricName",
+        "rawEvidenceRef"
+      ],
+      "properties": {
+        "adapter": {
+          "type": "string",
+          "minLength": 1
+        },
+        "adapterVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sourceMetricName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rawEvidenceRef": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "sourceSequence": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "quality": {
+      "enum": [
+        "VALID",
+        "STALE",
+        "ESTIMATED",
+        "REJECTED"
+      ]
+    },
+    "retentionClass": {
+      "enum": [
+        "RAW_TELEMETRY",
+        "USAGE_EVIDENCE",
+        "AUDIT_EVENT"
+      ]
+    }
+  },
+  "description": "Immutable normalized device telemetry observation. Tenant/Workload/Allocation fields may be absent when attribution is not authoritative; missing attribution must not be inferred."
+}
