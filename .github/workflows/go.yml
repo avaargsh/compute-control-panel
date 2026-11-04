@@ -2,7 +2,7 @@ name: Go validation
 
 on:
   push:
-    branches: [main, "feat/go-foundation"]
+    branches: [main, "feat/**"]
   pull_request:
 
 permissions:
