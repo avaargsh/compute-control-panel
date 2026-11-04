@@ -13,37 +13,36 @@ import (
 
 func usageEvidenceFixture(accepted WorkloadAcceptance) PersistUsageEvidenceParams {
 	digest := "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	params := PersistUsageEvidenceParams{
-		SchemaVersion:         AllocationUsageEvidenceSchemaVersion,
-		EvidenceSetID:         "evidence-set-" + accepted.Allocation.AllocationID,
-		TenantID:              accepted.Workload.TenantID,
-		ProjectID:              accepted.Workload.ProjectID,
-		WorkloadID:             accepted.Workload.WorkloadID,
-		AllocationID:           accepted.Allocation.AllocationID,
-		AllocationGeneration:   accepted.Allocation.DesiredGeneration,
-		ProviderID:             accepted.Allocation.ProviderID,
-		ComputeOperationID:     accepted.Operation.ID,
-		ProviderResourceID:     "provider-resource-" + accepted.Allocation.AllocationID,
-		ProviderResourceUID:    "provider-resource-uid-" + accepted.Allocation.AllocationID,
-		PoolID:                 accepted.Allocation.PoolID,
-		ProfileID:              "profile-h100",
-		GPUModel:               "NVIDIA-H100",
-		CapabilityProfileID:    "capability-profile-h100-v1",
-		MeteringPolicyVersion:  "metering-policy-v1",
-		EvidenceDigest:         digest,
-		UsageIntervalID:        "usage_" + digest[len("sha256:"):],
-		UsageStart:             time.Date(2026, 11, 4, 8, 0, 0, 0, time.UTC),
-		UsageEnd:               time.Date(2026, 11, 4, 9, 30, 0, 0, time.UTC),
-		GPUCount:               2,
-		SourceEventIDs: []string{
-			"device-assignment-" + accepted.Allocation.AllocationID,
-			"device-release-" + accepted.Allocation.AllocationID,
-			"kueue-admission-" + accepted.Allocation.AllocationID,
-			"kueue-release-" + accepted.Allocation.AllocationID,
-			"pod-scheduled-" + accepted.Allocation.AllocationID,
-			"provider-binding-" + accepted.Allocation.AllocationID,
-			"provider-liability-start-" + accepted.Allocation.AllocationID,
-		},
+	params := PersistUsageEvidenceParams{}
+	params.SchemaVersion = AllocationUsageEvidenceSchemaVersion
+	params.EvidenceSetID = "evidence-set-" + accepted.Allocation.AllocationID
+	params.TenantID = accepted.Workload.TenantID
+	params.ProjectID = accepted.Workload.ProjectID
+	params.WorkloadID = accepted.Workload.WorkloadID
+	params.AllocationID = accepted.Allocation.AllocationID
+	params.AllocationGeneration = accepted.Allocation.DesiredGeneration
+	params.ProviderID = accepted.Allocation.ProviderID
+	params.ComputeOperationID = accepted.Operation.ID
+	params.ProviderResourceID = "provider-resource-" + accepted.Allocation.AllocationID
+	params.ProviderResourceUID = "provider-resource-uid-" + accepted.Allocation.AllocationID
+	params.PoolID = accepted.Allocation.PoolID
+	params.ProfileID = "profile-h100"
+	params.GPUModel = "NVIDIA-H100"
+	params.CapabilityProfileID = "capability-profile-h100-v1"
+	params.MeteringPolicyVersion = "metering-policy-v1"
+	params.EvidenceDigest = digest
+	params.UsageIntervalID = "usage_" + digest[len("sha256:"):]
+	params.UsageStart = time.Date(2026, 11, 4, 8, 0, 0, 0, time.UTC)
+	params.UsageEnd = time.Date(2026, 11, 4, 9, 30, 0, 0, time.UTC)
+	params.GPUCount = 1
+	params.SourceEventIDs = []string{
+		"device-assignment-" + accepted.Allocation.AllocationID,
+		"device-release-" + accepted.Allocation.AllocationID,
+		"kueue-admission-" + accepted.Allocation.AllocationID,
+		"kueue-release-" + accepted.Allocation.AllocationID,
+		"pod-scheduled-" + accepted.Allocation.AllocationID,
+		"provider-binding-" + accepted.Allocation.AllocationID,
+		"provider-liability-start-" + accepted.Allocation.AllocationID,
 	}
 	params.EvidencePayload = marshalAllocationEvidencePayload(params)
 	params.UsageIntervalPayload = marshalUsageIntervalPayload(params)
@@ -51,30 +50,29 @@ func usageEvidenceFixture(accepted WorkloadAcceptance) PersistUsageEvidenceParam
 }
 
 func validUsageEvidenceParams() PersistUsageEvidenceParams {
-	params := PersistUsageEvidenceParams{
-		SchemaVersion:         AllocationUsageEvidenceSchemaVersion,
-		EvidenceSetID:         "evidence-valid",
-		TenantID:              "tenant-valid",
-		ProjectID:              "project-valid",
-		WorkloadID:             "workload-valid",
-		AllocationID:           "allocation-valid",
-		AllocationGeneration:   1,
-		ProviderID:             "provider-valid",
-		ComputeOperationID:     "operation-valid",
-		ProviderResourceID:     "resource-valid",
-		ProviderResourceUID:    "resource-uid-valid",
-		PoolID:                 "pool-valid",
-		ProfileID:              "profile-valid",
-		GPUModel:               "GPU-valid",
-		CapabilityProfileID:    "capability-profile-valid",
-		MeteringPolicyVersion:  "metering-policy-v1",
-		EvidenceDigest:         "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		UsageIntervalID:        "usage_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		UsageStart:             time.Date(2026, 11, 4, 8, 0, 0, 0, time.UTC),
-		UsageEnd:               time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC),
-		GPUCount:               1,
-		SourceEventIDs:         []string{"source-a", "source-b"},
-	}
+	params := PersistUsageEvidenceParams{}
+	params.SchemaVersion = AllocationUsageEvidenceSchemaVersion
+	params.EvidenceSetID = "evidence-valid"
+	params.TenantID = "tenant-valid"
+	params.ProjectID = "project-valid"
+	params.WorkloadID = "workload-valid"
+	params.AllocationID = "allocation-valid"
+	params.AllocationGeneration = 1
+	params.ProviderID = "provider-valid"
+	params.ComputeOperationID = "operation-valid"
+	params.ProviderResourceID = "resource-valid"
+	params.ProviderResourceUID = "resource-uid-valid"
+	params.PoolID = "pool-valid"
+	params.ProfileID = "profile-valid"
+	params.GPUModel = "GPU-valid"
+	params.CapabilityProfileID = "capability-profile-valid"
+	params.MeteringPolicyVersion = "metering-policy-v1"
+	params.EvidenceDigest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	params.UsageIntervalID = "usage_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	params.UsageStart = time.Date(2026, 11, 4, 8, 0, 0, 0, time.UTC)
+	params.UsageEnd = time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC)
+	params.GPUCount = 1
+	params.SourceEventIDs = []string{"source-a", "source-b"}
 	params.EvidencePayload = marshalAllocationEvidencePayload(params)
 	params.UsageIntervalPayload = marshalUsageIntervalPayload(params)
 	return params
@@ -114,32 +112,31 @@ func marshalAllocationEvidencePayload(p PersistUsageEvidenceParams) json.RawMess
 }
 
 func marshalUsageIntervalPayload(p PersistUsageEvidenceParams) json.RawMessage {
-	payload := persistedUsageIntervalPayload{
-		SchemaVersion:         usageIntervalSchemaVersion,
-		UsageIntervalID:       p.UsageIntervalID,
-		TenantID:              p.TenantID,
-		ProjectID:              p.ProjectID,
-		WorkloadID:             p.WorkloadID,
-		AllocationID:           p.AllocationID,
-		AllocationGeneration:   p.AllocationGeneration,
-		ProviderID:             p.ProviderID,
-		PoolID:                 p.PoolID,
-		ProfileID:              p.ProfileID,
-		ResourceClass:          "GPU",
-		GPUModel:               p.GPUModel,
-		Start:                  p.UsageStart,
-		End:                    p.UsageEnd,
-		GPUCount:               jsonNumber(p.GPUCount),
-		Unit:                   usageIntervalUnit,
-		MeteringPolicyVersion:  p.MeteringPolicyVersion,
-		SourceEventIDs:         append([]string(nil), p.SourceEventIDs...),
-		Quality:                usageEvidenceQuality,
-		AttributionMethod:      usageAttributionMethod,
-		SourceCoverage:         1,
-		EvidenceSetID:          p.EvidenceSetID,
-		EvidenceDigest:         p.EvidenceDigest,
-		CapabilityProfileID:    p.CapabilityProfileID,
-	}
+	payload := persistedUsageIntervalPayload{}
+	payload.SchemaVersion = usageIntervalSchemaVersion
+	payload.UsageIntervalID = p.UsageIntervalID
+	payload.TenantID = p.TenantID
+	payload.ProjectID = p.ProjectID
+	payload.WorkloadID = p.WorkloadID
+	payload.AllocationID = p.AllocationID
+	payload.AllocationGeneration = p.AllocationGeneration
+	payload.ProviderID = p.ProviderID
+	payload.PoolID = p.PoolID
+	payload.ProfileID = p.ProfileID
+	payload.ResourceClass = "GPU"
+	payload.GPUModel = p.GPUModel
+	payload.Start = p.UsageStart
+	payload.End = p.UsageEnd
+	payload.GPUCount = jsonNumber(p.GPUCount)
+	payload.Unit = usageIntervalUnit
+	payload.MeteringPolicyVersion = p.MeteringPolicyVersion
+	payload.SourceEventIDs = append([]string(nil), p.SourceEventIDs...)
+	payload.Quality = usageEvidenceQuality
+	payload.AttributionMethod = usageAttributionMethod
+	payload.SourceCoverage = 1
+	payload.EvidenceSetID = p.EvidenceSetID
+	payload.EvidenceDigest = p.EvidenceDigest
+	payload.CapabilityProfileID = p.CapabilityProfileID
 	data, err := json.Marshal(payload)
 	if err != nil {
 		panic(err)
@@ -154,6 +151,15 @@ func jsonNumber(value int64) string {
 func markUsageEvidenceProviderOperationSucceeded(t *testing.T, db *sql.DB, accepted WorkloadAcceptance) {
 	t.Helper()
 	_, err := db.ExecContext(context.Background(), `
+		UPDATE compute_allocations
+		SET phase='BOUND', updated_at=clock_timestamp()
+		WHERE tenant_id=$1 AND allocation_id=$2`,
+		accepted.Workload.TenantID, accepted.Allocation.AllocationID,
+	)
+	if err != nil {
+		t.Fatalf("mark Allocation bound: %v", err)
+	}
+	_, err = db.ExecContext(context.Background(), `
 		UPDATE compute_operations
 		SET status='SUCCEEDED', provider_resource_id=$3, provider_resource_uid=$4,
 		    updated_at=clock_timestamp()
