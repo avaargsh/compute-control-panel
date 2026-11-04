@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -142,6 +143,49 @@ func TestAcceptWorkloadCommitsWorkloadAllocationOperationAndEventsAtomically(t *
 	}
 	if latestAllocationID != accepted.Allocation.AllocationID {
 		t.Fatalf("latest allocation projection = %q, want %q", latestAllocationID, accepted.Allocation.AllocationID)
+	}
+}
+
+
+func TestGetWorkloadDetailsReturnsTenantScopedConsistentHistory(t *testing.T) {
+	db := openIntegrationDB(t)
+	repo, err := NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	params := acceptanceFixture(t,
+		"tenant-read-details-"+randomSuffix(t),
+		"workload-read-key-"+randomSuffix(t),
+		"operation-read-key-"+randomSuffix(t),
+		"event-operation-read-"+randomSuffix(t))
+	accepted, created, err := repo.AcceptWorkload(ctx, params)
+	if err != nil || !created {
+		t.Fatalf("AcceptWorkload: created=%t err=%v", created, err)
+	}
+
+	details, err := repo.GetWorkloadDetails(ctx, accepted.Workload.TenantID, accepted.Workload.WorkloadID)
+	if err != nil {
+		t.Fatalf("GetWorkloadDetails: %v", err)
+	}
+	if details.Workload.WorkloadID != accepted.Workload.WorkloadID ||
+		details.Workload.ProjectID != params.Workload.ProjectID ||
+		len(details.Allocations) != 1 || len(details.Operations) != 1 {
+		t.Fatalf("unexpected Workload detail snapshot: %+v", details)
+	}
+	if details.Allocations[0].AllocationID != accepted.Allocation.AllocationID ||
+		details.Operations[0].ID != accepted.Operation.ID ||
+		details.Operations[0].AllocationID != accepted.Allocation.AllocationID {
+		t.Fatalf("history lost the accepted identity chain: %+v", details)
+	}
+
+	if _, err := repo.GetWorkloadDetails(ctx, "different-tenant", accepted.Workload.WorkloadID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("cross-tenant read error = %v, want sql.ErrNoRows", err)
+	}
+	if _, err := repo.GetWorkloadDetails(ctx, accepted.Workload.TenantID, "missing-workload"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("missing Workload read error = %v, want sql.ErrNoRows", err)
 	}
 }
 
