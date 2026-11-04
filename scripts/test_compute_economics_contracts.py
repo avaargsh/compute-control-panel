@@ -208,10 +208,15 @@ class ComputeEconomicsContractTests(unittest.TestCase):
                     set(CURRENCY_MINOR_UNITS),
                     set(schema["properties"]["currency"]["enum"]),
                 )
+                mapping_rules = [
+                    rule["oneOf"] for rule in schema.get("allOf", [])
+                    if isinstance(rule, dict) and "oneOf" in rule
+                ]
+                self.assertEqual(1, len(mapping_rules), "schema must contain exactly one currency precision mapping")
                 schema_pairs = {
                     item["properties"]["currency"]["const"]:
                     item["properties"]["currencyMinorUnit"]["const"]
-                    for item in schema["oneOf"]
+                    for item in mapping_rules[0]
                 }
                 self.assertEqual(CURRENCY_MINOR_UNITS, schema_pairs)
 
