@@ -61,6 +61,9 @@ func validAllocationUsageEvidence(t *testing.T) (AllocationUsageEvidence, Eviden
 		GPUCount: "2",
 		MeteringPolicyVersion: "allocation-evidence-v1",
 		Provider: ProviderUsageEvidence{
+			ComputeOperationID: "compute-operation-1",
+			OperationRequestDigest: "sha256:" + strings.Repeat("b", 64),
+			OperationSucceeded: true,
 			ResourceID: "provider-resource-1",
 			ResourceUID: "provider-resource-uid-1",
 			PoolID: "pool-h100",
@@ -78,6 +81,7 @@ func validAllocationUsageEvidence(t *testing.T) (AllocationUsageEvidence, Eviden
 			LocalQueue: "gpu-queue",
 			ClusterQueue: "gpu-cluster-queue",
 			ResourceFlavor: "h100-flavor",
+			GPUResourceName: "vendor.example.com/gpu",
 			Admitted: true,
 			AdmittedGPUCount: 2,
 			Admission: evidenceRecord(t, "kueue-admission", "kueue", "kueue-workload-uid-1", "2026-11-04T09:20:00Z", "2026-11-04T09:10:00Z"),
@@ -395,4 +399,26 @@ func TestEvidenceGenerationMustBePositive(t *testing.T) {
 	if _, err := DeriveUsageInterval(evidence, policy); !errors.Is(err, ErrInvalidEvidence) {
 		t.Fatalf("DeriveUsageInterval error = %v, want ErrInvalidEvidence", err)
 	}
+}
+
+
+func TestDeriveUsageIntervalRequiresSuccessfulAllocationBoundOperation(t *testing.T) {
+	t.Run("operation not succeeded", func(t *testing.T) {
+		evidence, policy := validAllocationUsageEvidence(t)
+		evidence.Provider.OperationSucceeded = false
+		got, err := DeriveUsageInterval(evidence, policy)
+		if err != nil || got.Status != EvidenceStatusIncomplete ||
+			got.ReasonCode != ReasonProviderBindingMissing || got.UsageInterval != nil {
+			t.Fatalf("unexpected result=%+v err=%v", got, err)
+		}
+	})
+	t.Run("operation request digest missing", func(t *testing.T) {
+		evidence, policy := validAllocationUsageEvidence(t)
+		evidence.Provider.OperationRequestDigest = "invalid"
+		got, err := DeriveUsageInterval(evidence, policy)
+		if err != nil || got.Status != EvidenceStatusIncomplete ||
+			got.ReasonCode != ReasonProviderBindingMissing || got.UsageInterval != nil {
+			t.Fatalf("unexpected result=%+v err=%v", got, err)
+		}
+	})
 }
