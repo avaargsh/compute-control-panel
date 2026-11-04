@@ -358,6 +358,7 @@ func (r *Repository) PersistUsageEvidenceSet(ctx context.Context, p PersistUsage
 		  AND o.desired_generation=$6
 		  AND o.operation_kind IN ('CREATE', 'UPDATE')
 		  AND o.status='SUCCEEDED'
+		  AND a.phase IN ('BOUND', 'RELEASING', 'RELEASED')
 		  AND o.provider_resource_id=$7
 		  AND o.provider_resource_uid=$8
 		  AND w.project_id=$9
