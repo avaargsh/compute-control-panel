@@ -37,6 +37,9 @@ jobs:
           unformatted="$(gofmt -l .)"
           if [[ -n "$unformatted" ]]; then
             printf 'Unformatted Go files:\n%s\n' "$unformatted"
+            while IFS= read -r file; do
+              gofmt -d "$file"
+            done <<< "$unformatted"
             exit 1
           fi
       - name: Verify module checksums
