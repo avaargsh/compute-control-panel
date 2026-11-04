@@ -13,6 +13,8 @@ These files define the first documentation-only contract slice for Compute Econo
 
 The [golden fixture](examples/workload-cost-allocation-rate-boundary-v1.json) and [calculation rules](../../docs/architecture/compute-economics/WORKLOAD-COST-CALCULATION-V1.md) define rate-boundary splitting, exact arithmetic, rounding, idempotency and correction behavior.
 
+The [Allocation Usage Evidence v1 gate](../../docs/architecture/compute-economics/ALLOCATION-USAGE-EVIDENCE-V1.md) defines the required Provider, Kueue and device evidence before an Allocation can generate costable GPU-hours.
+
 ## v1 limits
 
 - Positive whole GPU device counts only; fractions, MIG slices and vendor-specific partition pricing are rejected by the v1 schema.

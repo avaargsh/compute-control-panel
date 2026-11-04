@@ -13,12 +13,13 @@ It does not calculate commercial revenue, billable usage, active GPU time, share
 ## 2. Inputs and versioned contracts
 
 - Usage interval: [usage-interval.schema.json](../../../schemas/compute-economics/usage-interval.schema.json)
+- Allocation Usage Evidence: [allocation-usage-evidence-v1.md](ALLOCATION-USAGE-EVIDENCE-V1.md)
 - Provider procurement rate: [provider-rate-card.schema.json](../../../schemas/compute-economics/provider-rate-card.schema.json)
 - Currency metadata snapshot: [currency-metadata-registry-v1.json](../../../internal/economics/currency-metadata-registry-v1.json)
 - Cost posting: [workload-cost-entry.schema.json](../../../schemas/compute-economics/workload-cost-entry.schema.json)
 - Golden fixture: [workload-cost-allocation-rate-boundary-v1.json](../../../schemas/compute-economics/examples/workload-cost-allocation-rate-boundary-v1.json)
 
-For v1, the costable usage interval must be exactly attributed to one tenant, project, Workload, Allocation, Provider, Pool and GPU Profile. Ambiguous or missing identity is not costable input. GPU quantity is a positive whole-device count; fractional GPU/MIG pricing requires a separate profile-scoped contract. The accepted Allocation interval must be supported by the P0 projection/evidence contract (including applicable Provider resource, Kueue admission and DRA/device evidence); a Provider acknowledgement alone is insufficient. V1 supports full GPU device counts only. Fractional shares and MIG/device partitions require a separate profile-scoped unit contract.
+For v1, the costable usage interval must be derived from the complete Provider/Kueue/device evidence gate in [Allocation Usage Evidence v1](ALLOCATION-USAGE-EVIDENCE-V1.md) and exactly attributed to one tenant, project, Workload, Allocation, Provider, Pool and GPU Profile. Ambiguous or missing identity is not costable input. GPU quantity is a positive whole-device count; fractional GPU/MIG pricing requires a separate profile-scoped contract. The accepted Allocation interval must be supported by the P0 projection/evidence contract (including applicable Provider resource, Kueue admission and DRA/device evidence); a Provider acknowledgement alone is insufficient. V1 supports full GPU device counts only. Fractional shares and MIG/device partitions require a separate profile-scoped unit contract.
 
 ## 3. Calculation
 
