@@ -41,7 +41,7 @@ jobs:
           fi
       - name: Show Go formatting diff on failure
         if: failure()
-        run: gofmt -d internal/httpapi/workload_create.go internal/httpapi/workload_create_test.go
+        run: gofmt -d internal/httpapi/workload_create.go internal/httpapi/workload_create_test.go internal/store/postgres/acceptance.go internal/store/postgres/acceptance_test.go
       - name: Verify module checksums
         run: go mod verify
       - name: Apply PostgreSQL migrations (checksummed runner, run twice for idempotency)
