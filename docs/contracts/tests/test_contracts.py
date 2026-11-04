@@ -248,6 +248,64 @@ class ContractSchemasTest(unittest.TestCase):
             },
         })
 
+    def test_openapi_matches_implemented_workload_read_and_auth_boundary(self) -> None:
+        document = json.loads((CONTRACT_ROOT / "openapi.json").read_text(encoding="utf-8"))
+        paths = document["paths"]
+        get_workload = paths["/api/v1/workloads/{workload_id}"]["get"]
+        response_ref = get_workload["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
+        self.assertEqual(response_ref, "#/components/schemas/WorkloadDetails")
+
+        details = self.validator("compute-workload-details-v1.schema.json")
+        details.validate({
+            "workload": {
+                "workload_id": "workload-001",
+                "project_id": "project-001",
+                "desired_generation": 1,
+                "version": 1,
+                "desired_state": "ACTIVE",
+                "observed_phase": "ACCEPTED",
+                "latest_allocation_id": "allocation-001",
+                "created_at": OBSERVED_AT,
+                "updated_at": OBSERVED_AT,
+            },
+            "allocations": [{
+                "allocation_id": "allocation-001",
+                "provider_id": "provider-001",
+                "pool_id": "pool-001",
+                "desired_generation": 1,
+                "phase": "PENDING",
+                "version": 1,
+            }],
+            "operations": [{
+                "compute_operation_id": "operation-001",
+                "allocation_id": "allocation-001",
+                "provider_id": "provider-001",
+                "operation_kind": "CREATE",
+                "desired_generation": 1,
+                "version": 1,
+                "status": "PENDING",
+            }],
+            "history_truncated": False,
+        })
+        with self.assertRaises(ValidationError):
+            details.validate({"workload_id": "workload-001"})
+
+        self.assertIn("ServiceMTLS", document["components"]["securitySchemes"])
+        self.assertEqual(document["components"]["securitySchemes"]["ServiceMTLS"]["type"], "mutualTLS")
+        for route, method in (
+            ("/api/v1/workloads", "post"),
+            ("/api/v1/workloads/{workload_id}", "get"),
+        ):
+            self.assertEqual(paths[route][method]["security"], [{"ServiceMTLS": []}])
+            self.assertEqual(paths[route][method]["x-implementation-status"], "handler-unmounted")
+        for route, method in (
+            ("/api/v1/workloads", "get"),
+            ("/api/v1/workloads/{workload_id}", "delete"),
+            ("/api/v1/workloads/{workload_id}/allocations", "get"),
+            ("/api/v1/compute-operations/{compute_operation_id}", "get"),
+        ):
+            self.assertEqual(paths[route][method]["x-implementation-status"], "proposed")
+
     def test_openapi_declares_write_and_read_contract_paths_and_local_schema_refs(self) -> None:
         openapi_path = CONTRACT_ROOT / "openapi.json"
         document = json.loads(openapi_path.read_text(encoding="utf-8"))
@@ -273,7 +331,7 @@ class ContractSchemasTest(unittest.TestCase):
         idempotency = next(p for p in create["parameters"] if p["name"] == "Idempotency-Key")
         self.assertTrue(idempotency["required"])
         self.assertIn("202", create["responses"])
-        self.assertIn("ServiceBearerAuth", create["security"][0])
+        self.assertIn("ServiceMTLS", create["security"][0])
 
         def walk(value: Any) -> None:
             if isinstance(value, dict):
