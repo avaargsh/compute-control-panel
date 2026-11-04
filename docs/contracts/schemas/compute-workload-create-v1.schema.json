@@ -1,5 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.compute-control-panel.dev/v1/compute-workload-create-v1.schema.json",
   "title": "Compute Workload create request v1",
   "type": "object",
   "required": [
