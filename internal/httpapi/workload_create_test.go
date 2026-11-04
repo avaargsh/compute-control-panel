@@ -256,6 +256,14 @@ func TestCreateWorkloadPersistsAuthorizedAtomicAcceptance(t *testing.T) {
 }
 
 
+func TestValidWorkloadDigestRequiresCanonicalLowercaseHex(t *testing.T) {
+	if !validWorkloadDigest("sha256:"+strings.Repeat("a", 64)) {
+		t.Fatal("lowercase SHA-256 digest should be accepted")
+	}
+	if validWorkloadDigest("sha256:"+strings.Repeat("A", 64)) {
+		t.Fatal("uppercase SHA-256 digest must be rejected as non-canonical")
+	}
+}
 func TestDecodeWorkloadCreateExcludesGuardPermitFromPersistedIntent(t *testing.T) {
 	base := validCreateBody()
 	permitA := `"authorization":{"guard_operation_id":"guard-001","permit_ref":"permit-v1","action_hash":"sha256:` + strings.Repeat("a", 64) + `","audience":"compute-control-panel"},`
