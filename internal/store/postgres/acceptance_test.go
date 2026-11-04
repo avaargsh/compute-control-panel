@@ -261,6 +261,51 @@ func TestAcceptWorkloadOutboxFailureRollsBackAllAcceptanceRows(t *testing.T) {
 	}
 }
 
+func TestOperationAllocationForeignKeyRejectsProviderAndGenerationMismatch(t *testing.T) {
+	db := openIntegrationDB(t)
+	repo, _ := NewRepository(db)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	params := acceptanceFixture(t, "tenant-allocation-fk-"+randomSuffix(t),
+		"workload-key-"+randomSuffix(t), "operation-key-"+randomSuffix(t),
+		"event-operation-"+randomSuffix(t))
+	accepted, created, err := repo.AcceptWorkload(ctx, params)
+	if err != nil || !created {
+		t.Fatalf("seed accepted Allocation: created=%t err=%v", created, err)
+	}
+
+	cases := []struct {
+		name       string
+		providerID string
+		generation int64
+	}{
+		{name: "provider mismatch", providerID: "provider-forged", generation: 1},
+		{name: "generation mismatch", providerID: params.ProviderID, generation: 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := db.ExecContext(ctx, `INSERT INTO compute_operations (
+				compute_operation_id, tenant_id, workload_id, allocation_id, provider_id,
+				operation_kind, desired_generation, provider_request_digest, idempotency_key,
+				version, fence_token, status
+			) VALUES ($1,$2,$3,$4,$5,'CREATE',$6,$7,$8,1,0,'PENDING')`,
+				"forged-operation-"+randomSuffix(t),
+				params.Workload.TenantID,
+				accepted.Workload.WorkloadID,
+				accepted.Allocation.AllocationID,
+				tc.providerID,
+				tc.generation,
+				"sha256:"+strings.Repeat("b", 64),
+				"forged-idempotency-"+randomSuffix(t),
+			)
+			if err == nil {
+				t.Fatalf("composite Allocation FK accepted %s", tc.name)
+			}
+		})
+	}
+}
+
 func TestAcceptWorkloadRejectsCrossBoundOperationAndAllocation(t *testing.T) {
 	params := acceptanceFixture(t, "tenant-accept-invalid", "workload-key", "operation-key", "event-op")
 	params.Operation.ProviderID = "provider-other"
