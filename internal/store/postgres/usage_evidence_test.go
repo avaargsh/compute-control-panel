@@ -21,7 +21,7 @@ func usageRecord(a WorkloadAcceptance, id, source, uid, at string) economics.Evi
 	sourceTime := observed
 	return economics.EvidenceRecord{
 		ObservationID: id + "-" + a.Allocation.AllocationID,
-		TenantID: a.Workload.TenantID, ProjectID: a.Workload.ProjectID,
+		TenantID:      a.Workload.TenantID, ProjectID: a.Workload.ProjectID,
 		WorkloadID: a.Workload.WorkloadID, AllocationID: a.Allocation.AllocationID,
 		AllocationGeneration: a.Allocation.DesiredGeneration, ProviderID: a.Allocation.ProviderID,
 		Source: source, AdapterVersion: "v1", NativeUID: uid,
@@ -58,7 +58,7 @@ func typedUsageEvidence(a WorkloadAcceptance) PersistUsageEvidenceParams {
 		},
 		ResourceID: "provider-resource-" + id, ResourceUID: providerUID,
 		PoolID: a.Allocation.PoolID, ProfileID: "profile-h100", GPUModel: "H100", GPUCount: 1,
-		Binding: usageRecord(a, "provider-binding", "provider", providerUID, "2026-11-04T09:05:00Z"),
+		Binding:            usageRecord(a, "provider-binding", "provider", providerUID, "2026-11-04T09:05:00Z"),
 		CostLiabilityStart: usageRecord(a, "provider-liability-start", "provider", providerUID, "2026-11-04T08:35:00Z"),
 	}
 	e.Provider.Binding.ComputeOperationID = a.Operation.ID
@@ -92,8 +92,8 @@ func typedUsageEvidence(a WorkloadAcceptance) PersistUsageEvidenceParams {
 	return PersistUsageEvidenceParams{
 		Evidence: e,
 		Policy: economics.EvidencePolicy{
-			Version: "allocation-evidence-v1",
-			AsOf: time.Date(2026, 11, 4, 12, 10, 0, 0, time.UTC),
+			Version:          "allocation-evidence-v1",
+			AsOf:             time.Date(2026, 11, 4, 12, 10, 0, 0, time.UTC),
 			MaximumClockSkew: 2 * time.Minute,
 			TrustedSourceTimestampAdapters: map[string]bool{
 				"provider@v1": true, "kueue@v1": true, "kubernetes@v1": true, "dra@v1": true,
@@ -126,22 +126,30 @@ func markUsageEvidenceProviderOperationSucceeded(t *testing.T, db *sql.DB, a Wor
 func TestPersistUsageEvidenceSetRequiresSuccessfulProviderOperation(t *testing.T) {
 	db := openIntegrationDB(t)
 	repo, err := NewRepository(db)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
 	p := acceptanceFixture(t, "tenant-evidence-pending-"+randomSuffix(t),
 		"workload-key-"+randomSuffix(t), "operation-key-"+randomSuffix(t), "operation-event-"+randomSuffix(t))
 	a, created, err := repo.AcceptWorkload(ctx, p)
-	if err != nil || !created { t.Fatalf("AcceptWorkload: created=%t err=%v", created, err) }
+	if err != nil || !created {
+		t.Fatalf("AcceptWorkload: created=%t err=%v", created, err)
+	}
 
 	if _, persisted, err := repo.PersistUsageEvidenceSet(ctx, typedUsageEvidence(a)); !errors.Is(err, ErrUsageEvidenceNotReady) || persisted {
 		t.Fatalf("PENDING Provider operation persisted evidence: persisted=%t err=%v", persisted, err)
 	}
 	var count int
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM compute_allocation_usage_evidence_sets WHERE tenant_id=$1 AND allocation_id=$2`,
-		a.Workload.TenantID, a.Allocation.AllocationID).Scan(&count); err != nil { t.Fatal(err) }
-	if count != 0 { t.Fatalf("PENDING Provider operation created %d evidence rows, want 0", count) }
+		a.Workload.TenantID, a.Allocation.AllocationID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("PENDING Provider operation created %d evidence rows, want 0", count)
+	}
 }
 
 func TestPersistUsageEvidenceSetIsImmutableIdempotentAndTenantScoped(t *testing.T) {
@@ -159,9 +167,13 @@ func TestPersistUsageEvidenceSetIsImmutableIdempotentAndTenantScoped(t *testing.
 
 	params := typedUsageEvidence(a)
 	first, persisted, err := repo.PersistUsageEvidenceSet(ctx, params)
-	if err != nil || !persisted { t.Fatalf("first persist: persisted=%t err=%v", persisted, err) }
+	if err != nil || !persisted {
+		t.Fatalf("first persist: persisted=%t err=%v", persisted, err)
+	}
 	replayed, persisted, err := repo.PersistUsageEvidenceSet(ctx, params)
-	if err != nil || persisted { t.Fatalf("exact replay: persisted=%t err=%v", persisted, err) }
+	if err != nil || persisted {
+		t.Fatalf("exact replay: persisted=%t err=%v", persisted, err)
+	}
 	if replayed.EvidenceDigest != first.EvidenceDigest || !replayed.RecordedAt.Equal(first.RecordedAt) {
 		t.Fatalf("replay changed immutable evidence: first=%+v replay=%+v", first, replayed)
 	}
@@ -189,9 +201,13 @@ func TestPersistUsageEvidenceSetIsImmutableIdempotentAndTenantScoped(t *testing.
 		t.Fatalf("persisted evidence scope mismatch: %+v", got)
 	}
 	if _, err := db.ExecContext(ctx, `UPDATE compute_allocation_usage_evidence_sets SET evidence_digest='sha256:' || repeat('c',64) WHERE tenant_id=$1 AND evidence_set_id=$2`,
-		params.Evidence.TenantID, first.EvidenceSetID); err == nil { t.Fatal("immutable evidence accepted UPDATE") }
+		params.Evidence.TenantID, first.EvidenceSetID); err == nil {
+		t.Fatal("immutable evidence accepted UPDATE")
+	}
 	if _, err := db.ExecContext(ctx, `DELETE FROM compute_allocation_usage_evidence_sets WHERE tenant_id=$1 AND evidence_set_id=$2`,
-		params.Evidence.TenantID, first.EvidenceSetID); err == nil { t.Fatal("immutable evidence accepted DELETE") }
+		params.Evidence.TenantID, first.EvidenceSetID); err == nil {
+		t.Fatal("immutable evidence accepted DELETE")
+	}
 }
 
 func TestPersistUsageEvidenceSetConcurrentReplayHasOneWinner(t *testing.T) {
@@ -224,38 +240,55 @@ func TestPersistUsageEvidenceSetConcurrentReplayHasOneWinner(t *testing.T) {
 	wg.Wait()
 	winners := 0
 	for i := range results {
-		if errs[i] != nil { t.Fatalf("concurrent persist[%d]: %v", i, errs[i]) }
-		if createdFlags[i] { winners++ }
-		if results[i].EvidenceDigest == "" { t.Fatalf("concurrent persist[%d] returned empty digest", i) }
+		if errs[i] != nil {
+			t.Fatalf("concurrent persist[%d]: %v", i, errs[i])
+		}
+		if createdFlags[i] {
+			winners++
+		}
+		if results[i].EvidenceDigest == "" {
+			t.Fatalf("concurrent persist[%d] returned empty digest", i)
+		}
 	}
-	if winners != 1 { t.Fatalf("created=true count = %d, want exactly one", winners) }
+	if winners != 1 {
+		t.Fatalf("created=true count = %d, want exactly one", winners)
+	}
 	var count int
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM compute_allocation_usage_evidence_sets WHERE tenant_id=$1 AND allocation_id=$2 AND allocation_generation=$3`,
-		params.Evidence.TenantID, params.Evidence.AllocationID, params.Evidence.AllocationGeneration).Scan(&count); err != nil { t.Fatal(err) }
-	if count != 1 { t.Fatalf("concurrent replay created %d rows, want 1", count) }
+		params.Evidence.TenantID, params.Evidence.AllocationID, params.Evidence.AllocationGeneration).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("concurrent replay created %d rows, want 1", count)
+	}
 }
 
 func TestPersistUsageEvidenceSetRejectsIncompleteOrForgedSourceFacts(t *testing.T) {
 	a := WorkloadAcceptance{
-		Workload: Workload{TenantID:"tenant-1", ProjectID:"project-1", WorkloadID:"workload-1"},
-		Allocation: Allocation{AllocationID:"allocation-1", DesiredGeneration:7, ProviderID:"provider-1", PoolID:"pool-h100"},
-		Operation: operation.Operation{ID:"compute-operation-1"},
+		Workload:   Workload{TenantID: "tenant-1", ProjectID: "project-1", WorkloadID: "workload-1"},
+		Allocation: Allocation{AllocationID: "allocation-1", DesiredGeneration: 7, ProviderID: "provider-1", PoolID: "pool-h100"},
+		Operation:  operation.Operation{ID: "compute-operation-1"},
 	}
 	valid := typedUsageEvidence(a)
-	cases := []struct{name string; mutate func(*PersistUsageEvidenceParams)}{
-		{"Kueue not admitted", func(p *PersistUsageEvidenceParams) { p.Evidence.Kueue.Admitted=false }},
-		{"missing DRA release", func(p *PersistUsageEvidenceParams) { p.Evidence.Device.Release=nil }},
-		{"cross-Project source", func(p *PersistUsageEvidenceParams) { p.Evidence.ProjectID="project-forged" }},
-		{"invalid Provider request digest", func(p *PersistUsageEvidenceParams) { p.Evidence.Provider.Operation.RequestDigest="invalid" }},
-		{"duplicate observation identity", func(p *PersistUsageEvidenceParams) { p.Evidence.Device.Release.ObservationID=p.Evidence.Device.Assignment.ObservationID }},
-		{"wrong Provider authority", func(p *PersistUsageEvidenceParams) { p.Evidence.Provider.Binding.Source="kubernetes" }},
+	cases := []struct {
+		name   string
+		mutate func(*PersistUsageEvidenceParams)
+	}{
+		{"Kueue not admitted", func(p *PersistUsageEvidenceParams) { p.Evidence.Kueue.Admitted = false }},
+		{"missing DRA release", func(p *PersistUsageEvidenceParams) { p.Evidence.Device.Release = nil }},
+		{"cross-Project source", func(p *PersistUsageEvidenceParams) { p.Evidence.ProjectID = "project-forged" }},
+		{"invalid Provider request digest", func(p *PersistUsageEvidenceParams) { p.Evidence.Provider.Operation.RequestDigest = "invalid" }},
+		{"duplicate observation identity", func(p *PersistUsageEvidenceParams) {
+			p.Evidence.Device.Release.ObservationID = p.Evidence.Device.Assignment.ObservationID
+		}},
+		{"wrong Provider authority", func(p *PersistUsageEvidenceParams) { p.Evidence.Provider.Binding.Source = "kubernetes" }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			changed := valid
 			tc.mutate(&changed)
-			if _, _, err := (&Repository{}).PersistUsageEvidenceSet(context.Background(), changed); err == nil {
-				t.Fatal("invalid or incomplete E1 evidence was accepted")
+			if _, err := deriveUsageEvidence(changed); !errors.Is(err, ErrUsageEvidenceNotReady) {
+				t.Fatalf("invalid or incomplete E1 evidence result: %v", err)
 			}
 		})
 	}
