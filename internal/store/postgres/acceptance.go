@@ -299,7 +299,7 @@ func (r *Repository) GetAcceptanceByIdempotency(ctx context.Context, lookup Acce
 			Kind:           operation.Create,
 		},
 	}
-	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
 	if err != nil {
 		return WorkloadAcceptance{}, false, fmt.Errorf("begin acceptance lookup: %w", err)
 	}
