@@ -1,0 +1,66 @@
+name: Go validation
+
+on:
+  push:
+    branches: [main, "feat/go-foundation"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: compute-ci
+          POSTGRES_USER: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6, immutable commit
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6, immutable commit
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Check Go formatting
+        shell: bash
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [[ -n "$unformatted" ]]; then
+            printf 'Unformatted Go files:\n%s\n' "$unformatted"
+            exit 1
+          fi
+      - name: Show Go formatting diff on failure
+        if: failure()
+        run: gofmt -d internal/httpapi/workload_create.go internal/httpapi/workload_create_test.go internal/httpapi/spiffe_auth.go internal/httpapi/spiffe_auth_test.go internal/httpapi/workload_read.go internal/httpapi/workload_read_test.go internal/store/postgres/acceptance.go internal/store/postgres/acceptance_test.go internal/store/postgres/read.go internal/store/postgres/identity.go internal/store/postgres/identity_test.go internal/identity/principal.go
+      - name: Verify module checksums
+        run: go mod verify
+      - name: Apply PostgreSQL migrations (checksummed runner, run twice for idempotency)
+        env:
+          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
+        run: |
+          go run ./cmd/migrate
+          go run ./cmd/migrate
+      - name: Validate PostgreSQL schema constraints
+        env:
+          PGPASSWORD: compute-ci
+        run: psql --host=127.0.0.1 --username=postgres --dbname=postgres --set=ON_ERROR_STOP=1 --file=migrations/tests/0001_compute_core_constraints.sql
+      - name: Static analysis
+        run: go vet ./...
+      - name: Race-enabled tests
+        env:
+          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
+        run: go test -race -count=1 ./...
+      - name: SIGKILL recovery repeatability
+        env:
+          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
+        run: go test -race -count=3 -run '^TestSIGKILLRecoveryLeaseIsFencedBeforeInspection$' ./internal/recovery
