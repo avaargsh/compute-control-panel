@@ -1,6 +1,7 @@
 package economics
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -20,21 +21,21 @@ func evidenceRecord(t *testing.T, id, source, nativeUID, observedAt, sourceTimes
 	observed := evidenceTime(t, observedAt)
 	recorded := observed.Add(5 * time.Second)
 	record := EvidenceRecord{
-		ObservationID: id,
-		TenantID: "tenant-1",
-		ProjectID: "project-1",
-		WorkloadID: "workload-1",
-		AllocationID: "allocation-1",
-		AllocationGeneration: 7,
-		ProviderID: "provider-1",
-		Source: source,
-		AdapterVersion: "v1",
-		NativeUID: nativeUID,
+		ObservationID:         id,
+		TenantID:              "tenant-1",
+		ProjectID:             "project-1",
+		WorkloadID:            "workload-1",
+		AllocationID:          "allocation-1",
+		AllocationGeneration:  7,
+		ProviderID:            "provider-1",
+		Source:                source,
+		AdapterVersion:        "v1",
+		NativeUID:             nativeUID,
 		NativeResourceVersion: "rv-" + id,
-		ObservedAt: observed,
-		RecordedAt: recorded,
-		ResponseDigest: "sha256:" + strings.Repeat("a", 64),
-		EvidenceRef: "evidence://" + id,
+		ObservedAt:            observed,
+		RecordedAt:            recorded,
+		ResponseDigest:        "sha256:" + strings.Repeat("a", 64),
+		EvidenceRef:           "evidence://" + id,
 	}
 	if sourceTimestamp != "" {
 		timestamp := evidenceTime(t, sourceTimestamp)
@@ -46,90 +47,90 @@ func evidenceRecord(t *testing.T, id, source, nativeUID, observedAt, sourceTimes
 func validAllocationUsageEvidence(t *testing.T) (AllocationUsageEvidence, EvidencePolicy) {
 	t.Helper()
 	evidence := AllocationUsageEvidence{
-		SchemaVersion: AllocationUsageEvidenceSchemaVersion,
-		EvidenceSetID: "evidence-set-1",
-		TenantID: "tenant-1",
-		ProjectID: "project-1",
-		WorkloadID: "workload-1",
-		AllocationID: "allocation-1",
-		AllocationGeneration: 7,
-		ProviderID: "provider-1",
-		PoolID: "pool-h100",
-		ProfileID: "profile-h100",
-		CapabilityProfileID: "k8s-kueue-dra-profile-v1",
-		GPUModel: "H100",
-		GPUCount: "2",
+		SchemaVersion:         AllocationUsageEvidenceSchemaVersion,
+		EvidenceSetID:         "evidence-set-1",
+		TenantID:              "tenant-1",
+		ProjectID:             "project-1",
+		WorkloadID:            "workload-1",
+		AllocationID:          "allocation-1",
+		AllocationGeneration:  7,
+		ProviderID:            "provider-1",
+		PoolID:                "pool-h100",
+		ProfileID:             "profile-h100",
+		CapabilityProfileID:   "k8s-kueue-dra-profile-v1",
+		GPUModel:              "H100",
+		GPUCount:              "2",
 		MeteringPolicyVersion: "allocation-evidence-v1",
 		Provider: ProviderUsageEvidence{
 			Operation: ComputeOperationUsageEvidence{
-				ID: "compute-operation-1",
-				TenantID: "tenant-1",
-				ProjectID: "project-1",
-				WorkloadID: "workload-1",
-				AllocationID: "allocation-1",
+				ID:                "compute-operation-1",
+				TenantID:          "tenant-1",
+				ProjectID:         "project-1",
+				WorkloadID:        "workload-1",
+				AllocationID:      "allocation-1",
 				DesiredGeneration: 7,
-				ProviderID: "provider-1",
-				Status: "SUCCEEDED",
-				RequestDigest: "sha256:" + strings.Repeat("b", 64),
+				ProviderID:        "provider-1",
+				Status:            "SUCCEEDED",
+				RequestDigest:     "sha256:" + strings.Repeat("b", 64),
 			},
-			ResourceID: "provider-resource-1",
+			ResourceID:  "provider-resource-1",
 			ResourceUID: "provider-resource-uid-1",
-			PoolID: "pool-h100",
-			ProfileID: "profile-h100",
-			GPUModel: "H100",
-			GPUCount: 2,
+			PoolID:      "pool-h100",
+			ProfileID:   "profile-h100",
+			GPUModel:    "H100",
+			GPUCount:    2,
 			Binding: func() EvidenceRecord {
 				record := evidenceRecord(t, "provider-binding", "provider", "provider-resource-uid-1", "2026-11-04T09:05:00Z", "2026-11-04T09:00:00Z")
 				record.ComputeOperationID = "compute-operation-1"
 				return record
 			}(),
 			CostLiabilityStart: evidenceRecord(t, "provider-cost-start", "provider", "provider-resource-uid-1", "2026-11-04T08:35:00Z", "2026-11-04T08:30:00Z"),
-			CostLiabilityEnd: recordPtr(evidenceRecord(t, "provider-cost-end", "provider", "provider-resource-uid-1", "2026-11-04T12:00:00Z", "2026-11-04T11:55:00Z")),
+			CostLiabilityEnd:   recordPtr(evidenceRecord(t, "provider-cost-end", "provider", "provider-resource-uid-1", "2026-11-04T12:00:00Z", "2026-11-04T11:55:00Z")),
 		},
 		Kueue: KueueUsageEvidence{
-			WorkloadUID: "kueue-workload-uid-1",
-			JobUID: "job-uid-1",
-			ProfileID: "profile-h100",
-			LocalQueue: "gpu-queue",
-			ClusterQueue: "gpu-cluster-queue",
-			ResourceFlavor: "h100-flavor",
-			GPUResourceName: "vendor.example.com/gpu",
-			Admitted: true,
+			WorkloadUID:      "kueue-workload-uid-1",
+			JobUID:           "job-uid-1",
+			ProfileID:        "profile-h100",
+			LocalQueue:       "gpu-queue",
+			ClusterQueue:     "gpu-cluster-queue",
+			ResourceFlavor:   "h100-flavor",
+			GPUResourceName:  "vendor.example.com/gpu",
+			Admitted:         true,
 			AdmittedGPUCount: 2,
-			Admission: evidenceRecord(t, "kueue-admission", "kueue", "kueue-workload-uid-1", "2026-11-04T09:20:00Z", "2026-11-04T09:10:00Z"),
-			Release: recordPtr(evidenceRecord(t, "kueue-release", "kueue", "kueue-workload-uid-1", "2026-11-04T11:50:00Z", "2026-11-04T11:45:00Z")),
+			Admission:        evidenceRecord(t, "kueue-admission", "kueue", "kueue-workload-uid-1", "2026-11-04T09:20:00Z", "2026-11-04T09:10:00Z"),
+			Release:          recordPtr(evidenceRecord(t, "kueue-release", "kueue", "kueue-workload-uid-1", "2026-11-04T11:50:00Z", "2026-11-04T11:45:00Z")),
 		},
 		Pod: PodUsageEvidence{
-			PodUID: "pod-uid-1",
-			JobUID: "job-uid-1",
-			NodeName: "gpu-node-1",
-			Scheduled: true,
+			PodUID:          "pod-uid-1",
+			JobUID:          "job-uid-1",
+			NodeName:        "gpu-node-1",
+			Scheduled:       true,
 			ScheduledRecord: evidenceRecord(t, "pod-scheduled", "kubernetes", "pod-uid-1", "2026-11-04T09:25:00Z", "2026-11-04T09:12:00Z"),
 		},
 		Device: DeviceUsageEvidence{
-			Mode: DeviceEvidenceModeDRA,
+			Mode:                DeviceEvidenceModeDRA,
 			CapabilityProfileID: "k8s-kueue-dra-profile-v1",
-			ClaimUID: "resource-claim-uid-1",
-			PodUID: "pod-uid-1",
-			Driver: "gpu.example.com",
-			PoolID: "pool-h100",
-			ProfileID: "profile-h100",
-			ResourceUID: "resource-claim-uid-1",
-			GPUCount: 2,
-			DeviceIDs: []string{"gpu-device-01", "gpu-device-02"},
-			Assignment: evidenceRecord(t, "device-assignment", "dra", "resource-claim-uid-1", "2026-11-04T09:30:00Z", "2026-11-04T09:15:00Z"),
-			Release: recordPtr(evidenceRecord(t, "device-release", "dra", "resource-claim-uid-1", "2026-11-04T11:55:00Z", "2026-11-04T11:50:00Z")),
+			ClaimUID:            "resource-claim-uid-1",
+			PodUID:              "pod-uid-1",
+			Driver:              "gpu.example.com",
+			PoolID:              "pool-h100",
+			ProfileID:           "profile-h100",
+			ResourceUID:         "resource-claim-uid-1",
+			GPUCount:            2,
+			DeviceIDs:           []string{"gpu-device-01", "gpu-device-02"},
+			Assignment:          evidenceRecord(t, "device-assignment", "dra", "resource-claim-uid-1", "2026-11-04T09:30:00Z", "2026-11-04T09:15:00Z"),
+			Release:             recordPtr(evidenceRecord(t, "device-release", "dra", "resource-claim-uid-1", "2026-11-04T11:55:00Z", "2026-11-04T11:50:00Z")),
 		},
 	}
 	policy := EvidencePolicy{
-		Version: "allocation-evidence-v1",
-		AsOf: evidenceTime(t, "2026-11-04T12:10:00Z"),
+		Version:          "allocation-evidence-v1",
+		AsOf:             evidenceTime(t, "2026-11-04T12:10:00Z"),
 		MaximumClockSkew: 2 * time.Minute,
 		TrustedSourceTimestampAdapters: map[string]bool{
-			"provider@v1": true,
-			"kueue@v1": true,
+			"provider@v1":   true,
+			"kueue@v1":      true,
 			"kubernetes@v1": true,
-			"dra@v1": true,
+			"dra@v1":        true,
 		},
 		CertifiedDeviceAdapters: map[string]bool{},
 	}
@@ -207,39 +208,39 @@ func TestDeriveUsageIntervalFailsClosedForMissingAdmissionAndRelease(t *testing.
 
 func TestDeriveUsageIntervalRejectsIdentityGenerationAndQuantityConflicts(t *testing.T) {
 	tests := []struct {
-		name string
+		name   string
 		mutate func(*AllocationUsageEvidence)
-		want string
+		want   string
 	}{
 		{
-			name: "stale generation",
+			name:   "stale generation",
 			mutate: func(e *AllocationUsageEvidence) { e.Device.Assignment.AllocationGeneration++ },
-			want: ReasonGenerationMismatch,
+			want:   ReasonGenerationMismatch,
 		},
 		{
-			name: "provider UID mismatch",
+			name:   "provider UID mismatch",
 			mutate: func(e *AllocationUsageEvidence) { e.Provider.Binding.NativeUID = "foreign-provider-uid" },
-			want: ReasonProviderIdentityMismatch,
+			want:   ReasonProviderIdentityMismatch,
 		},
 		{
-			name: "Kueue Job and Pod owner mismatch",
+			name:   "Kueue Job and Pod owner mismatch",
 			mutate: func(e *AllocationUsageEvidence) { e.Pod.JobUID = "foreign-job-uid" },
-			want: ReasonKueueIdentityMismatch,
+			want:   ReasonKueueIdentityMismatch,
 		},
 		{
-			name: "device claim references another pod",
+			name:   "device claim references another pod",
 			mutate: func(e *AllocationUsageEvidence) { e.Device.PodUID = "foreign-pod-uid" },
-			want: ReasonDeviceAssignmentMissing,
+			want:   ReasonDeviceAssignmentMissing,
 		},
 		{
-			name: "device count mismatch",
+			name:   "device count mismatch",
 			mutate: func(e *AllocationUsageEvidence) { e.Device.GPUCount = 1 },
-			want: ReasonDeviceCountMismatch,
+			want:   ReasonDeviceCountMismatch,
 		},
 		{
-			name: "provider count mismatch",
+			name:   "provider count mismatch",
 			mutate: func(e *AllocationUsageEvidence) { e.Provider.GPUCount = 4 },
-			want: ReasonDeviceCountMismatch,
+			want:   ReasonDeviceCountMismatch,
 		},
 	}
 	for _, test := range tests {
@@ -323,7 +324,6 @@ func TestEvidenceDigestIsDeterministicAndBindsSourceFacts(t *testing.T) {
 	}
 }
 
-
 func TestCalculatorDigestBindsEvidenceSetAndCapabilityProfile(t *testing.T) {
 	usage, rates := goldenInputs(t)
 	usage.EvidenceSetID = "evidence-set-1"
@@ -352,7 +352,6 @@ func TestCalculatorRejectsPartialEvidenceProvenance(t *testing.T) {
 	}
 }
 
-
 func TestDeriveUsageIntervalUsesEarliestProviderLiabilityEnd(t *testing.T) {
 	evidence, policy := validAllocationUsageEvidence(t)
 	providerEnd := evidenceRecord(t, "provider-cost-end-early", "provider", "provider-resource-uid-1", "2026-11-04T10:05:00Z", "2026-11-04T10:00:00Z")
@@ -376,7 +375,6 @@ func TestDeriveUsageIntervalRejectsEvidenceFromWrongAuthority(t *testing.T) {
 		t.Fatalf("unexpected result=%+v err=%v", got, err)
 	}
 }
-
 
 func TestEvidenceDigestBindsNormalizedAdmissionAndPlacementFacts(t *testing.T) {
 	evidence, policy := validAllocationUsageEvidence(t)
@@ -413,7 +411,6 @@ func TestEvidenceGenerationMustBePositive(t *testing.T) {
 	}
 }
 
-
 func TestDeriveUsageIntervalRequiresSuccessfulAllocationBoundOperation(t *testing.T) {
 	t.Run("operation not succeeded", func(t *testing.T) {
 		evidence, policy := validAllocationUsageEvidence(t)
@@ -434,7 +431,6 @@ func TestDeriveUsageIntervalRequiresSuccessfulAllocationBoundOperation(t *testin
 		}
 	})
 }
-
 
 func TestDeriveUsageIntervalRejectsProviderOperationScopeMismatch(t *testing.T) {
 	tests := []struct {
