@@ -302,7 +302,6 @@ class ComputeEconomicsContractTests(unittest.TestCase):
                     "currency": "CNY",
                     "currency_minor_unit": 2,
                     "currency_metadata_version": "six-list-one-2026-09-17-subset-v1",
-                    "currency_metadata_version": "six-list-one-2026-09-17-subset-v1",
                 },
                 {
                     "start": "2026-11-01T10:30:00Z",
@@ -313,6 +312,7 @@ class ComputeEconomicsContractTests(unittest.TestCase):
                     "amount": "36.00",
                     "currency": "CNY",
                     "currency_minor_unit": 2,
+                    "currency_metadata_version": "six-list-one-2026-09-17-subset-v1",
                 },
             ],
             segments,
@@ -414,6 +414,7 @@ class ComputeEconomicsContractTests(unittest.TestCase):
             "rateAmount": segment["rateAmountPerGpuHour"],
             "currency": "CNY",
             "currencyMinorUnit": 2,
+            "currencyMetadataVersion": self.currency_metadata["snapshotVersion"],
             "amount": "0.01",
             "calculationInputDigest": "sha256:" + "c" * 64,
             "calculationVersion": "cost-v1",
