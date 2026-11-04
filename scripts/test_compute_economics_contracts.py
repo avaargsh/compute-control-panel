@@ -288,6 +288,52 @@ class ComputeEconomicsContractTests(unittest.TestCase):
                 }
                 self.assertEqual(snapshot["currencies"], schema_pairs)
 
+
+    def test_workload_cost_entry_rejects_unknown_or_mismatched_currency_metadata(self) -> None:
+        segment = self.cost_fixture["expected"]["segments"][0]
+        entry = {
+            "schemaVersion": "compute.economics.workload-cost-entry.v1",
+            "costEntryId": "cost-metadata-test",
+            "entryType": "CHARGE",
+            "tenantId": "tenant-demo",
+            "projectId": "project-demo",
+            "workloadId": "workload-demo",
+            "allocationId": "allocation-demo",
+            "providerId": "provider-demo",
+            "poolId": "pool-h100",
+            "profileId": "gpu-h100-80gb",
+            "usageIntervalId": "usage-int-001",
+            "pricedWindow": {"start": segment["start"], "end": segment["end"]},
+            "pricedQuantity": segment["pricedQuantityGpuHours"],
+            "unit": "GPU_HOUR",
+            "rateCardId": segment["rateCardId"],
+            "rateCardVersion": segment["rateCardVersion"],
+            "rateAmount": segment["rateAmountPerGpuHour"],
+            "currency": "CNY",
+            "currencyMinorUnit": 2,
+            "currencyMetadataVersion": self.currency_metadata["snapshotVersion"],
+            "amount": segment["amount"],
+            "calculationInputDigest": "sha256:" + "d" * 64,
+            "calculationVersion": "cost-v1",
+            "roundingMode": "CURRENCY_MINOR_UNIT_HALF_UP",
+            "calculationStatus": "FINAL",
+            "sourceCoverage": 1,
+            "recordedAt": "2026-11-01T12:00:08Z",
+        }
+        self.assert_valid("workload_cost_entry", entry)
+
+        invalid_pairs = (("CNY", 3), ("JPY", 2), ("ZZZ", 2), ("XXX", 0))
+        for currency, minor_unit in invalid_pairs:
+            with self.subTest(currency=currency, minor_unit=minor_unit):
+                invalid = dict(entry)
+                invalid["currency"] = currency
+                invalid["currencyMinorUnit"] = minor_unit
+                self.assertFalse(self.validators["workload_cost_entry"].is_valid(invalid))
+
+        unknown_version = dict(entry)
+        unknown_version["currencyMetadataVersion"] = "unregistered-snapshot-v9"
+        self.assertFalse(self.validators["workload_cost_entry"].is_valid(unknown_version))
+
     def test_rate_boundary_fixture_prices_six_gpu_hours_at_sixty_six_cny(self) -> None:
         segments = calculate_direct_cost(
             self.cost_fixture["usageInterval"], self.cost_fixture["rateCards"]
