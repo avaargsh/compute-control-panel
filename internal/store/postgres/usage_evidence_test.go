@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -351,8 +350,5 @@ func TestValidateUsageEvidenceParamsRequiresWholeGPUCount(t *testing.T) {
 	params.SchemaVersion = "compute.economics.allocation-usage-evidence.v2"
 	if err := validateUsageEvidenceParams(params); err == nil {
 		t.Fatal("unsupported evidence schema version was accepted")
-	}
-	if err := errors.New(fmt.Sprintf("sentinel")); err == nil {
-		t.Fatal("unreachable sentinel")
 	}
 }
