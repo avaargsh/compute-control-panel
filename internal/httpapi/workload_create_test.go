@@ -517,3 +517,45 @@ func TestWorkloadCreatePinnedConsumerShapeFixtures(t *testing.T) {
 		})
 	}
 }
+
+// TestWorkloadCreateRejectsExplicitNullsAtAnyDepth proves the JSON Schema v1
+// rejects null even for optional fields; omission is allowed, null is not.
+// A null body must never reach authorization, idempotency lookup, provider
+// selection or persistence.
+func TestWorkloadCreateRejectsExplicitNullsAtAnyDepth(t *testing.T) {
+	base := validCreateBody()
+	withResources := func(resources string) string {
+		return strings.Replace(base, `"compute_profile_ref": {"id": "gpu-inference", "revision": "3"}`, `"resources": `+resources, 1)
+	}
+	cases := []struct {
+		name string
+		body string
+	}{
+		{name: "authorization omitted versus null", body: strings.Replace(base, `"compute_profile_ref":`, `"authorization": null, "compute_profile_ref":`, 1)},
+		{name: "constraints present as null", body: strings.Replace(base, `"constraints": {"pool_selector": {"capability": "gpu.h100"}, "max_duration_seconds": 7200}`, `"constraints": null`, 1)},
+		{name: "compute_profile_ref null with resources", body: strings.Replace(base, `"compute_profile_ref": {"id": "gpu-inference", "revision": "3"}`, `"compute_profile_ref": null, "resources": {"cpu":"8","memory":"32Gi"}`, 1)},
+		{name: "resources null with profile", body: strings.Replace(base, `"compute_profile_ref":`, `"resources": null, "compute_profile_ref":`, 1)},
+		{name: "storage field null", body: withResources(`{"cpu":"8","memory":"32Gi","storage":null}`)},
+		{name: "accelerators field null", body: withResources(`{"cpu":"8","memory":"32Gi","accelerators":null}`)},
+		{name: "accelerators array null element", body: withResources(`{"cpu":"8","memory":"32Gi","accelerators":[null]}`)},
+		{name: "pool_selector field null", body: strings.Replace(base, `"pool_selector": {"capability": "gpu.h100"}`, `"pool_selector": null`, 1)},
+		{name: "pool_selector value null", body: strings.Replace(base, `"capability": "gpu.h100"`, `"capability": null`, 1)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if !json.Valid([]byte(tc.body)) {
+				t.Fatalf("test fixture must be syntactically valid JSON: %s", tc.body)
+			}
+			principal, authorizer, selector, repo := newAcceptanceFixture()
+			handler := newAcceptanceTestHandler(t, testPrincipalAuthenticator{principal: principal}, authorizer, selector, repo)
+			recorder := performCreate(handler, tc.body, "explicit-null-contract")
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("schema-invalid null returned %d, want 400; response=%s", recorder.Code, recorder.Body.String())
+			}
+			if authorizer.calls != 0 || selector.calls != 0 || repo.lookupCalls != 0 || repo.calls != 0 {
+				t.Fatalf("null passed trust boundary: authorizer=%d selector=%d lookups=%d writes=%d",
+					authorizer.calls, selector.calls, repo.lookupCalls, repo.calls)
+			}
+		})
+	}
+}
