@@ -1,0 +1,320 @@
+{
+  "fixture_version": "compute.workload-create-consumers.v1",
+  "scope": "Producer-side shape fixtures for proposed cross-plane callers; NOT an independently executed ACP/Runtime/Guard consumer suite, permit verification, or production acceptance.",
+  "source_pins": [
+    {
+      "owner": "ACP proposed domain registry",
+      "repo": "avaargsh/agent-control-panel",
+      "commit": "39b00b1d1ed537997d6b0734c8f943f7d58174e7",
+      "path": "governance/contract-registry.v0.3.json",
+      "state": "proposed"
+    },
+    {
+      "owner": "Runtime canonical Run and RunIntent distinction",
+      "repo": "avaargsh/agent-runtime",
+      "commit": "15990113abd70db798240a3d4706c6cbd7353554",
+      "path": "internal/run/intent.go",
+      "state": "draft"
+    },
+    {
+      "owner": "Guard ActionSubmission ingress",
+      "repo": "avaargsh/EngageGuard",
+      "commit": "f92ad24e120738a76e0a324740e612ee761d041f",
+      "path": "docs/contracts/action-submission.v1.schema.json",
+      "state": "draft"
+    }
+  ],
+  "cases": [
+    {
+      "name": "runtime_run_owner",
+      "expect_schema_valid": true,
+      "body": {
+        "api_version": "compute.platform/v1",
+        "project_id": "project-001",
+        "owner_ref": {
+          "service": "agent-runtime",
+          "resource_type": "run",
+          "resource_id": "run-001"
+        },
+        "compute_profile_ref": {
+          "id": "gpu-inference",
+          "revision": "3"
+        }
+      }
+    },
+    {
+      "name": "sandbox_provider_claim_owner",
+      "expect_schema_valid": true,
+      "body": {
+        "api_version": "compute.platform/v1",
+        "project_id": "project-001",
+        "owner_ref": {
+          "service": "sandbox-provider",
+          "resource_type": "sandbox-claim",
+          "resource_id": "claim-001"
+        },
+        "compute_profile_ref": {
+          "id": "gpu-inference",
+          "revision": "3"
+        }
+      }
+    },
+    {
+      "name": "resources_decimal_with_storage",
+      "expect_schema_valid": true,
+      "body": {
+        "api_version": "compute.platform/v1",
+        "project_id": "project-001",
+        "owner_ref": {
+          "service": "agent-runtime",
+          "resource_type": "run",
+          "resource_id": "run-001"
+        },
+        "resources": {
+          "cpu": "8.5",
+          "memory": "32Gi",
+          "accelerators": [
+            {
+              "vendor": "nvidia",
+              "model": "H100",
+              "count": 1
+            }
+          ],
+          "storage": "100Gi"
+        },
+        "constraints": {
+          "max_duration_seconds": 3600,
+          "pool_selector": {
+            "class": "gpu"
+          }
+        }
+      }
+    },
+    {
+      "name": "runtime_run_with_transient_guard_proof_shape_only",
+      "expect_schema_valid": true,
+      "body": {
+        "api_version": "compute.platform/v1",
+        "project_id": "project-001",
+        "owner_ref": {
+          "service": "agent-runtime",
+          "resource_type": "run",
+          "resource_id": "run-001"
+        },
+        "compute_profile_ref": {
+          "id": "gpu-inference",
+          "revision": "3"
+        },
+        "authorization": {
+          "guard_operation_id": "guard-operation-001",
+          "permit_ref": "guard-permit-001",
+          "action_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "audience": "compute-control-panel"
+        }
+      }
+    },
+    {
+      "name": "reject_acp_run_intent_as_compute_owner",
+      "expect_schema_valid": false,
+      "body": {
+        "api_version": "compute.platform/v1",
+        "project_id": "project-001",
+        "owner_ref": {
+          "service": "agent-control-panel",
+          "resource_type": "run-intent",
+          "resource_id": "intent-001"
+        },
+        "compute_profile_ref": {
+          "id": "gpu-inference",
+          "revision": "3"
+        }
+      }
+    },
+    {
+      "name": "reject_runtime_run_intent_as_owner",
+      "expect_schema_valid": false,
+      "body": {
+        "api_version": "compute.platform/v1",
+        "project_id": "project-001",
+        "owner_ref": {
+          "service": "agent-runtime",
+          "resource_type": "run-intent",
+          "resource_id": "run-001"
+        },
+        "compute_profile_ref": {
+          "id": "gpu-inference",
+          "revision": "3"
+        }
+      }
+    },
+    {
+      "name": "reject_provider_native_resource_as_owner",
+      "expect_schema_valid": false,
+      "body": {
+        "api_version": "compute.platform/v1",
+        "project_id": "project-001",
+        "owner_ref": {
+          "service": "provider",
+          "resource_type": "resource",
+          "resource_id": "job-001"
+        },
+        "compute_profile_ref": {
+          "id": "gpu-inference",
+          "revision": "3"
+        }
+      }
+    },
+    {
+      "name": "reject_cpu_text",
+      "expect_schema_valid": false,
+      "body": {
+        "api_version": "compute.platform/v1",
+        "project_id": "project-001",
+        "owner_ref": {
+          "service": "agent-runtime",
+          "resource_type": "run",
+          "resource_id": "run-001"
+        },
+        "resources": {
+          "cpu": "eight",
+          "memory": "32Gi"
+        }
+      }
+    },
+    {
+      "name": "reject_cpu_exponent",
+      "expect_schema_valid": false,
+      "body": {
+        "api_version": "compute.platform/v1",
+        "project_id": "project-001",
+        "owner_ref": {
+          "service": "agent-runtime",
+          "resource_type": "run",
+          "resource_id": "run-001"
+        },
+        "resources": {
+          "cpu": "1e3",
+          "memory": "32Gi"
+        }
+      }
+    },
+    {
+      "name": "reject_overlong_owner_reference",
+      "expect_schema_valid": false,
+      "body": {
+        "api_version": "compute.platform/v1",
+        "project_id": "project-001",
+        "owner_ref": {
+          "service": "agent-runtime",
+          "resource_type": "run",
+          "resource_id": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+        },
+        "compute_profile_ref": {
+          "id": "gpu-inference",
+          "revision": "3"
+        }
+      }
+    },
+    {
+      "name": "reject_overlong_profile_revision",
+      "expect_schema_valid": false,
+      "body": {
+        "api_version": "compute.platform/v1",
+        "project_id": "project-001",
+        "owner_ref": {
+          "service": "agent-runtime",
+          "resource_type": "run",
+          "resource_id": "run-001"
+        },
+        "compute_profile_ref": {
+          "id": "gpu-inference",
+          "revision": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        }
+      }
+    },
+    {
+      "name": "reject_explicit_zero_duration",
+      "expect_schema_valid": false,
+      "body": {
+        "api_version": "compute.platform/v1",
+        "project_id": "project-001",
+        "owner_ref": {
+          "service": "agent-runtime",
+          "resource_type": "run",
+          "resource_id": "run-001"
+        },
+        "compute_profile_ref": {
+          "id": "gpu-inference",
+          "revision": "3"
+        },
+        "constraints": {
+          "max_duration_seconds": 0
+        }
+      }
+    },
+    {
+      "name": "reject_explicit_empty_storage",
+      "expect_schema_valid": false,
+      "body": {
+        "api_version": "compute.platform/v1",
+        "project_id": "project-001",
+        "owner_ref": {
+          "service": "agent-runtime",
+          "resource_type": "run",
+          "resource_id": "run-001"
+        },
+        "resources": {
+          "cpu": "8",
+          "memory": "32Gi",
+          "storage": ""
+        }
+      }
+    },
+    {
+      "name": "reject_guard_wrong_audience",
+      "expect_schema_valid": false,
+      "body": {
+        "api_version": "compute.platform/v1",
+        "project_id": "project-001",
+        "owner_ref": {
+          "service": "agent-runtime",
+          "resource_type": "run",
+          "resource_id": "run-001"
+        },
+        "compute_profile_ref": {
+          "id": "gpu-inference",
+          "revision": "3"
+        },
+        "authorization": {
+          "guard_operation_id": "guard-operation-001",
+          "permit_ref": "guard-permit-001",
+          "action_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "audience": "other-service"
+        }
+      }
+    },
+    {
+      "name": "reject_guard_noncanonical_action_hash",
+      "expect_schema_valid": false,
+      "body": {
+        "api_version": "compute.platform/v1",
+        "project_id": "project-001",
+        "owner_ref": {
+          "service": "agent-runtime",
+          "resource_type": "run",
+          "resource_id": "run-001"
+        },
+        "compute_profile_ref": {
+          "id": "gpu-inference",
+          "revision": "3"
+        },
+        "authorization": {
+          "guard_operation_id": "guard-operation-001",
+          "permit_ref": "guard-permit-001",
+          "action_hash": "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "audience": "compute-control-panel"
+        }
+      }
+    }
+  ]
+}
