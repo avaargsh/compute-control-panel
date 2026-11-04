@@ -277,14 +277,16 @@ class ComputeEconomicsContractTests(unittest.TestCase):
 
     def test_currency_snapshot_and_schema_have_identical_code_precision_matrix(self) -> None:
         snapshot = self.currency_metadata
-        schema = self.schemas["provider_rate_card"]
         self.assertEqual("six-list-one-2026-09-17-subset-v1", snapshot["snapshotVersion"])
-        self.assertEqual(set(snapshot["currencies"]), set(schema["properties"]["currency"]["enum"]))
-        schema_pairs = {
-            item["properties"]["currency"]["const"]: item["properties"]["currencyMinorUnit"]["const"]
-            for item in schema["oneOf"]
-        }
-        self.assertEqual(snapshot["currencies"], schema_pairs)
+        for schema_name in ("provider_rate_card", "workload_cost_entry"):
+            with self.subTest(schema=schema_name):
+                schema = self.schemas[schema_name]
+                self.assertEqual(set(snapshot["currencies"]), set(schema["properties"]["currency"]["enum"]))
+                schema_pairs = {
+                    item["properties"]["currency"]["const"]: item["properties"]["currencyMinorUnit"]["const"]
+                    for item in schema["oneOf"]
+                }
+                self.assertEqual(snapshot["currencies"], schema_pairs)
 
     def test_rate_boundary_fixture_prices_six_gpu_hours_at_sixty_six_cny(self) -> None:
         segments = calculate_direct_cost(
