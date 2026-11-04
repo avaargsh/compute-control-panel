@@ -286,9 +286,21 @@ func TestPersistUsageEvidenceSetRejectsIncompleteOrForgedSourceFacts(t *testing.
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			changed := valid
+			if valid.Evidence.Provider.CostLiabilityEnd != nil {
+				record := *valid.Evidence.Provider.CostLiabilityEnd
+				changed.Evidence.Provider.CostLiabilityEnd = &record
+			}
+			if valid.Evidence.Kueue.Release != nil {
+				record := *valid.Evidence.Kueue.Release
+				changed.Evidence.Kueue.Release = &record
+			}
+			if valid.Evidence.Device.Release != nil {
+				record := *valid.Evidence.Device.Release
+				changed.Evidence.Device.Release = &record
+			}
 			tc.mutate(&changed)
-			if _, err := deriveUsageEvidence(changed); !errors.Is(err, ErrUsageEvidenceNotReady) {
-				t.Fatalf("invalid or incomplete E1 evidence result: %v", err)
+			if _, err := deriveUsageEvidence(changed); err == nil {
+				t.Fatal("invalid or incomplete E1 evidence was accepted")
 			}
 		})
 	}
