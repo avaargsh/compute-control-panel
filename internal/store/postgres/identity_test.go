@@ -106,7 +106,6 @@ func TestResolveWorkloadPrincipalReturnsActiveTenantAndProjectGrants(t *testing.
 	}
 }
 
-
 func TestIdentityDirectoryAuditRollsBackWithIdentityMutation(t *testing.T) {
 	db := openIntegrationDB(t)
 	ctx := context.Background()
