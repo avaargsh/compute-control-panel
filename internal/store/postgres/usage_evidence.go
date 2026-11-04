@@ -16,9 +16,9 @@ import (
 )
 
 const (
-	usageIntervalUnit       = "GPU_DEVICE_COUNT"
-	usageAttributionMethod  = "DEVICE_BINDING"
-	usageEvidenceQuality    = "DERIVED"
+	usageIntervalUnit      = "GPU_DEVICE_COUNT"
+	usageAttributionMethod = "DEVICE_BINDING"
+	usageEvidenceQuality   = "DERIVED"
 )
 
 var (
@@ -38,32 +38,32 @@ type PersistUsageEvidenceParams struct {
 // UsageEvidenceSet is the immutable persistence projection for one FINAL
 // UsageInterval. One Allocation generation can have only one such record in v1.
 type UsageEvidenceSet struct {
-	SchemaVersion          string
-	EvidenceSetID          string
-	TenantID               string
-	ProjectID              string
-	WorkloadID             string
-	AllocationID           string
-	AllocationGeneration   int64
-	ProviderID             string
-	ComputeOperationID     string
-	ProviderResourceID     string
-	ProviderResourceUID    string
-	PoolID                 string
-	ProfileID              string
-	GPUModel               string
-	CapabilityProfileID    string
-	EvidencePolicyVersion  string
-	MeteringPolicyVersion  string
-	EvidenceDigest         string
-	UsageIntervalID        string
-	UsageStart             time.Time
-	UsageEnd               time.Time
-	GPUCount               int64
-	SourceEventIDs         []string
-	EvidencePayload        json.RawMessage
-	UsageIntervalPayload   json.RawMessage
-	RecordedAt             time.Time
+	SchemaVersion         string
+	EvidenceSetID         string
+	TenantID              string
+	ProjectID             string
+	WorkloadID            string
+	AllocationID          string
+	AllocationGeneration  int64
+	ProviderID            string
+	ComputeOperationID    string
+	ProviderResourceID    string
+	ProviderResourceUID   string
+	PoolID                string
+	ProfileID             string
+	GPUModel              string
+	CapabilityProfileID   string
+	EvidencePolicyVersion string
+	MeteringPolicyVersion string
+	EvidenceDigest        string
+	UsageIntervalID       string
+	UsageStart            time.Time
+	UsageEnd              time.Time
+	GPUCount              int64
+	SourceEventIDs        []string
+	EvidencePayload       json.RawMessage
+	UsageIntervalPayload  json.RawMessage
+	RecordedAt            time.Time
 }
 
 type usageEvidenceScanner interface {
@@ -144,10 +144,11 @@ func deriveUsageEvidence(p PersistUsageEvidenceParams) (derivedUsageEvidence, er
 	envelope := usageEvidenceEnvelope{
 		Evidence: p.Evidence,
 		Policy: usageEvidencePolicySnapshot{
-			Version: p.Policy.Version, AsOf: p.Policy.AsOf.UTC(),
-			MaximumClockSkew: p.Policy.MaximumClockSkew,
+			Version:                         p.Policy.Version,
+			AsOf:                            p.Policy.AsOf.UTC(),
+			MaximumClockSkew:                p.Policy.MaximumClockSkew,
 			TrustedSourceTimestampAdapters: trustedSources,
-			CertifiedDeviceAdapters: certifiedAdapters,
+			CertifiedDeviceAdapters:        certifiedAdapters,
 		},
 	}
 	evidenceJSON, err := json.Marshal(envelope)
