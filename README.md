@@ -66,25 +66,28 @@ A provider ACK, a PENDING Allocation, a Pod resource request or a queue admissio
 
 ## Current repository status — 2026-11-04
 
-The `main` branch contains the project charter and governance baseline. Implementation work remains in Draft PR branches and is not promoted to `main` until its dependency, exact-head CI and integration gates are independently satisfied.
+The `main` branch now contains the Go/PostgreSQL foundation, atomic Workload acceptance and the authenticated Workload create/read API. These are **implemented foundations**, not production-enabled endpoints or verified compute capacity. The default service does not mount the Workload handlers. Exact-head CI on a PR is not a substitute for deployed Provider, broker, Kubernetes/Kueue/DRA or production tenant-isolation evidence.
 
 ### P0 — durable Workload control and trust boundary
 
-- [PR #1 — Compute architecture and domain boundary](https://github.com/avaargsh/compute-control-panel/pull/1) (Draft).
-- [PR #2 — Go/PostgreSQL foundation and Provider operation invariants](https://github.com/avaargsh/compute-control-panel/pull/2) (Draft).
-- [PR #11 — atomic Workload + initial Allocation + CREATE Operation acceptance](https://github.com/avaargsh/compute-control-panel/pull/11) (Draft; one PostgreSQL transaction, durable intent only).
-- [PR #15 — authenticated Workload acceptance API](https://github.com/avaargsh/compute-control-panel/pull/15) (Draft; production CA, identity provisioning, Guard/Project policy, tenant RLS and Provider selector wiring remain gates).
-- [Issue #3 — P0 integration and release gate](https://github.com/avaargsh/compute-control-panel/issues/3) is the authoritative acceptance tracker.
+- [PR #2 — Go/PostgreSQL foundation and Provider operation invariants](https://github.com/avaargsh/compute-control-panel/pull/2) **merged** into main on 2026-11-04.
+- [PR #18 — atomic Workload, initial PENDING Allocation and bound CREATE Operation acceptance](https://github.com/avaargsh/compute-control-panel/pull/18) **merged** on 2026-11-04. The PostgreSQL transaction includes both dispatchable Outbox events; it is not scheduler admission or Provider realization.
+- [PR #20 — authenticated Workload create/read API and SPIFFE identity directory](https://github.com/avaargsh/compute-control-panel/pull/20) **merged** on 2026-11-04. Deployment trust bundle, tenant RLS/DB roles, concrete Guard/Project policy, Provider selector/Inspect and production endpoint mounting remain gated.
+- [PR #12 — architecture baseline and proposed OpenAPI/JSON Schema contracts](https://github.com/avaargsh/compute-control-panel/pull/12) remains **Draft**; its base snapshot predates the main implementation merges and requires reconciliation and cross-repository consumer validation.
+- [Issue #3 — P0 integration and release gate](https://github.com/avaargsh/compute-control-panel/issues/3) remains the acceptance tracker; historical status snapshots in its body must not override current PR and main-branch evidence.
+- Original PRs #1, #11 and #15 are closed without merging; their relevant slices were superseded or integrated via newer PRs above.
 
 ### Economics — contract, evidence and calculation slices
 
 - [Issue #8 — Compute Economics / GPU FinOps product direction](https://github.com/avaargsh/compute-control-panel/issues/8).
-- [PR #9 — E0 economics domain, schemas and golden fixtures](https://github.com/avaargsh/compute-control-panel/pull/9) (Draft).
-- [PR #16 — E1 trusted Allocation usage evidence contract](https://github.com/avaargsh/compute-control-panel/pull/16) (Draft; design contract).
-- [PR #17 — provider-independent derivation of costable GPU UsageInterval](https://github.com/avaargsh/compute-control-panel/pull/17) (Draft; deterministic evidence validation, no live collectors or durable evidence ledger).
-- [PR #19 — clean-main-based deterministic Workload cost calculator](https://github.com/avaargsh/compute-control-panel/pull/19) (Draft; calculation only, no production metering or posting).
+- [PR #9 — E0 economics domain, schemas and golden fixtures](https://github.com/avaargsh/compute-control-panel/pull/9) remains **Draft**.
+- [PR #14 — currency metadata contract alignment](https://github.com/avaargsh/compute-control-panel/pull/14) remains **Draft**.
+- [PR #16 — E1 trusted Allocation usage evidence contract](https://github.com/avaargsh/compute-control-panel/pull/16) remains **Draft**.
+- [PR #23 — consolidated deterministic cost calculator and E1 evidence derivation](https://github.com/avaargsh/compute-control-panel/pull/23) remains **Draft**; exact-head Go validation succeeded on `47219103d2e2f9d02daba9d4805447ba8fad9281`.
+- [PR #26 — immutable, tenant-bound FINAL Allocation usage evidence persistence](https://github.com/avaargsh/compute-control-panel/pull/26) remains **Draft**, stacked on PR #23; exact-head Go validation succeeded on `ae158a57aa2f283fea4dfa0ca4bfd367ac2ed11f`.
+- Historical calculator/derivation PRs #17 and #19 were closed without merging and superseded by consolidation PR #23.
 
-These are independent proof layers, not a claim that end-to-end billing or FinOps is ready. The calculator can price only a complete, validated UsageInterval. Production cost posting remains gated on trusted evidence collection, durable evidence-set persistence, append-only WorkloadCostEntry storage, replay/reversal semantics and exact-head integration tests.
+These are separate proof layers, not end-to-end billing or FinOps readiness. The calculator can price only a complete, validated UsageInterval. Production cost posting remains gated on authenticated evidence collection, reviewed trusted-policy provisioning, durable evidence ingestion, append-only WorkloadCostEntry/reversal storage and deployed cross-service validation.
 
 ## Delivery sequence
 
