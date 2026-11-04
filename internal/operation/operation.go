@@ -58,6 +58,7 @@ type Operation struct {
 	ID             string
 	TenantID       string
 	WorkloadID     string
+	AllocationID   string
 	ProviderID     string
 	IdempotencyKey string
 	RequestDigest  string
