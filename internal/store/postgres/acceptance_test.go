@@ -108,6 +108,33 @@ func TestAcceptWorkloadCommitsWorkloadAllocationOperationAndEventsAtomically(t *
 		t.Fatalf("acceptance events workload/operation = %d/%d", acceptedEventCount, pendingEventCount)
 	}
 
+	var workloadEventPayload, operationEventPayload []byte
+	if err := db.QueryRowContext(ctx, `SELECT payload FROM compute_outbox_events
+		WHERE tenant_id=$1 AND aggregate_type='compute_workload' AND aggregate_id=$2
+		AND event_type='compute.workload.accepted.v1'`,
+		params.Workload.TenantID, accepted.Workload.WorkloadID).Scan(&workloadEventPayload); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT payload FROM compute_outbox_events
+		WHERE tenant_id=$1 AND aggregate_type='compute_operation' AND aggregate_id=$2
+		AND event_type='compute.operation.pending.v1'`,
+		params.Workload.TenantID, accepted.Operation.ID).Scan(&operationEventPayload); err != nil {
+		t.Fatal(err)
+	}
+	for _, payload := range [][]byte{workloadEventPayload, operationEventPayload} {
+		var envelope map[string]json.RawMessage
+		if err := json.Unmarshal(payload, &envelope); err != nil {
+			t.Fatal(err)
+		}
+		var desiredGeneration int64
+		if err := json.Unmarshal(envelope["desired_generation"], &desiredGeneration); err != nil {
+			t.Fatalf("desired_generation must be a JSON integer: %s (%v)", envelope["desired_generation"], err)
+		}
+		if desiredGeneration != 1 {
+			t.Fatalf("desired_generation = %d, want 1", desiredGeneration)
+		}
+	}
+
 	var latestAllocationID string
 	if err := db.QueryRowContext(ctx, "SELECT latest_allocation_id FROM compute_workloads WHERE tenant_id=$1 AND workload_id=$2",
 		params.Workload.TenantID, accepted.Workload.WorkloadID).Scan(&latestAllocationID); err != nil {
