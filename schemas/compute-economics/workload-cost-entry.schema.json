@@ -177,7 +177,7 @@
     "calculationInputDigest": {
       "type": "string",
       "pattern": "^sha256:[a-f0-9]{64}$",
-      "description": "SHA-256 digest over canonical usage interval content, priced segment, rate-card identity/version, calculation version, currency and currency precision."
+      "description": "SHA-256 digest over canonical usage interval content, priced segment, rate-card identity/version, calculation version, currency metadata snapshot version and currency precision."
     },
     "roundingMode": {
       "const": "CURRENCY_MINOR_UNIT_HALF_UP"
