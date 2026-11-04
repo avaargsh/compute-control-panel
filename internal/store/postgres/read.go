@@ -13,10 +13,13 @@ import (
 // WorkloadDetails is a consistent, tenant-scoped read projection. It includes
 // durable Allocation and ComputeOperation history, never mutable provider
 // payloads or caller-supplied identifiers.
+const maxWorkloadHistoryItems = 100
+
 type WorkloadDetails struct {
-	Workload    Workload
-	Allocations []Allocation
-	Operations  []operation.Operation
+	Workload         Workload
+	Allocations      []Allocation
+	Operations       []operation.Operation
+	HistoryTruncated bool
 }
 
 // GetWorkloadDetails reads the Workload and its immutable Allocation/Operation
@@ -57,8 +60,9 @@ func (r *Repository) GetWorkloadDetails(ctx context.Context, tenantID, workloadI
 	allocationRows, err := tx.QueryContext(ctx,
 		`SELECT `+allocationColumns+` FROM compute_allocations
 		WHERE tenant_id=$1 AND workload_id=$2
-		ORDER BY desired_generation, created_at, allocation_id`,
-		tenantID, workloadID,
+		ORDER BY desired_generation DESC, created_at DESC, allocation_id DESC
+		LIMIT $3`,
+		tenantID, workloadID, maxWorkloadHistoryItems+1,
 	)
 	if err != nil {
 		return WorkloadDetails{}, fmt.Errorf("query Workload Allocations: %w", err)
@@ -78,12 +82,17 @@ func (r *Repository) GetWorkloadDetails(ctx context.Context, tenantID, workloadI
 	if err := allocationRows.Close(); err != nil {
 		return WorkloadDetails{}, fmt.Errorf("close Workload Allocation rows: %w", err)
 	}
+	if len(details.Allocations) > maxWorkloadHistoryItems {
+		details.HistoryTruncated = true
+		details.Allocations = details.Allocations[:maxWorkloadHistoryItems]
+	}
+	reverseAllocations(details.Allocations)
 
 	operationRows, err := tx.QueryContext(ctx,
 		"SELECT "+operationColumns+" FROM compute_operations "+
 			"WHERE tenant_id=$1 AND workload_id=$2 "+
-			"ORDER BY desired_generation, created_at, compute_operation_id",
-		tenantID, workloadID,
+			"ORDER BY desired_generation DESC, created_at DESC, compute_operation_id DESC LIMIT $3",
+		tenantID, workloadID, maxWorkloadHistoryItems+1,
 	)
 	if err != nil {
 		return WorkloadDetails{}, fmt.Errorf("query Workload Operations: %w", err)
@@ -103,8 +112,25 @@ func (r *Repository) GetWorkloadDetails(ctx context.Context, tenantID, workloadI
 	if err := operationRows.Close(); err != nil {
 		return WorkloadDetails{}, fmt.Errorf("close Workload Operation rows: %w", err)
 	}
+	if len(details.Operations) > maxWorkloadHistoryItems {
+		details.HistoryTruncated = true
+		details.Operations = details.Operations[:maxWorkloadHistoryItems]
+	}
+	reverseOperations(details.Operations)
 	if err := tx.Commit(); err != nil {
 		return WorkloadDetails{}, fmt.Errorf("commit Workload read snapshot: %w", err)
 	}
 	return details, nil
+}
+
+func reverseAllocations(items []Allocation) {
+	for left, right := 0, len(items)-1; left < right; left, right = left+1, right-1 {
+		items[left], items[right] = items[right], items[left]
+	}
+}
+
+func reverseOperations(items []operation.Operation) {
+	for left, right := 0, len(items)-1; left < right; left, right = left+1, right-1 {
+		items[left], items[right] = items[right], items[left]
+	}
 }
