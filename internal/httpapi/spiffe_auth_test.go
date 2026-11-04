@@ -11,10 +11,10 @@ import (
 )
 
 type testWorkloadIdentityResolver struct {
-	expected string
+	expected  string
 	principal WorkloadPrincipal
-	err error
-	calls int
+	err       error
+	calls     int
 }
 
 func (r *testWorkloadIdentityResolver) ResolveWorkloadPrincipal(_ context.Context, spiffeID string) (WorkloadPrincipal, error) {
@@ -100,9 +100,9 @@ func TestSPIFFEWorkloadAuthenticatorResolvesTrustedPrincipal(t *testing.T) {
 	resolver := &testWorkloadIdentityResolver{
 		expected: identity,
 		principal: WorkloadPrincipal{
-			TenantID: "tenant-001",
-			Subject: identity,
-			Service: "agent-runtime",
+			TenantID:   "tenant-001",
+			Subject:    identity,
+			Service:    "agent-runtime",
 			ProjectIDs: []string{"project-001"},
 		},
 	}
@@ -138,8 +138,8 @@ func TestSPIFFEWorkloadAuthenticatorRejectsPrincipalSubjectMismatch(t *testing.T
 	resolver := &testWorkloadIdentityResolver{
 		principal: WorkloadPrincipal{
 			TenantID: "tenant-001",
-			Subject: "spiffe://example.org/ns/other/sa/service",
-			Service: "agent-runtime",
+			Subject:  "spiffe://example.org/ns/other/sa/service",
+			Service:  "agent-runtime",
 		},
 	}
 	auth, err := NewSPIFFEWorkloadAuthenticator("example.org", resolver)
