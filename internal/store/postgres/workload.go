@@ -67,9 +67,10 @@ type Workload struct {
 	UpdatedAt          time.Time
 }
 
-// CreateWorkload commits the idempotency claim, workload and accepted event in
-// one transaction. A replay with the same tenant/key/digest returns the original
-// resource; a changed digest is rejected without another outbox event.
+// CreateWorkload is a low-level repository primitive. It commits the Workload
+// idempotency claim and a non-dispatchable recorded event. Initial provider
+// dispatch must use AcceptWorkload, which atomically binds Allocation and
+// ComputeOperation before emitting a dispatchable pending event.
 func (r *Repository) CreateWorkload(ctx context.Context, p CreateWorkloadParams) (Workload, bool, error) {
 	if err := validateCreateWorkload(p); err != nil {
 		return Workload{}, false, err
