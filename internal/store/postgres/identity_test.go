@@ -77,6 +77,33 @@ func TestResolveWorkloadPrincipalReturnsActiveTenantAndProjectGrants(t *testing.
 	if _, err := repo.ResolveWorkloadPrincipal(ctx, spiffeID); !errors.Is(err, ErrWorkloadIdentityNotFound) {
 		t.Fatalf("revoked identity error = %v, want ErrWorkloadIdentityNotFound", err)
 	}
+
+	var auditCount int
+	if err := db.QueryRowContext(ctx,
+		"SELECT count(*) FROM compute_identity_directory_audit WHERE spiffe_id=$1",
+		spiffeID,
+	).Scan(&auditCount); err != nil {
+		t.Fatal(err)
+	}
+	if auditCount != 6 {
+		t.Fatalf("identity directory audit events = %d, want 6", auditCount)
+	}
+	var identityInsert, identityRevoke, grantInsert, grantRevoke int
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			count(*) FILTER (WHERE entity_type='SERVICE_IDENTITY' AND action='INSERT'),
+			count(*) FILTER (WHERE entity_type='SERVICE_IDENTITY' AND action='UPDATE'),
+			count(*) FILTER (WHERE entity_type='PROJECT_GRANT' AND action='INSERT'),
+			count(*) FILTER (WHERE entity_type='PROJECT_GRANT' AND action='UPDATE')
+		FROM compute_identity_directory_audit WHERE spiffe_id=$1`,
+		spiffeID,
+	).Scan(&identityInsert, &identityRevoke, &grantInsert, &grantRevoke); err != nil {
+		t.Fatal(err)
+	}
+	if identityInsert != 1 || identityRevoke != 1 || grantInsert != 3 || grantRevoke != 1 {
+		t.Fatalf("identity audit insert/revoke identity=%d/%d grants=%d/%d",
+			identityInsert, identityRevoke, grantInsert, grantRevoke)
+	}
 }
 
 func TestResolveWorkloadPrincipalRejectsUnknownOrMalformedIdentity(t *testing.T) {
