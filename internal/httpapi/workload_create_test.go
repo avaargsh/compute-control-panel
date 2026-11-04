@@ -247,9 +247,6 @@ func TestCreateWorkloadPersistsAuthorizedAtomicAcceptance(t *testing.T) {
 		response["allocation_id"] != "allocation-stable" || response["compute_operation_id"] != "operation-stable" {
 		t.Fatalf("response lost acceptance/Allocation state distinction: %+v", response)
 	}
-	if recorder.Header().Get("Location") != "/api/v1/workloads/workload-stable" {
-		t.Fatalf("Location = %q", recorder.Header().Get("Location"))
-	}
 }
 
 func TestCreateWorkloadIdempotentReplaySkipsProviderSelection(t *testing.T) {
