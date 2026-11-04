@@ -26,11 +26,11 @@ func (a *testWorkloadReadAuthorizer) AuthorizeRead(context.Context, WorkloadPrin
 }
 
 type testWorkloadReadRepository struct {
-	details postgres.WorkloadDetails
-	err     error
-	tenantID string
+	details    postgres.WorkloadDetails
+	err        error
+	tenantID   string
 	workloadID string
-	calls   int
+	calls      int
 }
 
 func (r *testWorkloadReadRepository) GetWorkloadDetails(_ context.Context, tenantID, workloadID string) (postgres.WorkloadDetails, error) {
@@ -42,9 +42,9 @@ func (r *testWorkloadReadRepository) GetWorkloadDetails(_ context.Context, tenan
 
 func newReadFixture() (WorkloadPrincipal, *testWorkloadReadAuthorizer, *testWorkloadReadRepository) {
 	principal := WorkloadPrincipal{
-		TenantID: "tenant-read-001",
-		Subject: "spiffe://example.org/ns/agent-runtime/sa/runtime",
-		Service: "agent-runtime",
+		TenantID:   "tenant-read-001",
+		Subject:    "spiffe://example.org/ns/agent-runtime/sa/runtime",
+		Service:    "agent-runtime",
 		ProjectIDs: []string{"project-read-001"},
 	}
 	now := time.Date(2026, 11, 4, 8, 0, 0, 0, time.UTC)
@@ -52,16 +52,16 @@ func newReadFixture() (WorkloadPrincipal, *testWorkloadReadAuthorizer, *testWork
 	repository := &testWorkloadReadRepository{
 		details: postgres.WorkloadDetails{
 			Workload: postgres.Workload{
-				WorkloadID: "workload-read-001",
-				TenantID: "tenant-read-001",
-				ProjectID: "project-read-001",
-				DesiredGeneration: 2,
-				Version: 4,
-				DesiredState: "ACTIVE",
-				ObservedPhase: "PROVISIONING",
+				WorkloadID:         "workload-read-001",
+				TenantID:           "tenant-read-001",
+				ProjectID:          "project-read-001",
+				DesiredGeneration:  2,
+				Version:            4,
+				DesiredState:       "ACTIVE",
+				ObservedPhase:      "PROVISIONING",
 				LatestAllocationID: sql.NullString{String: "allocation-read-002", Valid: true},
-				CreatedAt: now.Add(-time.Hour),
-				UpdatedAt: now,
+				CreatedAt:          now.Add(-time.Hour),
+				UpdatedAt:          now,
 			},
 			Allocations: []postgres.Allocation{
 				{AllocationID: "allocation-read-001", TenantID: "tenant-read-001", WorkloadID: "workload-read-001", ProviderID: "provider-old", PoolID: "pool-old", DesiredGeneration: 1, Phase: "RELEASED", Version: 3},
@@ -80,8 +80,8 @@ func newWorkloadReadTestHandler(t *testing.T, principal WorkloadPrincipal, authE
 	t.Helper()
 	handler, err := NewWorkloadReadHandler(WorkloadReadDependencies{
 		Authenticator: testPrincipalAuthenticator{principal: principal, err: authErr},
-		Authorizer: authorizer,
-		Repository: repository,
+		Authorizer:    authorizer,
+		Repository:    repository,
 	})
 	if err != nil {
 		t.Fatalf("NewWorkloadReadHandler: %v", err)
@@ -96,23 +96,22 @@ func performWorkloadRead(handler http.Handler, method, path string) *httptest.Re
 	return recorder
 }
 
-
 func TestWorkloadAPIHandlerComposesCreateAndAuthenticatedReadRoutes(t *testing.T) {
 	principal, createAuthorizer, selector, acceptanceRepo := newAcceptanceFixture()
 	readAuthorizer := &testWorkloadReadAuthorizer{}
 	readRepository := &testWorkloadReadRepository{
 		details: postgres.WorkloadDetails{
 			Workload: postgres.Workload{
-				WorkloadID: "workload-stable",
-				TenantID: principal.TenantID,
-				ProjectID: "project-001",
-				DesiredGeneration: 1,
-				Version: 1,
-				DesiredState: "ACTIVE",
-				ObservedPhase: "ACCEPTED",
+				WorkloadID:         "workload-stable",
+				TenantID:           principal.TenantID,
+				ProjectID:          "project-001",
+				DesiredGeneration:  1,
+				Version:            1,
+				DesiredState:       "ACTIVE",
+				ObservedPhase:      "ACCEPTED",
 				LatestAllocationID: sql.NullString{String: "allocation-stable", Valid: true},
-				CreatedAt: time.Date(2026, 11, 4, 8, 0, 0, 0, time.UTC),
-				UpdatedAt: time.Date(2026, 11, 4, 8, 1, 0, 0, time.UTC),
+				CreatedAt:          time.Date(2026, 11, 4, 8, 0, 0, 0, time.UTC),
+				UpdatedAt:          time.Date(2026, 11, 4, 8, 1, 0, 0, time.UTC),
 			},
 			Allocations: []postgres.Allocation{
 				{AllocationID: "allocation-stable", ProviderID: "provider-server-selected", PoolID: "pool-server-selected", DesiredGeneration: 1, Phase: "PENDING", Version: 1},
@@ -122,16 +121,16 @@ func TestWorkloadAPIHandlerComposesCreateAndAuthenticatedReadRoutes(t *testing.T
 	authenticator := testPrincipalAuthenticator{principal: principal}
 	handler, err := NewWorkloadAPIHandler(
 		WorkloadCreateDependencies{
-			Authenticator: authenticator,
-			Authorizer: createAuthorizer,
+			Authenticator:    authenticator,
+			Authorizer:       createAuthorizer,
 			ProviderSelector: selector,
-			Repository: acceptanceRepo,
-			IDs: &sequentialWorkloadIDs{},
+			Repository:       acceptanceRepo,
+			IDs:              &sequentialWorkloadIDs{},
 		},
 		WorkloadReadDependencies{
 			Authenticator: authenticator,
-			Authorizer: readAuthorizer,
-			Repository: readRepository,
+			Authorizer:    readAuthorizer,
+			Repository:    readRepository,
 		},
 	)
 	if err != nil {
