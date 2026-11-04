@@ -179,8 +179,9 @@ func (h *WorkloadReadHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 			CreatedAt:          details.Workload.CreatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00"),
 			UpdatedAt:          details.Workload.UpdatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00"),
 		},
-		Allocations: allocations,
-		Operations:  operations,
+		Allocations:      allocations,
+		Operations:       operations,
+		HistoryTruncated: details.HistoryTruncated,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
