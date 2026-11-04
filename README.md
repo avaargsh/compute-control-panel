@@ -41,6 +41,8 @@ The `main` branch contains the project charter and governance entry point. Archi
 - [Go/PostgreSQL foundation — PR #2](https://github.com/avaargsh/compute-control-panel/pull/2) (Draft)
 - [Atomic Workload acceptance — PR #11](https://github.com/avaargsh/compute-control-panel/pull/11), stacked on PR #2 (Draft)
 - [Compute Economics E0 contracts — PR #9](https://github.com/avaargsh/compute-control-panel/pull/9) (Draft)
+- [Compute Economics calculator — PR #10](https://github.com/avaargsh/compute-control-panel/pull/10) (Draft)
+- [Currency registry contract alignment — PR #14](https://github.com/avaargsh/compute-control-panel/pull/14) (Draft; replaces closed PR #13)
 - [P0 integration and release gate — Issue #3](https://github.com/avaargsh/compute-control-panel/issues/3) (authoritative acceptance tracker)
 
 `gpu-compute-platform` is retired as an active delivery repository and remains historical migration/reference input only. All new compute implementation and release evidence belongs here.
