@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/avaargsh/compute-control-panel/internal/identity"
 	"github.com/avaargsh/compute-control-panel/internal/operation"
 	"github.com/avaargsh/compute-control-panel/internal/store/postgres"
 )
@@ -22,12 +23,7 @@ const (
 	maxWorkloadCreateBody    = 1 << 20
 )
 
-type WorkloadPrincipal struct {
-	TenantID   string
-	Subject    string
-	Service    string
-	ProjectIDs []string
-}
+type WorkloadPrincipal = identity.WorkloadPrincipal
 
 type WorkloadAuthenticator interface {
 	Authenticate(context.Context, *http.Request) (WorkloadPrincipal, error)
