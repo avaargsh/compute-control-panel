@@ -333,15 +333,18 @@ func (r *Repository) PersistUsageEvidenceSet(ctx context.Context, p PersistUsage
 		return UsageEvidenceSet{}, false, fmt.Errorf("insert usage evidence set: %w", err)
 	}
 
-	existing, payloadsMatch, err := findUsageEvidenceConflict(ctx, tx, record, derived.sourceEventJSON, derived.evidenceJSON, derived.usageJSON)
+	existing, payloadMismatches, err := findUsageEvidenceConflict(ctx, tx, record, derived.sourceEventJSON, derived.evidenceJSON, derived.usageJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return UsageEvidenceSet{}, false, ErrUsageEvidenceConflict
 	}
 	if err != nil {
 		return UsageEvidenceSet{}, false, fmt.Errorf("read conflicting usage evidence set: %w", err)
 	}
-	if !payloadsMatch || !sameUsageEvidenceIntent(existing, record) {
-		return UsageEvidenceSet{}, false, ErrUsageEvidenceConflict
+	if len(payloadMismatches) > 0 {
+		return UsageEvidenceSet{}, false, fmt.Errorf("%w: replay payload mismatch: %s", ErrUsageEvidenceConflict, strings.Join(payloadMismatches, ","))
+	}
+	if mismatches := usageEvidenceIntentMismatches(existing, record); len(mismatches) > 0 {
+		return UsageEvidenceSet{}, false, fmt.Errorf("%w: replay identity mismatch: %s", ErrUsageEvidenceConflict, strings.Join(mismatches, ","))
 	}
 	if err := tx.Commit(); err != nil {
 		return UsageEvidenceSet{}, false, fmt.Errorf("commit usage evidence replay: %w", err)
@@ -354,11 +357,11 @@ func findUsageEvidenceConflict(
 	tx *sql.Tx,
 	record UsageEvidenceSet,
 	sourceIDs, evidenceJSON, usageJSON []byte,
-) (UsageEvidenceSet, bool, error) {
+) (UsageEvidenceSet, []string, error) {
 	query := `SELECT ` + usageEvidenceSetColumns + `,
-		(evidence_payload=$5::jsonb
-		 AND usage_interval_payload=$6::jsonb
-		 AND source_event_ids=$7::jsonb) AS payloads_match
+		(evidence_payload=$5::jsonb) AS evidence_payload_matches,
+		(usage_interval_payload=$6::jsonb) AS usage_interval_matches,
+		(source_event_ids=$7::jsonb) AS source_event_ids_match
 		FROM compute_allocation_usage_evidence_sets
 		WHERE tenant_id=$1
 		  AND (evidence_set_id=$2
@@ -371,7 +374,7 @@ func findUsageEvidenceConflict(
 		FOR SHARE`
 	var existing UsageEvidenceSet
 	var persistedSourceIDs, persistedEvidence, persistedUsage []byte
-	var payloadsMatch bool
+	var evidencePayloadMatches, usageIntervalMatches, sourceEventIDsMatch bool
 	err := tx.QueryRowContext(ctx, query,
 		record.TenantID, record.EvidenceSetID, record.AllocationID, record.AllocationGeneration,
 		evidenceJSON, usageJSON, sourceIDs, record.UsageIntervalID,
@@ -383,44 +386,66 @@ func findUsageEvidenceConflict(
 		&existing.CapabilityProfileID, &existing.EvidencePolicyVersion, &existing.MeteringPolicyVersion,
 		&existing.EvidenceDigest, &existing.UsageIntervalID, &existing.UsageStart, &existing.UsageEnd,
 		&existing.GPUCount, &persistedSourceIDs, &persistedEvidence, &persistedUsage,
-		&existing.RecordedAt, &payloadsMatch,
+		&existing.RecordedAt, &evidencePayloadMatches, &usageIntervalMatches, &sourceEventIDsMatch,
 	)
 	if err != nil {
-		return UsageEvidenceSet{}, false, err
+		return UsageEvidenceSet{}, nil, err
 	}
 	if err := json.Unmarshal(persistedSourceIDs, &existing.SourceEventIDs); err != nil {
 		return UsageEvidenceSet{}, false, fmt.Errorf("decode conflicting evidence source IDs: %w", err)
 	}
 	existing.EvidencePayload = append([]byte(nil), persistedEvidence...)
 	existing.UsageIntervalPayload = append([]byte(nil), persistedUsage...)
-	return existing, payloadsMatch, nil
+	mismatches := make([]string, 0, 3)
+	if !evidencePayloadMatches {
+		mismatches = append(mismatches, "evidence_payload")
+	}
+	if !usageIntervalMatches {
+		mismatches = append(mismatches, "usage_interval_payload")
+	}
+	if !sourceEventIDsMatch {
+		mismatches = append(mismatches, "source_event_ids")
+	}
+	return existing, mismatches, nil
 }
 
-func sameUsageEvidenceIntent(existing, record UsageEvidenceSet) bool {
-	return existing.SchemaVersion == record.SchemaVersion &&
-		existing.EvidenceSetID == record.EvidenceSetID &&
-		existing.TenantID == record.TenantID &&
-		existing.ProjectID == record.ProjectID &&
-		existing.WorkloadID == record.WorkloadID &&
-		existing.AllocationID == record.AllocationID &&
-		existing.AllocationGeneration == record.AllocationGeneration &&
-		existing.ProviderID == record.ProviderID &&
-		existing.ComputeOperationID == record.ComputeOperationID &&
-		existing.ProviderRequestDigest == record.ProviderRequestDigest &&
-		existing.ProviderResourceID == record.ProviderResourceID &&
-		existing.ProviderResourceUID == record.ProviderResourceUID &&
-		existing.PoolID == record.PoolID &&
-		existing.ProfileID == record.ProfileID &&
-		existing.GPUModel == record.GPUModel &&
-		existing.CapabilityProfileID == record.CapabilityProfileID &&
-		existing.EvidencePolicyVersion == record.EvidencePolicyVersion &&
-		existing.MeteringPolicyVersion == record.MeteringPolicyVersion &&
-		existing.EvidenceDigest == record.EvidenceDigest &&
-		existing.UsageIntervalID == record.UsageIntervalID &&
-		existing.UsageStart.Equal(record.UsageStart) &&
-		existing.UsageEnd.Equal(record.UsageEnd) &&
-		existing.GPUCount == record.GPUCount &&
-		sameStringSlice(existing.SourceEventIDs, record.SourceEventIDs)
+func usageEvidenceIntentMismatches(existing, record UsageEvidenceSet) []string {
+	mismatches := make([]string, 0, 24)
+	checks := []struct {
+		name string
+		ok   bool
+	}{
+		{"schema_version", existing.SchemaVersion == record.SchemaVersion},
+		{"evidence_set_id", existing.EvidenceSetID == record.EvidenceSetID},
+		{"tenant_id", existing.TenantID == record.TenantID},
+		{"project_id", existing.ProjectID == record.ProjectID},
+		{"workload_id", existing.WorkloadID == record.WorkloadID},
+		{"allocation_id", existing.AllocationID == record.AllocationID},
+		{"allocation_generation", existing.AllocationGeneration == record.AllocationGeneration},
+		{"provider_id", existing.ProviderID == record.ProviderID},
+		{"compute_operation_id", existing.ComputeOperationID == record.ComputeOperationID},
+		{"provider_request_digest", existing.ProviderRequestDigest == record.ProviderRequestDigest},
+		{"provider_resource_id", existing.ProviderResourceID == record.ProviderResourceID},
+		{"provider_resource_uid", existing.ProviderResourceUID == record.ProviderResourceUID},
+		{"pool_id", existing.PoolID == record.PoolID},
+		{"profile_id", existing.ProfileID == record.ProfileID},
+		{"gpu_model", existing.GPUModel == record.GPUModel},
+		{"capability_profile_id", existing.CapabilityProfileID == record.CapabilityProfileID},
+		{"evidence_policy_version", existing.EvidencePolicyVersion == record.EvidencePolicyVersion},
+		{"metering_policy_version", existing.MeteringPolicyVersion == record.MeteringPolicyVersion},
+		{"evidence_digest", existing.EvidenceDigest == record.EvidenceDigest},
+		{"usage_interval_id", existing.UsageIntervalID == record.UsageIntervalID},
+		{"usage_start", existing.UsageStart.Equal(record.UsageStart)},
+		{"usage_end", existing.UsageEnd.Equal(record.UsageEnd)},
+		{"gpu_count", existing.GPUCount == record.GPUCount},
+		{"source_event_ids", sameStringSlice(existing.SourceEventIDs, record.SourceEventIDs)},
+	}
+	for _, check := range checks {
+		if !check.ok {
+			mismatches = append(mismatches, check.name)
+		}
+	}
+	return mismatches
 }
 
 func sameStringSlice(a, b []string) bool {
