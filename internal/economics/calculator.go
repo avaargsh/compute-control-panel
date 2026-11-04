@@ -56,6 +56,9 @@ type UsageInterval struct {
 	ProviderID            string
 	PoolID                string
 	ProfileID             string
+	EvidenceSetID         string
+	EvidenceDigest        string
+	CapabilityProfileID   string
 	ResourceClass         string
 	GPUModel              string
 	Start                 time.Time
@@ -264,6 +267,11 @@ func Calculate(usage UsageInterval, rates []ProviderRateCard) (CalculationResult
 }
 
 func validateUsage(usage UsageInterval) error {
+	hasEvidenceIdentity := usage.EvidenceSetID != "" || usage.EvidenceDigest != "" || usage.CapabilityProfileID != ""
+	if (usage.AttributionMethod == "DEVICE_BINDING" && !hasEvidenceIdentity) ||
+		(hasEvidenceIdentity && (!nonBlank(usage.EvidenceSetID, usage.CapabilityProfileID) || !validSHA256Digest(usage.EvidenceDigest))) {
+		return fmt.Errorf("%w: device-bound UsageInterval requires a complete evidence identity", ErrInvalidUsage)
+	}
 	if usage.SchemaVersion != usageSchemaVersion ||
 		!nonBlank(usage.UsageIntervalID, usage.TenantID, usage.ProjectID, usage.WorkloadID,
 			usage.AllocationID, usage.ProviderID, usage.PoolID, usage.ProfileID,
@@ -291,6 +299,14 @@ func validateUsage(usage UsageInterval) error {
 		seen[id] = struct{}{}
 	}
 	return nil
+}
+
+func validSHA256Digest(value string) bool {
+	if !strings.HasPrefix(value, "sha256:") || len(value) != len("sha256:")+64 {
+		return false
+	}
+	_, err := hex.DecodeString(strings.TrimPrefix(value, "sha256:"))
+	return err == nil
 }
 
 func validateRate(rate ProviderRateCard) error {
@@ -334,6 +350,9 @@ func calculationDigest(usage UsageInterval, rate ProviderRateCard, start, end st
 		CalculationVersion      string   `json:"calculationVersion"`
 		UsageSchemaVersion      string   `json:"usageSchemaVersion"`
 		UsageIntervalID         string   `json:"usageIntervalId"`
+		EvidenceSetID           string   `json:"evidenceSetId"`
+		EvidenceDigest          string   `json:"evidenceDigest"`
+		CapabilityProfileID     string   `json:"capabilityProfileId"`
 		TenantID                string   `json:"tenantId"`
 		ProjectID               string   `json:"projectId"`
 		WorkloadID              string   `json:"workloadId"`
@@ -372,6 +391,9 @@ func calculationDigest(usage UsageInterval, rate ProviderRateCard, start, end st
 		CalculationVersion:      CalculationVersion,
 		UsageSchemaVersion:      usage.SchemaVersion,
 		UsageIntervalID:         usage.UsageIntervalID,
+		EvidenceSetID:           usage.EvidenceSetID,
+		EvidenceDigest:          usage.EvidenceDigest,
+		CapabilityProfileID:     usage.CapabilityProfileID,
 		TenantID:                usage.TenantID,
 		ProjectID:               usage.ProjectID,
 		WorkloadID:              usage.WorkloadID,
