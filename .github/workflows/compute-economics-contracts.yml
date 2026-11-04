@@ -1,0 +1,37 @@
+name: Compute Economics Contract Validation
+
+on:
+  push:
+    branches: [main, "docs/compute-economics-domain-v0.1"]
+    paths:
+      - "schemas/compute-economics/**"
+      - "docs/architecture/COMPUTE-ECONOMICS-DOMAIN.md"
+      - "docs/architecture/compute-economics/**"
+      - "scripts/test_compute_economics_contracts.py"
+      - "requirements-compute-economics.txt"
+      - ".github/workflows/compute-economics-contracts.yml"
+  pull_request:
+    paths:
+      - "schemas/compute-economics/**"
+      - "docs/architecture/COMPUTE-ECONOMICS-DOMAIN.md"
+      - "docs/architecture/compute-economics/**"
+      - "scripts/test_compute_economics_contracts.py"
+      - "requirements-compute-economics.txt"
+      - ".github/workflows/compute-economics-contracts.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6, immutable commit
+      - name: Create isolated Python environment
+        run: python3 -m venv .venv
+      - name: Install pinned schema validator
+        run: .venv/bin/python -m pip install --disable-pip-version-check -r requirements-compute-economics.txt
+      - name: Validate JSON Schemas and economic golden fixtures
+        run: .venv/bin/python -m unittest discover -s scripts -p 'test_compute_economics_contracts.py' -v
