@@ -16,20 +16,20 @@ import (
 )
 
 const (
-	CalculationVersion     = "compute-cost-v1"
-	quantityScale          = 18
-	StatusFinal            = "FINAL"
-	StatusIncomplete       = "INCOMPLETE"
+	CalculationVersion           = "compute-cost-v1"
+	quantityScale                = 18
+	StatusFinal                  = "FINAL"
+	StatusIncomplete             = "INCOMPLETE"
 
 	PostingReady                 = "POSTABLE"
 	PostingSkippedZeroMinorUnits = "SKIPPED_ZERO_MINOR_UNITS"
-	ReasonRateGap          = "RATE_GAP"
-	ReasonIncompleteSource = "INCOMPLETE_SOURCE"
-	usageSchemaVersion     = "compute.economics.usage-interval.v1"
-	rateSchemaVersion      = "compute.economics.provider-rate-card.v1"
-	usageUnit              = "GPU_DEVICE_COUNT"
-	rateBasis              = "ALLOCATED_GPU_HOUR"
-	rateUnit               = "GPU_HOUR"
+	ReasonRateGap                = "RATE_GAP"
+	ReasonIncompleteSource       = "INCOMPLETE_SOURCE"
+	usageSchemaVersion           = "compute.economics.usage-interval.v1"
+	rateSchemaVersion            = "compute.economics.provider-rate-card.v1"
+	usageUnit                    = "GPU_DEVICE_COUNT"
+	rateBasis                    = "ALLOCATED_GPU_HOUR"
+	rateUnit                     = "GPU_HOUR"
 )
 
 var (
