@@ -11,7 +11,7 @@
 - [ ] Resolve canonical Run identity ownership between agent-control-panel and agent-runtime.
 - [ ] Align SandboxProvider claim/provision with Compute Allocation ownership.
 - [ ] Align EngageGuard Permit/action_hash schema and replay semantics.
-- [ ] Add OpenAPI and JSON Schema source files plus schema lint/compatibility checks.
+- [x] Add OpenAPI 3.1 + JSON Schema Draft 2020-12 source contracts and CI-backed golden validation tests (PR #12); cross-version compatibility checks and cross-repository consumer tests remain open.
 - [x] Obtain independent architecture review; keep PR Draft until blockers are resolved.
 
 ## Implementation
