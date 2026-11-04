@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -458,6 +459,59 @@ func TestCreateWorkloadRejectsSchemaIncompatibleInputs(t *testing.T) {
 			}
 			if authorizer.calls != 0 || selector.calls != 0 || repo.lookupCalls != 0 || repo.calls != 0 {
 				t.Fatalf("schema-invalid input crossed trust boundary: authorizer=%d selector=%d lookups=%d writes=%d",
+					authorizer.calls, selector.calls, repo.lookupCalls, repo.calls)
+			}
+		})
+	}
+}
+
+// TestWorkloadCreatePinnedConsumerShapeFixtures executes the same JSON bodies
+// validated by docs/contracts/tests/test_contracts.py through the actual Go
+// HTTP boundary. This uses a fake authorizer and does NOT prove live Guard
+// Permit verification, ACP/Runtime deployment, or mTLS provisioning.
+func TestWorkloadCreatePinnedConsumerShapeFixtures(t *testing.T) {
+	data, err := os.ReadFile("../../docs/contracts/fixtures/workload-create-consumers.v1.json")
+	if err != nil {
+		t.Fatalf("read consumer shape fixture: %v", err)
+	}
+	var suite struct {
+		Cases []struct {
+			Name              string          `json:"name"`
+			ExpectSchemaValid bool            `json:"expect_schema_valid"`
+			Body              json.RawMessage `json:"body"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(data, &suite); err != nil {
+		t.Fatalf("decode consumer shape fixture: %v", err)
+	}
+	if len(suite.Cases) < 12 {
+		t.Fatalf("expected >=12 cross-plane shape cases, got %d", len(suite.Cases))
+	}
+	for _, tc := range suite.Cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			var request WorkloadCreateRequest
+			if err := json.Unmarshal(tc.Body, &request); err != nil {
+				t.Fatalf("fixture must be syntactically decodable JSON: %v", err)
+			}
+			principal, authorizer, selector, repo := newAcceptanceFixture()
+			principal.Service = request.OwnerRef.Service
+			handler := newAcceptanceTestHandler(t, testPrincipalAuthenticator{principal: principal}, authorizer, selector, repo)
+			response := performCreate(handler, string(tc.Body), "consumer-shape-fixture")
+			if tc.ExpectSchemaValid {
+				if response.Code != http.StatusAccepted {
+					t.Fatalf("schema-valid shape got %d, want 202: %s", response.Code, response.Body.String())
+				}
+				if authorizer.calls != 1 || selector.calls != 1 || repo.lookupCalls != 1 || repo.calls != 1 {
+					t.Fatalf("valid body did not pass acceptance once: authorizer=%d selector=%d lookup=%d writes=%d",
+						authorizer.calls, selector.calls, repo.lookupCalls, repo.calls)
+				}
+				return
+			}
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("schema-invalid shape got %d, want 400: %s", response.Code, response.Body.String())
+			}
+			if authorizer.calls != 0 || selector.calls != 0 || repo.lookupCalls != 0 || repo.calls != 0 {
+				t.Fatalf("invalid body crossed trust boundary: authorizer=%d selector=%d lookup=%d writes=%d",
 					authorizer.calls, selector.calls, repo.lookupCalls, repo.calls)
 			}
 		})
