@@ -191,9 +191,9 @@ func (r *Repository) AcceptWorkload(ctx context.Context, p AcceptWorkloadParams)
 		return WorkloadAcceptance{}, false, fmt.Errorf("insert initial ComputeOperation: %w", err)
 	}
 
-	workloadPayload, err := json.Marshal(map[string]string{
+	workloadPayload, err := json.Marshal(map[string]any{
 		"workload_id":        workload.WorkloadID,
-		"desired_generation": "1",
+		"desired_generation": workload.DesiredGeneration,
 		"request_digest":     workload.RequestDigest,
 		"allocation_id":      allocation.AllocationID,
 		"operation_id":       createdOperation.ID,
@@ -201,12 +201,12 @@ func (r *Repository) AcceptWorkload(ctx context.Context, p AcceptWorkloadParams)
 	if err != nil {
 		return WorkloadAcceptance{}, false, fmt.Errorf("marshal accepted Workload event: %w", err)
 	}
-	operationPayload, err := json.Marshal(map[string]string{
+	operationPayload, err := json.Marshal(map[string]any{
 		"operation_id":       createdOperation.ID,
 		"workload_id":        workload.WorkloadID,
 		"allocation_id":      allocation.AllocationID,
 		"provider_id":        createdOperation.ProviderID,
-		"desired_generation": "1",
+		"desired_generation": createdOperation.Generation,
 		"operation_kind":     string(createdOperation.Kind),
 		"request_digest":     createdOperation.RequestDigest,
 	})
