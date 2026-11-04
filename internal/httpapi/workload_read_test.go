@@ -239,21 +239,21 @@ func TestGetWorkloadReturnsAllocationAndOperationHistoryWithoutProviderSecrets(t
 	}
 	var response struct {
 		Workload struct {
-			WorkloadID string `json:"workload_id"`
-			ProjectID string `json:"project_id"`
-			DesiredGeneration int64 `json:"desired_generation"`
-			ObservedPhase string `json:"observed_phase"`
+			WorkloadID         string `json:"workload_id"`
+			ProjectID          string `json:"project_id"`
+			DesiredGeneration  int64  `json:"desired_generation"`
+			ObservedPhase      string `json:"observed_phase"`
 			LatestAllocationID string `json:"latest_allocation_id"`
 		} `json:"workload"`
 		Allocations []struct {
 			AllocationID string `json:"allocation_id"`
-			ProviderID string `json:"provider_id"`
-			Phase string `json:"phase"`
+			ProviderID   string `json:"provider_id"`
+			Phase        string `json:"phase"`
 		} `json:"allocations"`
 		Operations []struct {
-			OperationID string `json:"compute_operation_id"`
+			OperationID  string `json:"compute_operation_id"`
 			AllocationID string `json:"allocation_id"`
-			Status string `json:"status"`
+			Status       string `json:"status"`
 		} `json:"operations"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
