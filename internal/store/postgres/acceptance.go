@@ -370,9 +370,7 @@ func (r *Repository) readAcceptanceReplay(ctx context.Context, tx *sql.Tx, p Acc
 	if err != nil {
 		return WorkloadAcceptance{}, fmt.Errorf("read accepted ComputeOperation: %w", err)
 	}
-	if !workload.LatestAllocationID.Valid ||
-		workload.LatestAllocationID.String != allocation.AllocationID ||
-		o.WorkloadID != workload.WorkloadID ||
+	if o.WorkloadID != workload.WorkloadID ||
 		o.AllocationID != allocation.AllocationID ||
 		o.ProviderID != allocation.ProviderID {
 		return WorkloadAcceptance{}, ErrAcceptanceIncomplete
