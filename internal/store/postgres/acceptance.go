@@ -46,6 +46,23 @@ type WorkloadAcceptance struct {
 	OperationEventID string
 }
 
+// AcceptanceLookup identifies an exact, previously accepted Workload without
+// asking the Provider selector to resolve capacity again. The original
+// Allocation/Provider decision is returned from durable state.
+type AcceptanceLookup struct {
+	TenantID                string
+	IdempotencyKey          string
+	RequestDigest           string
+	ProjectID               string
+	OwnerService            string
+	OwnerResourceType       string
+	OwnerResourceID         string
+	ComputeProfileID        string
+	ComputeProfileRevision  string
+	OperationIdempotencyKey string
+	OperationRequestDigest  string
+}
+
 type allocationScanner interface {
 	Scan(...any) error
 }
@@ -246,6 +263,60 @@ func (r *Repository) AcceptWorkload(ctx context.Context, p AcceptWorkloadParams)
 	}, true, nil
 }
 
+// GetAcceptanceByIdempotency returns a durable acceptance before Provider
+// selection. Exact retries therefore return the original Provider/Pool and do
+// not fail just because current capacity or scheduling preferences changed.
+func (r *Repository) GetAcceptanceByIdempotency(ctx context.Context, lookup AcceptanceLookup) (WorkloadAcceptance, bool, error) {
+	for _, value := range []string{
+		lookup.TenantID, lookup.IdempotencyKey, lookup.RequestDigest, lookup.ProjectID,
+		lookup.OwnerService, lookup.OwnerResourceType, lookup.OwnerResourceID,
+		lookup.OperationIdempotencyKey, lookup.OperationRequestDigest,
+	} {
+		if strings.TrimSpace(value) == "" {
+			return WorkloadAcceptance{}, false, ErrInvalidRequest
+		}
+	}
+	if (lookup.ComputeProfileID == "") != (lookup.ComputeProfileRevision == "") {
+		return WorkloadAcceptance{}, false, ErrInvalidRequest
+	}
+	p := AcceptWorkloadParams{
+		Workload: CreateWorkloadParams{
+			TenantID:               lookup.TenantID,
+			IdempotencyKey:         lookup.IdempotencyKey,
+			RequestDigest:          lookup.RequestDigest,
+			ProjectID:              lookup.ProjectID,
+			OwnerService:           lookup.OwnerService,
+			OwnerResourceType:      lookup.OwnerResourceType,
+			OwnerResourceID:        lookup.OwnerResourceID,
+			ComputeProfileID:       lookup.ComputeProfileID,
+			ComputeProfileRevision: lookup.ComputeProfileRevision,
+		},
+		Operation: operation.Operation{
+			TenantID:       lookup.TenantID,
+			IdempotencyKey: lookup.OperationIdempotencyKey,
+			RequestDigest:  lookup.OperationRequestDigest,
+			Generation:     1,
+			Kind:           operation.Create,
+		},
+	}
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
+	if err != nil {
+		return WorkloadAcceptance{}, false, fmt.Errorf("begin acceptance lookup: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	accepted, err := r.readAcceptanceReplay(ctx, tx, p)
+	if errors.Is(err, sql.ErrNoRows) {
+		return WorkloadAcceptance{}, false, nil
+	}
+	if err != nil {
+		return WorkloadAcceptance{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return WorkloadAcceptance{}, false, fmt.Errorf("commit acceptance lookup: %w", err)
+	}
+	return accepted, true, nil
+}
+
 func (r *Repository) readAcceptanceReplay(ctx context.Context, tx *sql.Tx, p AcceptWorkloadParams) (WorkloadAcceptance, error) {
 	const selectWorkload = "SELECT workload_id, tenant_id, project_id, request_digest, " +
 		"idempotency_key, desired_generation, version, desired_state, observed_phase, " +
@@ -289,10 +360,6 @@ func (r *Repository) readAcceptanceReplay(ctx context.Context, tx *sql.Tx, p Acc
 	if err != nil {
 		return WorkloadAcceptance{}, fmt.Errorf("read accepted Allocation: %w", err)
 	}
-	if allocation.ProviderID != p.ProviderID || allocation.PoolID != p.PoolID {
-		return WorkloadAcceptance{}, ErrIdempotencyConflict
-	}
-
 	o, err := scanOperation(tx.QueryRowContext(ctx,
 		"SELECT "+operationColumns+" FROM compute_operations WHERE tenant_id=$1 AND idempotency_key=$2",
 		workload.TenantID, p.Operation.IdempotencyKey,
@@ -303,8 +370,14 @@ func (r *Repository) readAcceptanceReplay(ctx context.Context, tx *sql.Tx, p Acc
 	if err != nil {
 		return WorkloadAcceptance{}, fmt.Errorf("read accepted ComputeOperation: %w", err)
 	}
-	if o.WorkloadID != workload.WorkloadID || o.AllocationID != allocation.AllocationID ||
-		!sameAcceptanceOperationIntent(o, p.Operation) {
+	if o.WorkloadID != workload.WorkloadID ||
+		o.AllocationID != allocation.AllocationID ||
+		o.ProviderID != allocation.ProviderID {
+		return WorkloadAcceptance{}, ErrAcceptanceIncomplete
+	}
+	expectedOperation := p.Operation
+	expectedOperation.WorkloadID = workload.WorkloadID
+	if !sameAcceptanceOperationIntent(o, expectedOperation) {
 		return WorkloadAcceptance{}, ErrIdempotencyConflict
 	}
 
@@ -365,7 +438,6 @@ func (r *Repository) readAcceptanceReplay(ctx context.Context, tx *sql.Tx, p Acc
 
 func sameAcceptanceOperationIntent(existing, requested operation.Operation) bool {
 	return existing.TenantID == requested.TenantID &&
-		existing.ProviderID == requested.ProviderID &&
 		existing.IdempotencyKey == requested.IdempotencyKey &&
 		existing.RequestDigest == requested.RequestDigest &&
 		existing.Generation == requested.Generation &&
