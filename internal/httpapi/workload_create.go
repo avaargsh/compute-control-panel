@@ -581,7 +581,11 @@ func validWorkloadDigest(value string) bool {
 	if !strings.HasPrefix(value, "sha256:") || len(value) != len("sha256:")+64 {
 		return false
 	}
-	_, err := hex.DecodeString(strings.TrimPrefix(value, "sha256:"))
+	digest := strings.TrimPrefix(value, "sha256:")
+	if strings.ToLower(digest) != digest {
+		return false
+	}
+	_, err := hex.DecodeString(digest)
 	return err == nil
 }
 
