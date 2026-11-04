@@ -4,7 +4,9 @@ These files define the first documentation-only contract slice for Compute Econo
 
 | Contract | Purpose |
 |---|---|
+| [UsageSample](usage-sample.schema.json) | Immutable normalized device telemetry with provider/source provenance |
 | [UsageInterval](usage-interval.schema.json) | A normalized full-GPU-device-count interval attributed to one accepted Allocation |
+| [Event Envelope](event-envelope.schema.json) | Tenant-scoped at-least-once event identity and aggregate-version contract |
 | [ProviderRateCard](provider-rate-card.schema.json) | Effective-dated Provider procurement rate per allocated GPU-hour |
 | [WorkloadCostEntry](workload-cost-entry.schema.json) | Append-only, fully covered direct Workload cost posting |
 
