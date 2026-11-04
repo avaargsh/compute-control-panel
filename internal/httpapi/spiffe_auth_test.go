@@ -48,6 +48,17 @@ func TestSPIFFEWorkloadAuthenticatorRequiresVerifiedTLSChain(t *testing.T) {
 	if _, err := auth.Authenticate(context.Background(), request); !errors.Is(err, ErrWorkloadAuthentication) {
 		t.Fatalf("unverified peer error = %v", err)
 	}
+
+	peerLeaf := &x509.Certificate{Raw: []byte("peer-leaf")}
+	differentVerifiedLeaf := &x509.Certificate{Raw: []byte("different-verified-leaf")}
+	request.TLS = &tls.ConnectionState{
+		PeerCertificates: []*x509.Certificate{peerLeaf},
+		VerifiedChains:   [][]*x509.Certificate{{differentVerifiedLeaf}},
+	}
+	if _, err := auth.Authenticate(context.Background(), request); !errors.Is(err, ErrWorkloadAuthentication) {
+		t.Fatalf("mismatched verified leaf error = %v", err)
+	}
+
 	if resolver.calls != 0 {
 		t.Fatalf("unverified TLS reached identity resolver: %d calls", resolver.calls)
 	}
