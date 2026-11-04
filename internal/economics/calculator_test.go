@@ -2,6 +2,7 @@ package economics
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -110,6 +111,24 @@ func TestCurrencyAndPrecisionDriftFailClosed(t *testing.T) {
 	rates[1].CurrencyMinorUnit = 3
 	if _, err := Calculate(usage, rates); !errors.Is(err, ErrCurrencyPrecisionMismatch) {
 		t.Fatalf("precision error = %v", err)
+	}
+}
+
+func TestEmbeddedCurrencyMetadataSnapshotIsWellFormed(t *testing.T) {
+	snapshot, ok := currencyMetadataSnapshots[CurrencyMetadataVersion]
+	if !ok || len(snapshot) == 0 {
+		t.Fatal("pinned currency metadata snapshot is missing")
+	}
+	for code, minorUnit := range snapshot {
+		if len(code) != 3 || code != strings.ToUpper(code) {
+			t.Errorf("invalid currency code %q", code)
+		}
+		if minorUnit < 0 || minorUnit > 4 {
+			t.Errorf("invalid minor unit for %s: %d", code, minorUnit)
+		}
+	}
+	if snapshot["CNY"] != 2 || snapshot["JPY"] != 0 || snapshot["KWD"] != 3 || snapshot["CLF"] != 4 {
+		t.Fatal("pinned registry has unexpected currency precision values")
 	}
 }
 
