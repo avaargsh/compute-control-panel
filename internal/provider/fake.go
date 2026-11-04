@@ -261,6 +261,14 @@ func (f *FakeProvider) Inspect(ctx context.Context, req Request) (operation.Obse
 			obs.ReasonCode = "RESOURCE_NO_LONGER_PRESENT"
 			break
 		}
+		if live.generation != req.DesiredGeneration {
+			// A prior operation receipt cannot establish that its resource
+			// generation is still current. Stale CREATE observations must
+			// not authorize cleanup of a newer generation sharing the UID.
+			obs.Result = operation.ObservationConflict
+			obs.ReasonCode = "RESOURCE_GENERATION_SUPERSEDED"
+			break
+		}
 		obs.Result = operation.ResourcePresent
 		obs.ResourceID = rec.resourceID
 		obs.ResourceUID = rec.resourceUID
