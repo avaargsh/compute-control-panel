@@ -1,0 +1,400 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Compute Control Plane API",
+    "version": "1.0.0",
+    "summary": "Proposed provider-neutral compute workload and operation API.",
+    "description": "Contract proposal only. The current repository does not yet expose the write/read Workload API, authenticated tenant authorization, or production Provider/Kueue/DRA adapters. POST create must use Repository.AcceptWorkload; its initial Allocation is PENDING and is not readiness evidence."
+  },
+  "servers": [
+    {
+      "url": "https://compute.example.invalid"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Workloads"
+    },
+    {
+      "name": "Operations"
+    }
+  ],
+  "paths": {
+    "/api/v1/workloads": {
+      "post": {
+        "tags": [
+          "Workloads"
+        ],
+        "operationId": "createWorkload",
+        "summary": "Accept a compute workload idempotently.",
+        "description": "A 202 is returned only after Workload, initial PENDING Allocation, latest-allocation projection, Allocation-bound CREATE Operation and both dispatchable Outbox events commit in one database transaction. Provider dispatch is asynchronous.",
+        "security": [
+          {
+            "ServiceBearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Stable key for one logical request; replays must use the same canonical body.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkloadCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Durable acceptance completed; provider capacity is not yet verified.",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string",
+                  "format": "uri-reference"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkloadAccepted"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Workloads"
+        ],
+        "operationId": "listWorkloads",
+        "summary": "List tenant-scoped workloads.",
+        "security": [
+          {
+            "ServiceBearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tenant-scoped cursor page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Workload"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/v1/workloads/{workload_id}": {
+      "parameters": [
+        {
+          "name": "workload_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Workloads"
+        ],
+        "operationId": "getWorkload",
+        "summary": "Read a tenant-scoped workload.",
+        "security": [
+          {
+            "ServiceBearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workload desired state and observed projection.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Workload"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Workloads"
+        ],
+        "operationId": "requestWorkloadDeletion",
+        "summary": "Persist delete intent asynchronously.",
+        "description": "A 202 records DELETE_REQUESTED. It is not proof that provider resources or Kueue reservations have been released.",
+        "security": [
+          {
+            "ServiceBearerAuth": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Delete intent is durable; final release remains asynchronous.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "workload_id",
+                    "desired_state",
+                    "status_url"
+                  ],
+                  "properties": {
+                    "workload_id": {
+                      "type": "string"
+                    },
+                    "desired_state": {
+                      "const": "DELETE_REQUESTED"
+                    },
+                    "status_url": {
+                      "type": "string",
+                      "format": "uri-reference"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/v1/workloads/{workload_id}/allocations": {
+      "parameters": [
+        {
+          "name": "workload_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Workloads"
+        ],
+        "operationId": "listWorkloadAllocations",
+        "summary": "List allocations associated with a workload.",
+        "security": [
+          {
+            "ServiceBearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Allocation history.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Allocation"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/v1/compute-operations/{compute_operation_id}": {
+      "parameters": [
+        {
+          "name": "compute_operation_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Operations"
+        ],
+        "operationId": "getComputeOperation",
+        "summary": "Read provider mutation intent and reconciliation evidence references.",
+        "security": [
+          {
+            "ServiceBearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Durable compute provider operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComputeOperation"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ServiceBearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Service workload identity. Tenant and project scope are derived from verified claims, never trusted from request body."
+      }
+    },
+    "schemas": {
+      "WorkloadCreate": {
+        "$ref": "./schemas/compute-workload-create-v1.schema.json"
+      },
+      "WorkloadAccepted": {
+        "$ref": "./schemas/compute-workload-accepted-v1.schema.json"
+      },
+      "Workload": {
+        "$ref": "./schemas/compute-workload-v1.schema.json"
+      },
+      "Allocation": {
+        "$ref": "./schemas/compute-allocation-v1.schema.json"
+      },
+      "ComputeOperation": {
+        "$ref": "./schemas/compute-operation-v1.schema.json"
+      },
+      "ResourceObservation": {
+        "$ref": "./schemas/compute-resource-observation-v1.schema.json"
+      },
+      "EventEnvelope": {
+        "$ref": "./schemas/compute-event-envelope-v1.schema.json"
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "Authentication is missing or invalid."
+      },
+      "Forbidden": {
+        "description": "The authenticated workload identity is not authorized for this tenant/project/resource."
+      },
+      "NotFound": {
+        "description": "The resource is absent in the caller's authorized scope."
+      },
+      "Conflict": {
+        "description": "The idempotency key was reused with a different request digest or the requested generation is stale."
+      },
+      "UnprocessableEntity": {
+        "description": "The request failed schema or capability validation."
+      }
+    }
+  }
+}
