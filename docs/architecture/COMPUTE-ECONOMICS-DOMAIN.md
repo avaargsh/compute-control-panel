@@ -119,7 +119,7 @@ For the first auditable workload-cost slice:
 
 **direct_workload_cost = priced_allocation_quantity × effective_provider_rate**
 
-For GPU-hour rates, the quantity is derived from the exact Allocation interval and GPU quantity/fraction. The rate defines its own unit and basis; the system must reject incompatible units.
+For v1 GPU-hour rates, the quantity is derived from the exact accepted Allocation interval and positive whole-GPU device count. Fractional device and MIG quantities require a later profile-scoped contract. The rate defines its own unit and basis; the system must reject incompatible units.
 
 **Important:** the initial cost basis is allocated/provisioned capacity time, not GPU active time. A Provider may charge for reserved capacity even while a workload is idle. Active time is an operational efficiency metric and must not silently discount the Provider's actual charge.
 
@@ -129,11 +129,11 @@ Effective-dated procurement price facts, keyed by Provider and applicable resour
 
 - rate ID and immutable version;
 - currency and unit;
-- rate basis (for example per allocated GPU-hour, reserved GPU-hour, host-hour or fixed-period commitment);
+- rate basis (v1 supports ALLOCATED_GPU_HOUR only; reserved GPU-hour, host-hour and fixed-period commitment require later calculation contracts);
 - effective start/end;
 - source/contract reference and provenance;
 - tax/inclusion metadata where known;
-- optional minimum commitment, tier or discount terms.
+- currencyMinorUnit from a versioned ISO 4217 currency registry (v1 uses one precision per currency within a priced interval).
 
 A future rate change must not rewrite historical cost calculations.
 
@@ -146,7 +146,7 @@ Append-only calculated cost fact with:
 - source UsageInterval IDs and covered time range;
 - priced quantity and unit;
 - rate-card version and calculation version;
-- amount and currency;
+- amount, currency and currencyMinorUnit;\n- required SHA-256 calculationInputDigest over canonical source facts and calculation/rate policy inputs;
 - allocation method and completeness/quality status;
 - correction/reversal linkage.
 
@@ -293,7 +293,7 @@ Recommendations (acquire, reduce, rebalance, discount or retire capacity) are ad
 8. Revenue and margin require commercial source facts and direct-cost coverage; incomplete values remain explicitly incomplete.
 9. Capacity analytics distinguish healthy/schedulable supply, allocation, pending demand and idle capacity without changing scheduler authority.
 
-## 14. E0 machine-readable contract assets
+## 13. E0 machine-readable contract assets
 
 The initial schemas and examples are cataloged in [schemas/compute-economics](../../schemas/compute-economics/README.md):
 
@@ -305,7 +305,7 @@ The cost calculation contract is [Workload Cost Calculation v1](compute-economic
 
 These files are proposed contracts under PR #9. They do not imply production ingestion, a live broker, a billing integration or accepted Allocation projection.
 
-## 13. Dependencies and non-goals
+## 14. Dependencies and non-goals
 
 **P0 blockers:** stable Allocation identity/projection; authenticated Provider and Kubernetes/Kueue/DRA evidence; trusted tenant/project scope; durable event delivery and replay semantics. Track these in [Issue #3](https://github.com/avaargsh/compute-control-panel/issues/3).
 
