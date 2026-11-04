@@ -44,11 +44,21 @@ func (s *testProviderSelector) SelectProvider(context.Context, WorkloadPrincipal
 }
 
 type testAcceptanceRepository struct {
-	result  postgres.WorkloadAcceptance
-	created bool
-	err     error
-	params  postgres.AcceptWorkloadParams
-	calls   int
+	result       postgres.WorkloadAcceptance
+	lookupFound  bool
+	lookupErr    error
+	lookupParams postgres.AcceptanceLookup
+	lookupCalls  int
+	created      bool
+	err          error
+	params       postgres.AcceptWorkloadParams
+	calls        int
+}
+
+func (r *testAcceptanceRepository) GetAcceptanceByIdempotency(_ context.Context, lookup postgres.AcceptanceLookup) (postgres.WorkloadAcceptance, bool, error) {
+	r.lookupCalls++
+	r.lookupParams = lookup
+	return r.result, r.lookupFound, r.lookupErr
 }
 
 func (r *testAcceptanceRepository) AcceptWorkload(_ context.Context, params postgres.AcceptWorkloadParams) (postgres.WorkloadAcceptance, bool, error) {
@@ -239,6 +249,55 @@ func TestCreateWorkloadPersistsAuthorizedAtomicAcceptance(t *testing.T) {
 	}
 	if recorder.Header().Get("Location") != "/api/v1/workloads/workload-stable" {
 		t.Fatalf("Location = %q", recorder.Header().Get("Location"))
+	}
+}
+
+
+func TestCreateWorkloadIdempotentReplaySkipsProviderSelection(t *testing.T) {
+	principal, authorizer, selector, repo := newAcceptanceFixture()
+	repo.lookupFound = true
+	selector.err = errors.New("capacity changed after original acceptance")
+	handler := newAcceptanceTestHandler(t, testPrincipalAuthenticator{principal: principal}, authorizer, selector, repo)
+
+	recorder := performCreate(handler, validCreateBody(), "request-001")
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if repo.lookupCalls != 1 || repo.calls != 0 || selector.calls != 0 {
+		t.Fatalf("replay must use durable acceptance without provider resolution: lookup=%d accept=%d selector=%d", repo.lookupCalls, repo.calls, selector.calls)
+	}
+	if authorizer.calls != 1 {
+		t.Fatalf("authorization must still be rechecked on replay: calls=%d", authorizer.calls)
+	}
+	if repo.lookupParams.TenantID != principal.TenantID ||
+		repo.lookupParams.IdempotencyKey != "request-001" ||
+		repo.lookupParams.ProjectID != "project-001" ||
+		repo.lookupParams.OperationIdempotencyKey == "" ||
+		repo.lookupParams.OperationRequestDigest == "" {
+		t.Fatalf("incomplete durable acceptance lookup: %+v", repo.lookupParams)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response["workload_id"] != "workload-stable" ||
+		response["allocation_id"] != "allocation-stable" ||
+		response["compute_operation_id"] != "operation-stable" {
+		t.Fatalf("idempotent replay did not return original identities: %+v", response)
+	}
+}
+
+func TestCreateWorkloadIdempotencyConflictIsCheckedBeforeProviderSelection(t *testing.T) {
+	principal, authorizer, selector, repo := newAcceptanceFixture()
+	repo.lookupErr = postgres.ErrIdempotencyConflict
+	handler := newAcceptanceTestHandler(t, testPrincipalAuthenticator{principal: principal}, authorizer, selector, repo)
+
+	recorder := performCreate(handler, validCreateBody(), "request-001")
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if selector.calls != 0 || repo.calls != 0 {
+		t.Fatalf("idempotency conflict reached provider selection or acceptance write")
 	}
 }
 
