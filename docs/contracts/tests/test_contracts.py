@@ -151,6 +151,65 @@ class ContractSchemasTest(unittest.TestCase):
             "status": "PENDING",
         })
 
+
+    def test_operation_schema_rejects_inconsistent_status_evidence(self) -> None:
+        validate = self.validator("compute-operation-v1.schema.json")
+        base = {
+            "compute_operation_id": "operation-001",
+            "tenant_id": "tenant-001",
+            "workload_id": "workload-001",
+            "allocation_id": "allocation-001",
+            "provider_id": "provider-001",
+            "operation_kind": "CREATE",
+            "desired_generation": 1,
+            "provider_request_digest": SHA256,
+            "idempotency_key": "compute-operation-key-001",
+            "version": 1,
+            "fence_token": 0,
+            "status": "PENDING",
+        }
+        invalid = [
+            {**base, "lease_owner": "worker-1"},
+            {**base, "cleanup_required": True},
+            {**base, "operation_kind": "UPDATE"},
+            {**base, "status": "FAILED"},
+            {**base, "status": "MANUAL_REVIEW"},
+            {**base, "status": "LEASED", "lease_owner": "worker-1", "lease_expires_at": OBSERVED_AT},
+        ]
+        for operation in invalid:
+            with self.subTest(operation=operation):
+                with self.assertRaises(ValidationError):
+                    validate.validate(operation)
+
+    def test_operation_schema_accepts_verified_create_and_rejects_delete_success_with_resource(self) -> None:
+        validate = self.validator("compute-operation-v1.schema.json")
+        succeeded_create = {
+            "compute_operation_id": "operation-002",
+            "tenant_id": "tenant-001",
+            "workload_id": "workload-001",
+            "allocation_id": "allocation-001",
+            "provider_id": "provider-001",
+            "operation_kind": "CREATE",
+            "desired_generation": 1,
+            "provider_request_digest": SHA256,
+            "idempotency_key": "compute-operation-key-002",
+            "version": 3,
+            "fence_token": 1,
+            "status": "SUCCEEDED",
+            "provider_resource_id": "job-001",
+            "provider_resource_uid": "uid-001",
+        }
+        validate.validate(succeeded_create)
+
+        invalid_delete_success = {
+            **succeeded_create,
+            "operation_kind": "DELETE",
+            "target_resource_id": "job-001",
+            "target_resource_uid": "uid-001",
+        }
+        with self.assertRaises(ValidationError):
+            validate.validate(invalid_delete_success)
+
     def test_resource_observation_is_timestamped_evidence(self) -> None:
         self.validator("compute-resource-observation-v1.schema.json").validate({
             "observation_id": "observation-001",
