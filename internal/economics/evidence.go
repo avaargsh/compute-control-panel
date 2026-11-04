@@ -17,7 +17,7 @@ const (
 	EvidenceStatusFinal                  = "FINAL"
 	EvidenceStatusIncomplete             = "INCOMPLETE"
 	DeviceEvidenceModeDRA                = "DRA"
-	DeviceEvidenceModeCertifiedAdapter = "CERTIFIED_DEVICE_ADAPTER"
+	DeviceEvidenceModeCertifiedAdapter   = "CERTIFIED_DEVICE_ADAPTER"
 
 	ReasonProviderBindingMissing   = "PROVIDER_BINDING_MISSING"
 	ReasonProviderIdentityMismatch = "PROVIDER_IDENTITY_MISMATCH"
@@ -62,28 +62,28 @@ type EvidenceRecord struct {
 }
 
 type ComputeOperationUsageEvidence struct {
-	ID                  string
-	TenantID            string
-	ProjectID           string
-	WorkloadID          string
-	AllocationID        string
-	DesiredGeneration   int64
-	ProviderID          string
-	Status              string
-	RequestDigest       string
+	ID                string
+	TenantID          string
+	ProjectID         string
+	WorkloadID        string
+	AllocationID      string
+	DesiredGeneration int64
+	ProviderID        string
+	Status            string
+	RequestDigest     string
 }
 
 type ProviderUsageEvidence struct {
-	Operation           ComputeOperationUsageEvidence
-	ResourceID          string
-	ResourceUID         string
-	PoolID              string
-	ProfileID           string
-	GPUModel            string
-	GPUCount            int64
-	Binding             EvidenceRecord
-	CostLiabilityStart  EvidenceRecord
-	CostLiabilityEnd    *EvidenceRecord
+	Operation          ComputeOperationUsageEvidence
+	ResourceID         string
+	ResourceUID        string
+	PoolID             string
+	ProfileID          string
+	GPUModel           string
+	GPUCount           int64
+	Binding            EvidenceRecord
+	CostLiabilityStart EvidenceRecord
+	CostLiabilityEnd   *EvidenceRecord
 }
 
 type KueueUsageEvidence struct {
@@ -357,16 +357,16 @@ func DeriveUsageInterval(evidence AllocationUsageEvidence, policy EvidencePolicy
 	sort.Strings(sourceEventIDs)
 
 	usage := &UsageInterval{
-		SchemaVersion: usageSchemaVersion,
+		SchemaVersion:   usageSchemaVersion,
 		UsageIntervalID: "usage_" + strings.TrimPrefix(digest, "sha256:"),
-		TenantID: evidence.TenantID, ProjectID: evidence.ProjectID,
+		TenantID:        evidence.TenantID, ProjectID: evidence.ProjectID,
 		WorkloadID: evidence.WorkloadID, AllocationID: evidence.AllocationID,
 		AllocationGeneration: evidence.AllocationGeneration,
-		ProviderID: evidence.ProviderID, PoolID: evidence.PoolID, ProfileID: evidence.ProfileID,
+		ProviderID:           evidence.ProviderID, PoolID: evidence.PoolID, ProfileID: evidence.ProfileID,
 		ResourceClass: "GPU", GPUModel: evidence.GPUModel,
 		Start: start, End: end, GPUCount: evidence.GPUCount, Unit: usageUnit,
 		MeteringPolicyVersion: evidence.MeteringPolicyVersion,
-		SourceEventIDs: sourceEventIDs, Quality: "DERIVED",
+		SourceEventIDs:        sourceEventIDs, Quality: "DERIVED",
 		AttributionMethod: "DEVICE_BINDING", SourceCoverage: 1,
 		EvidenceSetID: evidence.EvidenceSetID, EvidenceDigest: digest,
 		CapabilityProfileID: evidence.CapabilityProfileID,
@@ -474,11 +474,11 @@ func allocationUsageEvidenceDigest(
 			ObservationID: record.ObservationID, ComputeOperationID: record.ComputeOperationID,
 			Source: record.Source, AdapterVersion: record.AdapterVersion, NativeUID: record.NativeUID,
 			NativeResourceVersion: record.NativeResourceVersion,
-			ObservedAt: record.ObservedAt.UTC().Format(time.RFC3339Nano),
-			RecordedAt: record.RecordedAt.UTC().Format(time.RFC3339Nano),
-			SourceTimestamp: sourceTimestamp,
-			EffectiveAt: effective[record.ObservationID].UTC().Format(time.RFC3339Nano),
-			ResponseDigest: record.ResponseDigest, EvidenceRef: record.EvidenceRef,
+			ObservedAt:            record.ObservedAt.UTC().Format(time.RFC3339Nano),
+			RecordedAt:            record.RecordedAt.UTC().Format(time.RFC3339Nano),
+			SourceTimestamp:       sourceTimestamp,
+			EffectiveAt:           effective[record.ObservationID].UTC().Format(time.RFC3339Nano),
+			ResponseDigest:        record.ResponseDigest, EvidenceRef: record.EvidenceRef,
 		})
 	}
 	sort.Slice(canonicalRecords, func(i, j int) bool {
@@ -488,27 +488,27 @@ func allocationUsageEvidenceDigest(
 	sort.Strings(canonicalDevices)
 
 	input := struct {
-		SchemaVersion         string
-		EvidenceSetID         string
-		EvidencePolicyVersion string
-		TenantID              string
-		ProjectID             string
-		WorkloadID            string
-		AllocationID          string
-		AllocationGeneration  int64
-		ProviderID            string
-		ProviderResourceID    string
-		ProviderResourceUID   string
-		PoolID                string
-		ProfileID             string
-		CapabilityProfileID   string
-		GPUModel              string
-		GPUCount              string
-		MeteringPolicyVersion string
-		KueueWorkloadUID      string
-		JobUID                string
-		PodUID                string
-		DeviceMode            string
+		SchemaVersion                  string
+		EvidenceSetID                  string
+		EvidencePolicyVersion          string
+		TenantID                       string
+		ProjectID                      string
+		WorkloadID                     string
+		AllocationID                   string
+		AllocationGeneration           int64
+		ProviderID                     string
+		ProviderResourceID             string
+		ProviderResourceUID            string
+		PoolID                         string
+		ProfileID                      string
+		CapabilityProfileID            string
+		GPUModel                       string
+		GPUCount                       string
+		MeteringPolicyVersion          string
+		KueueWorkloadUID               string
+		JobUID                         string
+		PodUID                         string
+		DeviceMode                     string
 		DeviceResourceUID              string
 		DeviceIDs                      []string
 		ProviderPoolID                 string
@@ -545,30 +545,30 @@ func allocationUsageEvidenceDigest(
 	}{
 		SchemaVersion: evidence.SchemaVersion, EvidenceSetID: evidence.EvidenceSetID,
 		EvidencePolicyVersion: policy.Version,
-		TenantID: evidence.TenantID, ProjectID: evidence.ProjectID,
+		TenantID:              evidence.TenantID, ProjectID: evidence.ProjectID,
 		WorkloadID: evidence.WorkloadID, AllocationID: evidence.AllocationID,
 		AllocationGeneration: evidence.AllocationGeneration,
-		ProviderID: evidence.ProviderID, ProviderResourceID: evidence.Provider.ResourceID,
+		ProviderID:           evidence.ProviderID, ProviderResourceID: evidence.Provider.ResourceID,
 		ProviderResourceUID: evidence.Provider.ResourceUID,
-		PoolID: evidence.PoolID, ProfileID: evidence.ProfileID,
+		PoolID:              evidence.PoolID, ProfileID: evidence.ProfileID,
 		CapabilityProfileID: evidence.CapabilityProfileID,
-		GPUModel: evidence.GPUModel, GPUCount: evidence.GPUCount,
+		GPUModel:            evidence.GPUModel, GPUCount: evidence.GPUCount,
 		MeteringPolicyVersion: evidence.MeteringPolicyVersion,
-		KueueWorkloadUID: evidence.Kueue.WorkloadUID, JobUID: evidence.Kueue.JobUID,
+		KueueWorkloadUID:      evidence.Kueue.WorkloadUID, JobUID: evidence.Kueue.JobUID,
 		PodUID: evidence.Pod.PodUID, DeviceMode: evidence.Device.Mode,
 		DeviceResourceUID: evidence.Device.ResourceUID, DeviceIDs: canonicalDevices,
-		ProviderComputeOperationID: evidence.Provider.Operation.ID,
-		ProviderOperationTenantID: evidence.Provider.Operation.TenantID,
-		ProviderOperationProjectID: evidence.Provider.Operation.ProjectID,
-		ProviderOperationWorkloadID: evidence.Provider.Operation.WorkloadID,
-		ProviderOperationAllocationID: evidence.Provider.Operation.AllocationID,
-		ProviderOperationGeneration: evidence.Provider.Operation.DesiredGeneration,
-		ProviderOperationProviderID: evidence.Provider.Operation.ProviderID,
-		ProviderOperationStatus: evidence.Provider.Operation.Status,
+		ProviderComputeOperationID:     evidence.Provider.Operation.ID,
+		ProviderOperationTenantID:      evidence.Provider.Operation.TenantID,
+		ProviderOperationProjectID:     evidence.Provider.Operation.ProjectID,
+		ProviderOperationWorkloadID:    evidence.Provider.Operation.WorkloadID,
+		ProviderOperationAllocationID:  evidence.Provider.Operation.AllocationID,
+		ProviderOperationGeneration:    evidence.Provider.Operation.DesiredGeneration,
+		ProviderOperationProviderID:    evidence.Provider.Operation.ProviderID,
+		ProviderOperationStatus:        evidence.Provider.Operation.Status,
 		ProviderOperationRequestDigest: evidence.Provider.Operation.RequestDigest,
-		ProviderBindingOperationID: evidence.Provider.Binding.ComputeOperationID,
-		KueueGPUResourceName: evidence.Kueue.GPUResourceName,
-		ProviderPoolID: evidence.Provider.PoolID, ProviderProfileID: evidence.Provider.ProfileID,
+		ProviderBindingOperationID:     evidence.Provider.Binding.ComputeOperationID,
+		KueueGPUResourceName:           evidence.Kueue.GPUResourceName,
+		ProviderPoolID:                 evidence.Provider.PoolID, ProviderProfileID: evidence.Provider.ProfileID,
 		ProviderGPUModel: evidence.Provider.GPUModel, ProviderGPUCount: evidence.Provider.GPUCount,
 		KueueProfileID: evidence.Kueue.ProfileID, KueueLocalQueue: evidence.Kueue.LocalQueue,
 		KueueClusterQueue: evidence.Kueue.ClusterQueue, KueueResourceFlavor: evidence.Kueue.ResourceFlavor,
@@ -577,9 +577,9 @@ func allocationUsageEvidenceDigest(
 		DeviceClaimUID: evidence.Device.ClaimUID, DeviceDriver: evidence.Device.Driver,
 		DevicePoolID: evidence.Device.PoolID, DeviceProfileID: evidence.Device.ProfileID,
 		DeviceGPUCount: evidence.Device.GPUCount,
-		Records: canonicalRecords,
-		CostableStart: start.UTC().Format(time.RFC3339Nano),
-		CostableEnd: end.UTC().Format(time.RFC3339Nano),
+		Records:        canonicalRecords,
+		CostableStart:  start.UTC().Format(time.RFC3339Nano),
+		CostableEnd:    end.UTC().Format(time.RFC3339Nano),
 	}
 	encoded, err := json.Marshal(input)
 	if err != nil {
@@ -587,6 +587,19 @@ func allocationUsageEvidenceDigest(
 	}
 	sum := sha256.Sum256(encoded)
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
+
+func isSHA256Digest(value string) bool {
+	if !strings.HasPrefix(value, "sha256:") || len(value) != len("sha256:")+64 {
+		return false
+	}
+	digest := strings.TrimPrefix(value, "sha256:")
+	if strings.ToLower(digest) != digest {
+		return false
+	}
+	_, err := hex.DecodeString(digest)
+	return err == nil
 }
 
 func latestTime(values ...time.Time) time.Time {
