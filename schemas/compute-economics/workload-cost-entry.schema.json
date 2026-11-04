@@ -27,7 +27,8 @@
     "calculationVersion",
     "roundingMode",
     "calculationStatus",
-    "recordedAt"
+    "recordedAt",
+    "sourceCoverage"
   ],
   "properties": {
     "schemaVersion": {
@@ -95,11 +96,8 @@
     },
     "pricedQuantity": {
       "type": "string",
-      "pattern": "^(0|[1-9][0-9]*)(\\\\.[0-9]+)?$",
-      "description": "Non-negative base-10 decimal string. Never use binary floating point for accounting values.",
-      "not": {
-        "const": "0"
-      }
+      "pattern": "^(?=.*[1-9])(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+      "description": "Strictly positive base-10 decimal string. Never use binary floating point for accounting values."
     },
     "unit": {
       "const": "GPU_HOUR"
@@ -114,11 +112,8 @@
     },
     "rateAmount": {
       "type": "string",
-      "pattern": "^(0|[1-9][0-9]*)(\\\\.[0-9]+)?$",
-      "description": "Non-negative base-10 decimal string. Never use binary floating point for accounting values.",
-      "not": {
-        "const": "0"
-      }
+      "pattern": "^(?=.*[1-9])(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+      "description": "Strictly positive base-10 decimal string. Never use binary floating point for accounting values."
     },
     "currency": {
       "type": "string",
@@ -126,11 +121,8 @@
     },
     "amount": {
       "type": "string",
-      "pattern": "^(0|[1-9][0-9]*)(\\\\.[0-9]+)?$",
-      "description": "Non-negative base-10 decimal string. Never use binary floating point for accounting values.",
-      "not": {
-        "const": "0"
-      }
+      "pattern": "^(?=.*[1-9])(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+      "description": "Strictly positive base-10 decimal string. Never use binary floating point for accounting values."
     },
     "calculationVersion": {
       "type": "string",
@@ -144,10 +136,8 @@
       "const": "CURRENCY_MINOR_UNIT_HALF_UP"
     },
     "calculationStatus": {
-      "enum": [
-        "FINAL",
-        "INCOMPLETE"
-      ]
+      "const": "FINAL",
+      "description": "Only complete, fully covered postings are persisted as WorkloadCostEntry records. Incomplete calculations return an outcome without posting a cost entry."
     },
     "reversesEntryId": {
       "type": "string",
@@ -158,9 +148,7 @@
       "format": "date-time"
     },
     "sourceCoverage": {
-      "type": "number",
-      "minimum": 0,
-      "maximum": 1
+      "const": 1
     }
   },
   "allOf": [
@@ -184,18 +172,20 @@
     {
       "if": {
         "properties": {
-          "calculationStatus": {
-            "const": "INCOMPLETE"
+          "entryType": {
+            "const": "CHARGE"
           }
         },
         "required": [
-          "calculationStatus"
+          "entryType"
         ]
       },
       "then": {
-        "required": [
-          "sourceCoverage"
-        ]
+        "not": {
+          "required": [
+            "reversesEntryId"
+          ]
+        }
       }
     }
   ],
