@@ -252,7 +252,6 @@ func TestCreateWorkloadPersistsAuthorizedAtomicAcceptance(t *testing.T) {
 	}
 }
 
-
 func TestCreateWorkloadIdempotentReplaySkipsProviderSelection(t *testing.T) {
 	principal, authorizer, selector, repo := newAcceptanceFixture()
 	repo.lookupFound = true
