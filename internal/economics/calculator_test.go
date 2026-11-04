@@ -353,7 +353,6 @@ func TestReplayProducesIdenticalCostEntries(t *testing.T) {
 	}
 }
 
-
 func TestDeviceBoundUsageRequiresTrustedEvidenceIdentity(t *testing.T) {
 	usage, rates := goldenInputs(t)
 	usage.AttributionMethod = "DEVICE_BINDING"
