@@ -15,7 +15,7 @@ The [golden fixture](examples/workload-cost-allocation-rate-boundary-v1.json) an
 ## v1 limits
 
 - Positive whole GPU device counts only; fractions, MIG slices and vendor-specific partition pricing are rejected by the v1 schema.
-- Only fixed ALLOCATED_GPU_HOUR procurement rates. Tiered prices and minimum commitments require later pricing contracts.\n- Currency precision is resolved from versioned currency metadata and persisted on rates and cost entries; precision drift inside one priced interval fails closed. Cost postings include a canonical input digest.
+- Only fixed ALLOCATED_GPU_HOUR procurement rates. Tiered prices and minimum commitments require later pricing contracts.\n- Currency precision is resolved from the pinned `six-list-one-2026-09-17-subset-v1` application allowlist and persisted with the metadata version on rates and cost entries. Unsupported codes and precision mismatches fail closed. See [currency metadata snapshot](currency-metadata-snapshot-v1.json). Cost postings include a canonical input digest.
 - Workload direct cost requires an accepted Allocation identity/projection and authoritative resource/admission evidence.
 - Commercial billable usage, customer sell prices, revenue recognition, invoices and collection remain separate future contracts.
 - Missing source coverage or missing/overlapping rate windows produces an incomplete calculation outcome; it must not create a zero or partial final WorkloadCostEntry.
