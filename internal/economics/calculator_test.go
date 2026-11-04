@@ -126,6 +126,47 @@ func TestCurrencyMinorUnitUsesHalfUpRounding(t *testing.T) {
 	}
 }
 
+func TestZeroRoundedAmountRetainsEvidenceWithoutPostingCostEntry(t *testing.T) {
+	usage, rates := goldenInputs(t)
+	usage.End = parseTestTime(t, "2026-11-01T09:00:01Z")
+	usage.GPUCount = "1"
+	rate := rates[0]
+	rate.EffectiveTo = nil
+	rate.RateAmount = "10.00"
+
+	got, err := Calculate(usage, []ProviderRateCard{rate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != StatusFinal || got.TotalDirectWorkloadCost != "0.00" {
+		t.Fatalf("unexpected fully-covered zero-minor-unit calculation: %+v", got)
+	}
+	if len(got.Segments) != 1 {
+		t.Fatalf("segments = %d, want 1", len(got.Segments))
+	}
+	segment := got.Segments[0]
+	if segment.Amount != "0.00" || segment.PostingStatus != PostingSkippedZeroMinorUnits ||
+		segment.CostEntryID != "" || segment.CalculationInputDigest == "" {
+		t.Fatalf("zero-minor-unit segment must retain evidence and skip ledger posting: %+v", segment)
+	}
+}
+
+func TestPositiveRoundedAmountIsMarkedPostable(t *testing.T) {
+	usage, rates := goldenInputs(t)
+	usage.End = parseTestTime(t, "2026-11-01T09:01:00Z")
+	usage.GPUCount = "1"
+	rate := rates[0]
+	rate.EffectiveTo = nil
+	got, err := Calculate(usage, []ProviderRateCard{rate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Segments) != 1 || got.Segments[0].PostingStatus != PostingReady ||
+		got.Segments[0].CostEntryID == "" || got.Segments[0].Amount != "0.17" {
+		t.Fatalf("positive minor-unit amount must be postable: %+v", got)
+	}
+}
+
 func TestNanosecondDurationIsPricedExactly(t *testing.T) {
 	usage, rates := goldenInputs(t)
 	usage.Start = parseTestTime(t, "2026-11-01T09:00:00.000000000Z")

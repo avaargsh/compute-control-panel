@@ -20,6 +20,9 @@ const (
 	quantityScale          = 18
 	StatusFinal            = "FINAL"
 	StatusIncomplete       = "INCOMPLETE"
+
+	PostingReady                 = "POSTABLE"
+	PostingSkippedZeroMinorUnits = "SKIPPED_ZERO_MINOR_UNITS"
 	ReasonRateGap          = "RATE_GAP"
 	ReasonIncompleteSource = "INCOMPLETE_SOURCE"
 	usageSchemaVersion     = "compute.economics.usage-interval.v1"
@@ -82,6 +85,7 @@ type ProviderRateCard struct {
 
 type CostSegment struct {
 	CostEntryID            string
+	PostingStatus          string
 	CalculationInputDigest string
 	Start                  string
 	End                    string
@@ -214,8 +218,17 @@ func Calculate(usage UsageInterval, rates []ProviderRateCard) (CalculationResult
 			return CalculationResult{}, fmt.Errorf("calculate input digest: %w", err)
 		}
 		amountText := formatFixed(roundedAmount, selected.CurrencyMinorUnit)
+		postingStatus := PostingReady
+		costEntryID := "cost_" + strings.TrimPrefix(digest, "sha256:")
+		if roundedAmount.Sign() == 0 {
+			// Preserve the priced interval and its evidence, but never create a
+			// zero-valued financial entry (the ledger schema requires > 0).
+			postingStatus = PostingSkippedZeroMinorUnits
+			costEntryID = ""
+		}
 		segment := CostSegment{
-			CostEntryID:            "cost_" + strings.TrimPrefix(digest, "sha256:"),
+			CostEntryID:            costEntryID,
+			PostingStatus:          postingStatus,
 			CalculationInputDigest: digest,
 			Start:                  startText,
 			End:                    endText,
