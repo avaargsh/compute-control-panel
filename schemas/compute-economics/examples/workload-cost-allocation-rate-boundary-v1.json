@@ -48,7 +48,8 @@
       "currency": "CNY",
       "effectiveFrom": "2026-01-01T00:00:00Z",
       "effectiveTo": "2026-11-01T10:30:00Z",
-      "sourceRef": "contract-demo#rate-1"
+      "sourceRef": "contract-demo#rate-1",
+      "currencyMinorUnit": 2
     },
     {
       "schemaVersion": "compute.economics.provider-rate-card.v1",
@@ -63,7 +64,8 @@
       "currency": "CNY",
       "effectiveFrom": "2026-11-01T10:30:00Z",
       "effectiveTo": null,
-      "sourceRef": "contract-demo#rate-2"
+      "sourceRef": "contract-demo#rate-2",
+      "currencyMinorUnit": 2
     }
   ],
   "expected": {
@@ -77,7 +79,8 @@
         "rateAmountPerGpuHour": "10.00",
         "amount": "30.00",
         "rateCardId": "rate-h100-v1",
-        "rateCardVersion": 1
+        "rateCardVersion": 1,
+        "currencyMinorUnit": 2
       },
       {
         "start": "2026-11-01T10:30:00Z",
@@ -88,7 +91,8 @@
         "rateAmountPerGpuHour": "12.00",
         "amount": "36.00",
         "rateCardId": "rate-h100-v2",
-        "rateCardVersion": 2
+        "rateCardVersion": 2,
+        "currencyMinorUnit": 2
       }
     ],
     "totalAllocatedGpuHours": "6.0",
