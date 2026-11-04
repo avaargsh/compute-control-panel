@@ -17,8 +17,8 @@ const CurrencyMetadataVersion = "six-list-one-2026-09-17-subset-v1"
 var currencyMetadataRegistryJSON []byte
 
 type currencyMetadataSnapshot struct {
-	RegistryVersion      string         `json:"registryVersion"`
-	SupportedCurrencies  map[string]int `json:"supportedCurrencies"`
+	RegistryVersion     string         `json:"registryVersion"`
+	SupportedCurrencies map[string]int `json:"supportedCurrencies"`
 }
 
 var currencyMetadataSnapshots = loadCurrencyMetadataSnapshots()

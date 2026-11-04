@@ -87,19 +87,19 @@ type ProviderRateCard struct {
 	CurrencyMinorUnit       int
 }
 type CostSegment struct {
-	CostEntryID            string
-	PostingStatus          string
-	CalculationInputDigest string
-	Start                  string
-	End                    string
-	PricedQuantity         string
-	RateCardID             string
-	RateCardVersion        int
-	RateAmount             string
-	Currency               string
-	CurrencyMinorUnit      int
+	CostEntryID             string
+	PostingStatus           string
+	CalculationInputDigest  string
+	Start                   string
+	End                     string
+	PricedQuantity          string
+	RateCardID              string
+	RateCardVersion         int
+	RateAmount              string
+	Currency                string
+	CurrencyMinorUnit       int
 	CurrencyMetadataVersion string
-	Amount                 string
+	Amount                  string
 }
 
 type CalculationResult struct {
@@ -112,6 +112,7 @@ type CalculationResult struct {
 	CurrencyMetadataVersion string
 	Segments                []CostSegment
 }
+
 // Calculate prices a fully-covered Allocation interval against effective-dated
 // Provider procurement rates. It has no persistence or billing side effects.
 // Missing evidence or rate coverage returns INCOMPLETE and no partial postings.
@@ -330,81 +331,81 @@ func calculationDigest(usage UsageInterval, rate ProviderRateCard, start, end st
 		return "", err
 	}
 	input := struct {
-		CalculationVersion      string	`json:"calculationVersion"`
-		UsageSchemaVersion      string	`json:"usageSchemaVersion"`
-		UsageIntervalID         string	`json:"usageIntervalId"`
-		TenantID                string	`json:"tenantId"`
-		ProjectID               string	`json:"projectId"`
-		WorkloadID              string	`json:"workloadId"`
-		AllocationID            string	`json:"allocationId"`
-		AllocationGeneration    int64	`json:"allocationGeneration"`
-		ProviderID              string	`json:"providerId"`
-		PoolID                  string	`json:"poolId"`
-		ProfileID               string	`json:"profileId"`
-		GPUModel                string	`json:"gpuModel"`
-		GPUCount                string	`json:"gpuCount"`
-		Unit                    string	`json:"unit"`
-		WindowStart             string	`json:"windowStart"`
-		WindowEnd               string	`json:"windowEnd"`
-		MeteringPolicyVersion   string	`json:"meteringPolicyVersion"`
-		Quality                 string	`json:"quality"`
-		AttributionMethod       string	`json:"attributionMethod"`
-		SourceEventIDs          []string	`json:"sourceEventIds"`
-		SourceCoverage          string	`json:"sourceCoverage"`
-		RateCardID              string	`json:"rateCardId"`
-		RateCardVersion         int	`json:"rateCardVersion"`
-		RateSourceRef           string	`json:"rateSourceRef"`
-		RateProviderID          string	`json:"rateProviderId"`
-		RatePoolID              string	`json:"ratePoolId"`
-		RateProfileID           string	`json:"rateProfileId"`
-		RateBasis               string	`json:"rateBasis"`
-		RateUnit                string	`json:"rateUnit"`
-		RateAmount              string	`json:"rateAmount"`
-		Currency                string	`json:"currency"`
-		CurrencyMetadataVersion string	`json:"currencyMetadataVersion"`
-		CurrencyMinorUnit       int	`json:"currencyMinorUnit"`
-		EffectiveFrom           string	`json:"effectiveFrom"`
-		EffectiveTo             string	`json:"effectiveTo"`
-		SegmentStart            string	`json:"segmentStart"`
-		SegmentEnd              string	`json:"segmentEnd"`
+	CalculationVersion      string   `json:"calculationVersion"`
+	UsageSchemaVersion      string   `json:"usageSchemaVersion"`
+	UsageIntervalID         string   `json:"usageIntervalId"`
+	TenantID                string   `json:"tenantId"`
+	ProjectID               string   `json:"projectId"`
+	WorkloadID              string   `json:"workloadId"`
+	AllocationID            string   `json:"allocationId"`
+	AllocationGeneration    int64    `json:"allocationGeneration"`
+	ProviderID              string   `json:"providerId"`
+	PoolID                  string   `json:"poolId"`
+	ProfileID               string   `json:"profileId"`
+	GPUModel                string   `json:"gpuModel"`
+	GPUCount                string   `json:"gpuCount"`
+	Unit                    string   `json:"unit"`
+	WindowStart             string   `json:"windowStart"`
+	WindowEnd               string   `json:"windowEnd"`
+	MeteringPolicyVersion   string   `json:"meteringPolicyVersion"`
+	Quality                 string   `json:"quality"`
+	AttributionMethod       string   `json:"attributionMethod"`
+	SourceEventIDs          []string `json:"sourceEventIds"`
+	SourceCoverage          string   `json:"sourceCoverage"`
+	RateCardID              string   `json:"rateCardId"`
+	RateCardVersion         int      `json:"rateCardVersion"`
+	RateSourceRef           string   `json:"rateSourceRef"`
+	RateProviderID          string   `json:"rateProviderId"`
+	RatePoolID              string   `json:"ratePoolId"`
+	RateProfileID           string   `json:"rateProfileId"`
+	RateBasis               string   `json:"rateBasis"`
+	RateUnit                string   `json:"rateUnit"`
+	RateAmount              string   `json:"rateAmount"`
+	Currency                string   `json:"currency"`
+	CurrencyMetadataVersion string   `json:"currencyMetadataVersion"`
+	CurrencyMinorUnit       int      `json:"currencyMinorUnit"`
+	EffectiveFrom           string   `json:"effectiveFrom"`
+	EffectiveTo             string   `json:"effectiveTo"`
+	SegmentStart            string   `json:"segmentStart"`
+	SegmentEnd              string   `json:"segmentEnd"`
 	}{
-		CalculationVersion: CalculationVersion,
-		UsageSchemaVersion: usage.SchemaVersion,
-		UsageIntervalID: usage.UsageIntervalID,
-		TenantID: usage.TenantID,
-		ProjectID: usage.ProjectID,
-		WorkloadID: usage.WorkloadID,
-		AllocationID: usage.AllocationID,
-		AllocationGeneration: usage.AllocationGeneration,
-		ProviderID: usage.ProviderID,
-		PoolID: usage.PoolID,
-		ProfileID: usage.ProfileID,
-		GPUModel: usage.GPUModel,
-		GPUCount: usage.GPUCount,
-		Unit: usage.Unit,
-		WindowStart: usage.Start.UTC().Format(time.RFC3339Nano),
-		WindowEnd: usage.End.UTC().Format(time.RFC3339Nano),
-		MeteringPolicyVersion: usage.MeteringPolicyVersion,
-		Quality: usage.Quality,
-		AttributionMethod: usage.AttributionMethod,
-		SourceEventIDs: sourceIDs,
-		SourceCoverage: strconv.FormatFloat(usage.SourceCoverage, 'g', -1, 64),
-		RateCardID: rate.RateCardID,
-		RateCardVersion: rate.Version,
-		RateSourceRef: rate.SourceRef,
-		RateProviderID: rate.ProviderID,
-		RatePoolID: rate.PoolID,
-		RateProfileID: rate.ProfileID,
-		RateBasis: rate.RateBasis,
-		RateUnit: rate.Unit,
-		RateAmount: canonicalRate,
-		Currency: rate.Currency,
-		CurrencyMetadataVersion: rate.CurrencyMetadataVersion,
-		CurrencyMinorUnit: rate.CurrencyMinorUnit,
-		EffectiveFrom: from,
-		EffectiveTo: to,
-		SegmentStart: start,
-		SegmentEnd: end,
+		CalculationVersion      : CalculationVersion,
+		UsageSchemaVersion      : usage.SchemaVersion,
+		UsageIntervalID         : usage.UsageIntervalID,
+		TenantID                : usage.TenantID,
+		ProjectID               : usage.ProjectID,
+		WorkloadID              : usage.WorkloadID,
+		AllocationID            : usage.AllocationID,
+		AllocationGeneration    : usage.AllocationGeneration,
+		ProviderID              : usage.ProviderID,
+		PoolID                  : usage.PoolID,
+		ProfileID               : usage.ProfileID,
+		GPUModel                : usage.GPUModel,
+		GPUCount                : usage.GPUCount,
+		Unit                    : usage.Unit,
+		WindowStart             : usage.Start.UTC().Format(time.RFC3339Nano),
+		WindowEnd               : usage.End.UTC().Format(time.RFC3339Nano),
+		MeteringPolicyVersion   : usage.MeteringPolicyVersion,
+		Quality                 : usage.Quality,
+		AttributionMethod       : usage.AttributionMethod,
+		SourceEventIDs          : sourceIDs,
+		SourceCoverage          : strconv.FormatFloat(usage.SourceCoverage, 'g', -1, 64),
+		RateCardID              : rate.RateCardID,
+		RateCardVersion         : rate.Version,
+		RateSourceRef           : rate.SourceRef,
+		RateProviderID          : rate.ProviderID,
+		RatePoolID              : rate.PoolID,
+		RateProfileID           : rate.ProfileID,
+		RateBasis               : rate.RateBasis,
+		RateUnit                : rate.Unit,
+		RateAmount              : canonicalRate,
+		Currency                : rate.Currency,
+		CurrencyMetadataVersion : rate.CurrencyMetadataVersion,
+		CurrencyMinorUnit       : rate.CurrencyMinorUnit,
+		EffectiveFrom           : from,
+		EffectiveTo             : to,
+		SegmentStart            : start,
+		SegmentEnd              : end,
 	}
 	encoded, err := json.Marshal(input)
 	if err != nil {
