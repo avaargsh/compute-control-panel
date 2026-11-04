@@ -219,3 +219,59 @@ func TestFakeProviderCannotDeleteForeignStaleOrAlreadyReclaimedUID(t *testing.T)
 		t.Fatalf("unrecorded delete inferred finality: %+v %v", obs, err)
 	}
 }
+
+func TestFakeProviderRejectsStaleGenerationMutation(t *testing.T) {
+	ctx := context.Background()
+	fake := NewFakeProvider()
+	create := fakeRequest()
+	if _, err := fake.Apply(ctx, create); err != nil {
+		t.Fatal(err)
+	}
+	created, err := fake.Inspect(ctx, create)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	current := create
+	current.OperationID = "op-update-generation-3"
+	current.IdempotencyKey = "update-gen-3"
+	current.DesiredGeneration = 3
+	current.Kind = operation.Update
+	current.TargetResourceID = created.ResourceID
+	current.TargetResourceUID = created.ResourceUID
+	if _, err := fake.Apply(ctx, current); err != nil {
+		t.Fatalf("new generation UPDATE rejected: %v", err)
+	}
+
+	for _, kind := range []operation.Kind{operation.Update, operation.Delete} {
+		t.Run(string(kind), func(t *testing.T) {
+			stale := current
+			stale.OperationID = "op-stale-" + string(kind)
+			stale.IdempotencyKey = "stale-" + string(kind)
+			stale.DesiredGeneration = 2
+			stale.Kind = kind
+			if _, err := fake.Apply(ctx, stale); !errors.Is(err, ErrOperationConflict) {
+				t.Fatalf("stale %s mutated newer generation: %v", kind, err)
+			}
+		})
+	}
+	stillLive, err := fake.Inspect(ctx, current)
+	if err != nil || stillLive.Result != operation.ResourcePresent ||
+		stillLive.ResourceUID != created.ResourceUID {
+		t.Fatalf("stale mutation removed or obscured live resource: %+v %v", stillLive, err)
+	}
+
+	release := current
+	release.OperationID = "op-delete-generation-4"
+	release.IdempotencyKey = "delete-gen-4"
+	release.DesiredGeneration = 4
+	release.Kind = operation.Delete
+	if _, err := fake.Apply(ctx, release); err != nil {
+		t.Fatalf("current generation release failed: %v", err)
+	}
+	obs, err := fake.Inspect(ctx, release)
+	if err != nil || obs.Result != operation.TargetAbsent ||
+		obs.TargetResourceUID != created.ResourceUID {
+		t.Fatalf("current generation release not inspectable: %+v %v", obs, err)
+	}
+}
