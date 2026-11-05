@@ -181,3 +181,39 @@ func TestProviderRegistryRejectsInvalidInputsBeforePersistence(t *testing.T) {
 		t.Fatalf("blank provider read accepted: %v", err)
 	}
 }
+
+func TestProviderRegistryForbidsDirectFingerprintMutationAndAuditRewrite(t *testing.T) {
+	db := openIntegrationDB(t)
+	repo, _ := NewRepository(db)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	p := providerRegistrationFixture(t)
+	if _, _, err := repo.RegisterProvider(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx,
+		"UPDATE compute_providers SET adapter_version='tampered' WHERE provider_id=$1", p.ProviderID); err == nil {
+		t.Fatal("direct SQL changed immutable Provider adapter version")
+	}
+	if _, err := db.ExecContext(ctx,
+		"UPDATE compute_provider_lifecycle_audit SET reason_code='TAMPERED' WHERE provider_id=$1", p.ProviderID); err == nil {
+		t.Fatal("audit update was allowed")
+	}
+	if _, err := db.ExecContext(ctx,
+		"DELETE FROM compute_provider_lifecycle_audit WHERE provider_id=$1", p.ProviderID); err == nil {
+		t.Fatal("audit delete was allowed")
+	}
+	got, err := repo.GetProvider(ctx, p.ProviderID)
+	if err != nil || got.AdapterVersion != p.AdapterVersion || got.Version != 1 {
+		t.Fatalf("rejected fingerprint mutation took effect: %+v %v", got, err)
+	}
+	var events int
+	if err := db.QueryRowContext(ctx,
+		"SELECT count(*) FROM compute_provider_lifecycle_audit WHERE provider_id=$1 AND reason_code='REGISTERED'",
+		p.ProviderID).Scan(&events); err != nil {
+		t.Fatal(err)
+	}
+	if events != 1 {
+		t.Fatalf("registration audit was changed: %d", events)
+	}
+}
