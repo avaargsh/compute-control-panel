@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -20,13 +19,13 @@ func TestEvidencePolicyCommitFenceRejectsStaleOrRevokedSnapshot(t *testing.T) {
 	defer cancel()
 	policy := economics.EvidencePolicy{
 		Version: "v1", AsOf: time.Date(2026, 11, 4, 12, 10, 0, 0, time.UTC),
-		MaximumClockSkew: time.Minute,
+		MaximumClockSkew:               time.Minute,
 		TrustedSourceTimestampAdapters: map[string]bool{"provider@v1": true},
-		CertifiedDeviceAdapters: map[string]bool{},
+		CertifiedDeviceAdapters:        map[string]bool{},
 	}
 	now := time.Now().UTC()
 	approved := TrustedEvidencePolicy{
-		TenantID: "tenant-fence-"+randomSuffix(t), ProviderID: "provider-fence",
+		TenantID: "tenant-fence-" + randomSuffix(t), ProviderID: "provider-fence",
 		Policy: policy, EffectiveFrom: now.Add(-time.Hour),
 		EffectiveUntil: now.Add(time.Hour),
 	}
@@ -95,33 +94,45 @@ func TestEvidencePolicyCommitFenceSerializesConcurrentRevocation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	approved := TrustedEvidencePolicy{
-		TenantID: "tenant-fence-lock-"+randomSuffix(t), ProviderID: "provider-fence",
+		TenantID: "tenant-fence-lock-" + randomSuffix(t), ProviderID: "provider-fence",
 		Policy: economics.EvidencePolicy{
 			Version: "v1", AsOf: time.Date(2026, 11, 4, 12, 10, 0, 0, time.UTC),
 			TrustedSourceTimestampAdapters: map[string]bool{"provider@v1": true},
 		},
-		EffectiveFrom: time.Now().UTC().Add(-time.Hour),
+		EffectiveFrom:  time.Now().UTC().Add(-time.Hour),
 		EffectiveUntil: time.Now().UTC().Add(time.Hour),
 	}
 	digest, err := evidencePolicyFenceDigest(approved)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO compute_evidence_policy_fences
 		(tenant_id,provider_id,policy_version,policy_digest,effective_from,effective_until,revision,revoked)
 		VALUES($1,$2,$3,$4,$5,$6,1,false)
 	`, approved.TenantID, approved.ProviderID, approved.Policy.Version, digest, approved.EffectiveFrom, approved.EffectiveUntil)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	tx, err := db.BeginTx(ctx, nil)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer tx.Rollback()
-	if err := lockTrustedEvidencePolicy(ctx, tx, approved); err != nil { t.Fatal(err) }
+	if err := lockTrustedEvidencePolicy(ctx, tx, approved); err != nil {
+		t.Fatal(err)
+	}
 
 	// The admin must not be able to revoke the policy while an E1 writer
 	// holds its transaction-level read lock. PostgreSQL lock_timeout avoids
 	// a timing-dependent blocked goroutine in this deterministic test.
 	adminTx, err := db.BeginTx(ctx, nil)
-	if err != nil { t.Fatal(err) }
-	if _, err := adminTx.ExecContext(ctx, "SET LOCAL lock_timeout='150ms'"); err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adminTx.ExecContext(ctx, "SET LOCAL lock_timeout='150ms'"); err != nil {
+		t.Fatal(err)
+	}
 	_, err = adminTx.ExecContext(ctx, `
 		UPDATE compute_evidence_policy_fences SET revoked=true,revision=revision+1
 		WHERE tenant_id=$1 AND provider_id=$2 AND policy_version=$3
@@ -130,22 +141,25 @@ func TestEvidencePolicyCommitFenceSerializesConcurrentRevocation(t *testing.T) {
 		t.Fatalf("revocation bypassed in-flight transaction policy fence: %v", err)
 	}
 	_ = adminTx.Rollback()
-	if err := tx.Commit(); err != nil { t.Fatal(err) }
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
 	// Once the writer commits, the admin's revoke can proceed; all later
 	// writes must fail closed against the revoked version.
 	_, err = db.ExecContext(ctx, `
 		UPDATE compute_evidence_policy_fences SET revoked=true,revision=revision+1
 		WHERE tenant_id=$1 AND provider_id=$2 AND policy_version=$3
 	`, approved.TenantID, approved.ProviderID, approved.Policy.Version)
-	if err != nil { t.Fatalf("admin revocation after writer commit: %v", err) }
+	if err != nil {
+		t.Fatalf("admin revocation after writer commit: %v", err)
+	}
 	next, err := db.BeginTx(ctx, nil)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer next.Rollback()
 	if err := lockTrustedEvidencePolicy(ctx, next, approved); !errors.Is(err, ErrEvidencePolicyUntrusted) {
 		t.Fatalf("post-revocation write admitted: %v", err)
 	}
 }
 
-// sql import remains intentional: transaction-scoped fence must use the SAME
-// sql.Tx as the immutable FINAL evidence insert, never a separate connection.
-var _ *sql.Tx
