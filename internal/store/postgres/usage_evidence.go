@@ -341,6 +341,9 @@ func (r *Repository) PersistUsageEvidenceSet(ctx context.Context, p PersistUsage
 		usageIntervalUnit, usageAttributionMethod, usageEvidenceQuality, 1,
 	))
 	if insertErr == nil {
+		if err := recheckTrustedEvidencePolicyDeadline(ctx, tx, approved); err != nil {
+			return UsageEvidenceSet{}, false, err
+		}
 		if err := tx.Commit(); err != nil {
 			return UsageEvidenceSet{}, false, fmt.Errorf("commit usage evidence set: %w", err)
 		}
@@ -362,6 +365,9 @@ func (r *Repository) PersistUsageEvidenceSet(ctx context.Context, p PersistUsage
 	}
 	if mismatches := usageEvidenceIntentMismatches(existing, record); len(mismatches) > 0 {
 		return UsageEvidenceSet{}, false, fmt.Errorf("%w: replay identity mismatch: %s", ErrUsageEvidenceConflict, strings.Join(mismatches, ","))
+	}
+	if err := recheckTrustedEvidencePolicyDeadline(ctx, tx, approved); err != nil {
+		return UsageEvidenceSet{}, false, err
 	}
 	if err := tx.Commit(); err != nil {
 		return UsageEvidenceSet{}, false, fmt.Errorf("commit usage evidence replay: %w", err)
