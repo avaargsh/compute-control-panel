@@ -55,7 +55,7 @@ func resolveTrustedUsagePolicy(
 ) (economics.EvidencePolicy, error) {
 	snapshot, err := resolveTrustedUsagePolicySnapshot(ctx, authority, p, now)
 	if err != nil {
-		return TrustedEvidencePolicy{}, err
+		return economics.EvidencePolicy{}, err
 	}
 	return snapshot.Policy, nil
 }
