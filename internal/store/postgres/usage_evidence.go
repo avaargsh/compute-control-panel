@@ -255,11 +255,11 @@ func (r *Repository) PersistUsageEvidenceSet(ctx context.Context, p PersistUsage
 	if r == nil {
 		return UsageEvidenceSet{}, false, ErrEvidencePolicyUntrusted
 	}
-	trustedPolicy, err := resolveTrustedUsagePolicy(ctx, r.evidencePolicyAuthority, p, time.Now().UTC())
+	approved, err := resolveTrustedUsagePolicySnapshot(ctx, r.evidencePolicyAuthority, p, time.Now().UTC())
 	if err != nil {
 		return UsageEvidenceSet{}, false, err
 	}
-	p.Policy = trustedPolicy
+	p.Policy = approved.Policy
 	derived, err := deriveUsageEvidence(p)
 	if err != nil {
 		return UsageEvidenceSet{}, false, err
@@ -270,6 +270,9 @@ func (r *Repository) PersistUsageEvidenceSet(ctx context.Context, p PersistUsage
 		return UsageEvidenceSet{}, false, fmt.Errorf("begin usage evidence transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockTrustedEvidencePolicy(ctx, tx, approved); err != nil {
+		return UsageEvidenceSet{}, false, err
+	}
 
 	var operationID, providerRequestDigest string
 	err = tx.QueryRowContext(ctx, `

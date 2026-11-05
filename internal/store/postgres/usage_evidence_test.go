@@ -109,16 +109,34 @@ func fixtureEvidencePolicy() economics.EvidencePolicy {
 func newTestEvidenceRepo(t *testing.T, db *sql.DB) *Repository {
 	t.Helper()
 	repo, err := NewRepositoryWithEvidencePolicyAuthority(db, EvidencePolicyAuthorityFunc(
-		func(_ context.Context, tenantID, providerID, version string) (TrustedEvidencePolicy, error) {
+		func(ctx context.Context, tenantID, providerID, version string) (TrustedEvidencePolicy, error) {
 			policy := fixtureEvidencePolicy()
 			if version != policy.Version {
 				return TrustedEvidencePolicy{}, errors.New("unrecognized test policy version")
 			}
-			now := time.Now().UTC()
-			return TrustedEvidencePolicy{
+			approved := TrustedEvidencePolicy{
 				TenantID: tenantID, ProviderID: providerID, Policy: policy,
-				EffectiveFrom: now.Add(-time.Hour), EffectiveUntil: now.Add(time.Hour),
-			}, nil
+				EffectiveFrom:  time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC),
+				EffectiveUntil: time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
+				Revision:       1,
+			}
+			// Only the isolated PG integration test authority provisions
+			// approved policy rows. Production callers cannot administer
+			// trusted policy versions through the E1 repository.
+			digest, err := evidencePolicyFenceDigest(approved)
+			if err != nil {
+				return TrustedEvidencePolicy{}, err
+			}
+			_, err = db.ExecContext(ctx, `
+				INSERT INTO compute_evidence_policy_fences
+				  (tenant_id,provider_id,policy_version,policy_digest,effective_from,effective_until,revision,revoked)
+				VALUES ($1,$2,$3,$4,$5,$6,1,false)
+				ON CONFLICT (tenant_id,provider_id,policy_version) DO NOTHING
+			`, tenantID, providerID, version, digest, approved.EffectiveFrom, approved.EffectiveUntil)
+			if err != nil {
+				return TrustedEvidencePolicy{}, err
+			}
+			return approved, nil
 		},
 	))
 	if err != nil {
