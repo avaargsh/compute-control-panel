@@ -23,11 +23,11 @@ func TestEvidencePolicyCommitFenceRejectsStaleOrRevokedSnapshot(t *testing.T) {
 		TrustedSourceTimestampAdapters: map[string]bool{"provider@v1": true},
 		CertifiedDeviceAdapters:        map[string]bool{},
 	}
-	now := time.Now().UTC()
+	now := time.Now().UTC().Truncate(time.Microsecond)
 	approved := TrustedEvidencePolicy{
 		TenantID: "tenant-fence-" + randomSuffix(t), ProviderID: "provider-fence",
 		Policy: policy, EffectiveFrom: now.Add(-time.Hour),
-		EffectiveUntil: now.Add(time.Hour),
+		EffectiveUntil: now.Add(time.Hour), Revision: 1,
 	}
 	digest, err := evidencePolicyFenceDigest(approved)
 	if err != nil {
@@ -99,8 +99,9 @@ func TestEvidencePolicyCommitFenceSerializesConcurrentRevocation(t *testing.T) {
 			Version: "v1", AsOf: time.Date(2026, 11, 4, 12, 10, 0, 0, time.UTC),
 			TrustedSourceTimestampAdapters: map[string]bool{"provider@v1": true},
 		},
-		EffectiveFrom:  time.Now().UTC().Add(-time.Hour),
-		EffectiveUntil: time.Now().UTC().Add(time.Hour),
+		EffectiveFrom:  time.Now().UTC().Truncate(time.Microsecond).Add(-time.Hour),
+		EffectiveUntil: time.Now().UTC().Truncate(time.Microsecond).Add(time.Hour),
+		Revision: 1,
 	}
 	digest, err := evidencePolicyFenceDigest(approved)
 	if err != nil {
