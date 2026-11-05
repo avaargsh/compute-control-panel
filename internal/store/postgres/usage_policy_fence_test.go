@@ -162,4 +162,3 @@ func TestEvidencePolicyCommitFenceSerializesConcurrentRevocation(t *testing.T) {
 		t.Fatalf("post-revocation write admitted: %v", err)
 	}
 }
-
