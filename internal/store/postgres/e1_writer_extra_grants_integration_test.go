@@ -27,9 +27,9 @@ func TestE1WriterRoleRejectsUnexpectedControlAndEvidenceGrants(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
-		privilege  string
-		relation   string
+		name      string
+		privilege string
+		relation  string
 	}{
 		{"Provider operation status", "UPDATE(status)", "public.compute_operations"},
 		{"Allocation lifecycle", "UPDATE(phase)", "public.compute_allocations"},
