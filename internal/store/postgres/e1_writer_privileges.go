@@ -30,7 +30,14 @@ func verifyEvidenceWriterPrivileges(ctx context.Context, q evidenceWriterQueryRo
 	var privileged, hasRead, hasLockColumn, canInsertEvidence bool
 	err := q.QueryRowContext(ctx, `
 		SELECT
-		  (r.rolsuper OR r.rolbypassrls
+		  (r.rolsuper OR r.rolbypassrls OR r.rolcreaterole OR r.rolcreatedb
+		   OR session_user <> current_user
+		   OR has_database_privilege(current_user, current_database(), 'CREATE')
+		   OR EXISTS (
+		     SELECT 1 FROM pg_roles other
+		     WHERE other.rolname <> current_user
+		       AND pg_has_role(current_user, other.oid, 'SET')
+		   )
 		   OR has_schema_privilege(current_user, 'public', 'CREATE')
 		   OR has_table_privilege(current_user, 'compute_evidence_policy_fences', 'INSERT')
 		   OR has_table_privilege(current_user, 'compute_evidence_policy_fences', 'DELETE')
