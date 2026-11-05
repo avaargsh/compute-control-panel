@@ -225,6 +225,16 @@ func TestPersistUsageEvidenceSetIsImmutableIdempotentAndTenantScoped(t *testing.
 	if err != nil || persisted {
 		t.Fatalf("exact replay: persisted=%t err=%v", persisted, err)
 	}
+	// PostgreSQL row-share locking requires narrowly granted UPDATE on
+	// recorded_at. The append-only trigger must still prohibit any
+	// real UPDATE from that same restricted writer connection.
+	if _, err := repo.db.ExecContext(ctx, `
+		UPDATE compute_allocation_usage_evidence_sets
+		SET recorded_at=clock_timestamp()
+		WHERE tenant_id=$1 AND evidence_set_id=$2
+	`, params.Evidence.TenantID, first.EvidenceSetID); err == nil {
+		t.Fatal("restricted E1 replay writer mutated immutable evidence recorded_at")
+	}
 	if replayed.EvidenceDigest != first.EvidenceDigest || !replayed.RecordedAt.Equal(first.RecordedAt) {
 		t.Fatalf("replay changed immutable evidence: first=%+v replay=%+v", first, replayed)
 	}
