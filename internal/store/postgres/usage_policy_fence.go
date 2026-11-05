@@ -40,9 +40,10 @@ func evidencePolicyFenceDigest(approved TrustedEvidencePolicy) (string, error) {
 		EffectiveFrom  time.Time
 		EffectiveUntil time.Time
 	}{
-		TenantID: approved.TenantID, ProviderID: approved.ProviderID,
-		Policy: approved.Policy,
-		EffectiveFrom: approved.EffectiveFrom.UTC(),
+		TenantID:       approved.TenantID,
+		ProviderID:     approved.ProviderID,
+		Policy:         approved.Policy,
+		EffectiveFrom:  approved.EffectiveFrom.UTC(),
 		EffectiveUntil: approved.EffectiveUntil.UTC(),
 	})
 	if err != nil {
