@@ -74,7 +74,7 @@ func lockTrustedEvidencePolicy(
 	var effectiveFrom, effectiveUntil time.Time
 	err = tx.QueryRowContext(ctx, `
 		SELECT policy_digest,revision,revoked,effective_from,effective_until
-		FROM compute_evidence_policy_fences
+		FROM public.compute_evidence_policy_fences
 		WHERE tenant_id=$1 AND provider_id=$2 AND policy_version=$3
 		FOR SHARE
 	`, approved.TenantID, approved.ProviderID, approved.Policy.Version).Scan(
