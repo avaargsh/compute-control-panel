@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -27,7 +28,7 @@ func TestAcceptWorkloadDoesNotCreateOperationsOnDrainingProvider(t *testing.T) {
 		"operation-event-draining-"+randomSuffix(t))
 	params.ProviderID = provider.ProviderID
 	params.Operation.ProviderID = provider.ProviderID
-	if _, created, err := repo.AcceptWorkload(ctx, params); err == nil || created {
+	if _, created, err := repo.AcceptWorkload(ctx, params); !errors.Is(err, ErrProviderDraining) || created {
 		t.Fatalf("DRAINING Provider was assigned a new Workload: created=%t err=%v", created, err)
 	}
 
