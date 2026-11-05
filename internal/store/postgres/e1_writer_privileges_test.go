@@ -123,7 +123,6 @@ func TestE1WriterRoleCanReadLockButCannotRewritePolicy(t *testing.T) {
 	}
 }
 
-
 func TestE1WriterRoleRejectsSetRolePolicyAdministratorMembership(t *testing.T) {
 	admin := openIntegrationDB(t)
 	writer := testEvidenceWriterDB(t, admin)
