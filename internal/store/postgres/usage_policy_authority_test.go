@@ -35,6 +35,7 @@ func TestEvidencePolicyAuthorityFailsClosed(t *testing.T) {
 		params    PersistUsageEvidenceParams
 	}{
 		{"missing policy authority", nil, p},
+		{"typed-nil policy authority", EvidencePolicyAuthorityFunc(nil), p},
 		{"authority outage", EvidencePolicyAuthorityFunc(func(context.Context, string, string, string) (TrustedEvidencePolicy, error) {
 			return TrustedEvidencePolicy{}, errors.New("policy service offline")
 		}), p},
