@@ -155,3 +155,25 @@ func TestE1WriterRoleRejectsSetRolePolicyAdministratorMembership(t *testing.T) {
 		t.Fatalf("E1 writer can SET ROLE into privileged policy administrator: %v", err)
 	}
 }
+
+func TestE1WriterRoleRejectsSuperuserSessionSetRoleToWriter(t *testing.T) {
+	admin := openIntegrationDB(t)
+	writer := testEvidenceWriterDB(t, admin)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	var login string
+	if err := writer.QueryRowContext(ctx, "SELECT current_user").Scan(&login); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := admin.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("SET LOCAL ROLE %s", login)); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyEvidenceWriterPrivileges(ctx, tx); !errors.Is(err, ErrEvidencePolicyUntrusted) {
+		t.Fatalf("superuser login using SET LOCAL ROLE writer was accepted: %v", err)
+	}
+}
