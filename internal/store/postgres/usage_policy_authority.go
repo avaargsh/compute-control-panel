@@ -40,6 +40,9 @@ type EvidencePolicyAuthority interface {
 type EvidencePolicyAuthorityFunc func(context.Context, string, string, string) (TrustedEvidencePolicy, error)
 
 func (fn EvidencePolicyAuthorityFunc) ResolveEvidencePolicy(ctx context.Context, tenantID, providerID, version string) (TrustedEvidencePolicy, error) {
+	if fn == nil {
+		return TrustedEvidencePolicy{}, ErrEvidencePolicyUntrusted
+	}
 	return fn(ctx, tenantID, providerID, version)
 }
 
