@@ -1,5 +1,42 @@
 # Compute Control Plane — PR and release-gate checkpoint
 
+## Latest reconciled checkpoint — 2026-11-05 (supersedes snapshot below)
+
+**Verified main:** `c35fea3be8b2b65c0347465e7146670556c1b94f`,
+[Go CI #41946906034](https://github.com/avaargsh/compute-control-panel/actions/runs/41946906034) **SUCCESS**.
+The dated matrix below was an accurate earlier review snapshot and is retained
+for audit only; its "Draft #23/#26" and "blocked by #35" cells are **historical,
+not current**.
+
+| Work | Current GitHub status | Scope / verification |
+| --- | --- | --- |
+| [#31](https://github.com/avaargsh/compute-control-panel/pull/31) FakeProvider conformance | MERGED | Exact UID, Tenant/Provider/Workload and generation fencing; no production Provider release |
+| [#34](https://github.com/avaargsh/compute-control-panel/pull/34) Provider registry | MERGED | Durable REGISTERED -> DRAINING with audit; not READY or active admission enforcement |
+| [#36](https://github.com/avaargsh/compute-control-panel/pull/36) migration guard | MERGED | Real guard correctly rejected old #26's competing 0005 migration |
+| [#37](https://github.com/avaargsh/compute-control-panel/pull/37) Economics library | MERGED | Side-effect-free deterministic calculation and typed E1 derivation; exact-main [#41946263987](https://github.com/avaargsh/compute-control-panel/actions/runs/41946263987) SUCCESS |
+| [#38](https://github.com/avaargsh/compute-control-panel/pull/38) FINAL E1 storage | MERGED | New `0006_allocation_usage_evidence_sets.sql`, immutable Provider `0005`, migration history regression; exact-main [#41946906034](https://github.com/avaargsh/compute-control-panel/actions/runs/41946906034) SUCCESS |
+| Old [#23](https://github.com/avaargsh/compute-control-panel/pull/23) / [#26](https://github.com/avaargsh/compute-control-panel/pull/26) | CLOSED UNMERGED | Source/tests safely carried to #37/#38; historical green tests not current deployment evidence |
+| [#35](https://github.com/avaargsh/compute-control-panel/issues/35) migration conflict | CLOSED | Resolved for current main by forward-only version 0006, without rewriting main 0005 |
+| [#12](https://github.com/avaargsh/compute-control-panel/pull/12), [#9](https://github.com/avaargsh/compute-control-panel/pull/9), [#14](https://github.com/avaargsh/compute-control-panel/pull/14), [#16](https://github.com/avaargsh/compute-control-panel/pull/16) | DRAFT | Proposed contracts/Docs; current-main reconciliation and independent consumers remain open |
+
+**Still blocking production:** [#3](https://github.com/avaargsh/compute-control-panel/issues/3)
+cross-plane authorization/owner/Permit, [#32](https://github.com/avaargsh/compute-control-panel/issues/32)
+authenticated Provider READY and admission-time Drain exclusion, [#33](https://github.com/avaargsh/compute-control-panel/issues/33)
+Kueue/Pod/DRA GPU assignment and release, and new
+[#39](https://github.com/avaargsh/compute-control-panel/issues/39) authoritative
+EvidencePolicy provenance. The stored `FINAL` record is derived from a
+caller-supplied policy in the internal repository: it is **not** automatically
+a production-verified cost, device assignment or release receipt. External
+integration tests, deployed DB-role/RLS and source signatures are not yet proven.
+
+**Immediate queue:** (1) #32 Provider readiness and admission-transaction gate;
+(2) #33 real Kueue/Pod/DRA evidence; (3) #39 trusted policy snapshots,
+authenticated ingestion and replay quarantine; (4) #12 cross-repo contracts;
+(5) #9/#14/#16 docs/contract consolidation with exact-head tests.
+No individual human owner is inferred from a PR author's identity.
+
+---
+
 **Snapshot date:** 2026-11-05. **Repository:** `avaargsh/compute-control-panel`.
 **Observed main before this governance PR:** `1f229ce89865959339e68d5a0ce1f18595c6e70b`
 ([exact-main CI #41942994314](https://github.com/avaargsh/compute-control-panel/actions/runs/41942994314), success).
