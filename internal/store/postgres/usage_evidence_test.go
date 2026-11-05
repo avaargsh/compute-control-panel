@@ -116,9 +116,9 @@ func newTestEvidenceRepo(t *testing.T, db *sql.DB) *Repository {
 			}
 			approved := TrustedEvidencePolicy{
 				TenantID: tenantID, ProviderID: providerID, Policy: policy,
-				EffectiveFrom: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC),
+				EffectiveFrom:  time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC),
 				EffectiveUntil: time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
-				Revision: 1,
+				Revision:       1,
 			}
 			// Only the isolated PG integration test authority provisions
 			// approved policy rows. Production callers cannot administer
