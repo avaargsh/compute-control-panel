@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -29,15 +28,17 @@ func TestPersistUsageEvidenceSetRejectsPolicyExpiryDuringProviderLock(t *testing
 	policy := fixtureEvidencePolicy()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	approved := TrustedEvidencePolicy{
-		TenantID: tenant,
-		ProviderID: a.Allocation.ProviderID,
-		Policy: policy,
-		EffectiveFrom: now.Add(-time.Hour),
+		TenantID:       tenant,
+		ProviderID:     a.Allocation.ProviderID,
+		Policy:         policy,
+		EffectiveFrom:  now.Add(-time.Hour),
 		EffectiveUntil: now.Add(4 * time.Second),
-		Revision: 1,
+		Revision:       1,
 	}
 	digest, err := evidencePolicyFenceDigest(approved)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := admin.ExecContext(ctx, `
 		INSERT INTO public.compute_evidence_policy_fences
 		(tenant_id,provider_id,policy_version,policy_digest,effective_from,effective_until,revision,revoked)
@@ -51,19 +52,28 @@ func TestPersistUsageEvidenceSetRejectsPolicyExpiryDuringProviderLock(t *testing
 		EvidencePolicyAuthorityFunc(func(context.Context, string, string, string) (TrustedEvidencePolicy, error) {
 			return approved, nil
 		}))
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// This ordinary UPDATE obtains a row lock that conflicts with the
 	// Provider verification's SELECT ... FOR SHARE.
 	blocker, err := admin.BeginTx(ctx, nil)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer blocker.Rollback()
 	if _, err := blocker.ExecContext(ctx, `
 		UPDATE public.compute_operations SET updated_at=clock_timestamp()
 		WHERE tenant_id=$1 AND compute_operation_id=$2
-	`, tenant, a.Operation.ID); err != nil { t.Fatal(err) }
+	`, tenant, a.Operation.ID); err != nil {
+		t.Fatal(err)
+	}
 
-	type outcome struct { persisted bool; err error }
+	type outcome struct {
+		persisted bool
+		err       error
+	}
 	finished := make(chan outcome, 1)
 	go func() {
 		_, persisted, e := repo.PersistUsageEvidenceSet(ctx, typedUsageEvidence(a))
@@ -76,7 +86,9 @@ func TestPersistUsageEvidenceSetRejectsPolicyExpiryDuringProviderLock(t *testing
 	observedPolicyLock := false
 	for time.Now().Before(approved.EffectiveUntil) {
 		probe, e := admin.BeginTx(ctx, nil)
-		if e != nil { t.Fatal(e) }
+		if e != nil {
+			t.Fatal(e)
+		}
 		var one int
 		e = probe.QueryRowContext(ctx, `
 			SELECT 1 FROM public.compute_evidence_policy_fences
@@ -88,7 +100,9 @@ func TestPersistUsageEvidenceSetRejectsPolicyExpiryDuringProviderLock(t *testing
 			observedPolicyLock = true
 			break
 		}
-		if e != nil { t.Fatalf("policy lock probe: %v", e) }
+		if e != nil {
+			t.Fatalf("policy lock probe: %v", e)
+		}
 		select {
 		case out := <-finished:
 			t.Fatalf("E1 finished before Provider blocker released: %+v", out)
@@ -103,15 +117,21 @@ func TestPersistUsageEvidenceSetRejectsPolicyExpiryDuringProviderLock(t *testing
 	// the policy end, then allow E1 to resume. Do not mutate the policy row.
 	for {
 		var dbNow time.Time
-		if err := admin.QueryRowContext(ctx, "SELECT clock_timestamp()").Scan(&dbNow); err != nil { t.Fatal(err) }
-		if !dbNow.Before(approved.EffectiveUntil.Add(50 * time.Millisecond)) { break }
+		if err := admin.QueryRowContext(ctx, "SELECT clock_timestamp()").Scan(&dbNow); err != nil {
+			t.Fatal(err)
+		}
+		if !dbNow.Before(approved.EffectiveUntil.Add(50 * time.Millisecond)) {
+			break
+		}
 		select {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		case <-time.After(30 * time.Millisecond):
 		}
 	}
-	if err := blocker.Commit(); err != nil { t.Fatal(err) }
+	if err := blocker.Commit(); err != nil {
+		t.Fatal(err)
+	}
 
 	select {
 	case out := <-finished:
@@ -126,8 +146,10 @@ func TestPersistUsageEvidenceSetRejectsPolicyExpiryDuringProviderLock(t *testing
 	if err := admin.QueryRowContext(ctx, `
 		SELECT count(*) FROM public.compute_allocation_usage_evidence_sets
 		WHERE tenant_id=$1 AND allocation_id=$2
-	`, tenant, a.Allocation.AllocationID).Scan(&durable); err != nil { t.Fatal(err) }
-	if durable != 0 { t.Fatalf("expired E1 FINAL persisted %d durable rows", durable) }
+	`, tenant, a.Allocation.AllocationID).Scan(&durable); err != nil {
+		t.Fatal(err)
+	}
+	if durable != 0 {
+		t.Fatalf("expired E1 FINAL persisted %d durable rows", durable)
+	}
 }
-
-var _ *sql.Tx // keeps the intended PostgreSQL transaction type obvious
