@@ -108,7 +108,7 @@ func fixtureEvidencePolicy() economics.EvidencePolicy {
 
 func newTestEvidenceRepo(t *testing.T, db *sql.DB) *Repository {
 	t.Helper()
-	repo, err := NewRepositoryWithEvidencePolicyAuthority(db, EvidencePolicyAuthorityFunc(
+	repo, err := NewRepositoryWithEvidencePolicyAuthority(testEvidenceWriterDB(t, db), EvidencePolicyAuthorityFunc(
 		func(ctx context.Context, tenantID, providerID, version string) (TrustedEvidencePolicy, error) {
 			policy := fixtureEvidencePolicy()
 			if version != policy.Version {
@@ -145,6 +145,17 @@ func newTestEvidenceRepo(t *testing.T, db *sql.DB) *Repository {
 	return repo
 }
 
+// Fixture Workload/Allocation acceptance is owned by the admin test
+// harness, not the separately scoped E1-only writer connection.
+func acceptTestEvidenceWorkload(t *testing.T, db *sql.DB, ctx context.Context, p AcceptWorkloadParams) (WorkloadAcceptance, bool, error) {
+	t.Helper()
+	repo, err := NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return repo.AcceptWorkload(ctx, p)
+}
+
 func markUsageEvidenceProviderOperationSucceeded(t *testing.T, db *sql.DB, a WorkloadAcceptance) {
 	t.Helper()
 	_, err := db.ExecContext(context.Background(), `
@@ -173,7 +184,7 @@ func TestPersistUsageEvidenceSetRequiresSuccessfulProviderOperation(t *testing.T
 
 	p := acceptanceFixture(t, "tenant-evidence-pending-"+randomSuffix(t),
 		"workload-key-"+randomSuffix(t), "operation-key-"+randomSuffix(t), "operation-event-"+randomSuffix(t))
-	a, created, err := repo.AcceptWorkload(ctx, p)
+	a, created, err := acceptTestEvidenceWorkload(t, db, ctx, p)
 	if err != nil || !created {
 		t.Fatalf("AcceptWorkload: created=%t err=%v", created, err)
 	}
@@ -199,7 +210,7 @@ func TestPersistUsageEvidenceSetIsImmutableIdempotentAndTenantScoped(t *testing.
 
 	p := acceptanceFixture(t, "tenant-evidence-"+randomSuffix(t),
 		"workload-key-"+randomSuffix(t), "operation-key-"+randomSuffix(t), "operation-event-"+randomSuffix(t))
-	a, created, err := repo.AcceptWorkload(ctx, p)
+	a, created, err := acceptTestEvidenceWorkload(t, db, ctx, p)
 	if err != nil || !created {
 		t.Fatalf("AcceptWorkload: created=%t err=%v", created, err)
 	}
@@ -264,7 +275,7 @@ func TestPersistUsageEvidenceSetConcurrentReplayHasOneWinner(t *testing.T) {
 
 	p := acceptanceFixture(t, "tenant-evidence-race-"+randomSuffix(t),
 		"workload-key-"+randomSuffix(t), "operation-key-"+randomSuffix(t), "operation-event-"+randomSuffix(t))
-	a, created, err := repo.AcceptWorkload(ctx, p)
+	a, created, err := acceptTestEvidenceWorkload(t, db, ctx, p)
 	if err != nil || !created {
 		t.Fatalf("AcceptWorkload: created=%t err=%v", created, err)
 	}
@@ -362,7 +373,7 @@ func TestPersistUsageEvidenceSetRequiresExactProviderRequestDigest(t *testing.T)
 
 	p := acceptanceFixture(t, "tenant-evidence-digest-"+randomSuffix(t),
 		"workload-key-"+randomSuffix(t), "operation-key-"+randomSuffix(t), "operation-event-"+randomSuffix(t))
-	a, created, err := repo.AcceptWorkload(ctx, p)
+	a, created, err := acceptTestEvidenceWorkload(t, db, ctx, p)
 	if err != nil || !created {
 		t.Fatalf("AcceptWorkload: created=%t err=%v", created, err)
 	}
