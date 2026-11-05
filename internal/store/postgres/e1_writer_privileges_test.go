@@ -122,3 +122,37 @@ func TestE1WriterRoleCanReadLockButCannotRewritePolicy(t *testing.T) {
 		}
 	}
 }
+
+
+func TestE1WriterRoleRejectsSetRolePolicyAdministratorMembership(t *testing.T) {
+	admin := openIntegrationDB(t)
+	writer := testEvidenceWriterDB(t, admin)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	var login string
+	if err := writer.QueryRowContext(ctx, "SELECT current_user").Scan(&login); err != nil {
+		t.Fatal(err)
+	}
+	grantRole := "e1_policy_admin_" + randomSuffix(t)
+	if _, err := admin.ExecContext(ctx, fmt.Sprintf("CREATE ROLE %s NOLOGIN", grantRole)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = admin.ExecContext(context.Background(), fmt.Sprintf("REVOKE %s FROM %s", grantRole, login))
+		_, _ = admin.ExecContext(context.Background(), fmt.Sprintf("DROP OWNED BY %s", grantRole))
+		_, _ = admin.ExecContext(context.Background(), fmt.Sprintf("DROP ROLE %s", grantRole))
+	})
+	_, err := admin.ExecContext(ctx, fmt.Sprintf("GRANT UPDATE(revision) ON compute_evidence_policy_fences TO %s", grantRole))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// PostgreSQL 16 SET ROLE membership does not have to inherit privileges.
+	// A user who can switch to a policy administrator is not an E1 writer.
+	_, err = admin.ExecContext(ctx, fmt.Sprintf("GRANT %s TO %s WITH INHERIT FALSE, SET TRUE", grantRole, login))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyEvidenceWriterPrivileges(ctx, writer); !errors.Is(err, ErrEvidencePolicyUntrusted) {
+		t.Fatalf("E1 writer can SET ROLE into privileged policy administrator: %v", err)
+	}
+}
