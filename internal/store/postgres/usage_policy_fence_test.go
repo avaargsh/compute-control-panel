@@ -221,7 +221,8 @@ func TestPersistUsageEvidenceSetRejectsUnprovisionedRevokedAndStalePolicyRevisio
 		EffectiveUntil: time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
 		Revision:       1,
 	}
-	repo, err := NewRepositoryWithEvidencePolicyAuthority(db, staticEvidencePolicyAuthority{policy: approved})
+	writerDB := testEvidenceWriterDB(t, db)
+	repo, err := NewRepositoryWithEvidencePolicyAuthority(writerDB, staticEvidencePolicyAuthority{policy: approved})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +266,7 @@ func TestPersistUsageEvidenceSetRejectsUnprovisionedRevokedAndStalePolicyRevisio
 	}
 	checkDenied("stale revision")
 	approved.Revision = 2
-	updatedRepo, err := NewRepositoryWithEvidencePolicyAuthority(db, staticEvidencePolicyAuthority{policy: approved})
+	updatedRepo, err := NewRepositoryWithEvidencePolicyAuthority(writerDB, staticEvidencePolicyAuthority{policy: approved})
 	if err != nil {
 		t.Fatal(err)
 	}
