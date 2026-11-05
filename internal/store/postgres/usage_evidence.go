@@ -280,10 +280,10 @@ func (r *Repository) PersistUsageEvidenceSet(ctx context.Context, p PersistUsage
 	var operationID, providerRequestDigest string
 	err = tx.QueryRowContext(ctx, `
 		SELECT o.compute_operation_id, o.provider_request_digest
-		FROM compute_operations o
-		JOIN compute_workloads w
+		FROM public.compute_operations o
+		JOIN public.compute_workloads w
 		  ON w.workload_id=o.workload_id AND w.tenant_id=o.tenant_id
-		JOIN compute_allocations a
+		JOIN public.compute_allocations a
 		  ON a.allocation_id=o.allocation_id
 		 AND a.workload_id=o.workload_id
 		 AND a.tenant_id=o.tenant_id
@@ -316,7 +316,7 @@ func (r *Repository) PersistUsageEvidenceSet(ctx context.Context, p PersistUsage
 		return UsageEvidenceSet{}, false, ErrUsageEvidenceNotReady
 	}
 
-	insert := `INSERT INTO compute_allocation_usage_evidence_sets (
+	insert := `INSERT INTO public.compute_allocation_usage_evidence_sets (
 		evidence_set_id, schema_version, tenant_id, project_id, workload_id,
 		allocation_id, allocation_generation, provider_id, compute_operation_id,
 		provider_request_digest, provider_resource_id, provider_resource_uid, pool_id, profile_id, gpu_model,
@@ -379,7 +379,7 @@ func findUsageEvidenceConflict(
 		(evidence_payload=$5::jsonb) AS evidence_payload_matches,
 		(usage_interval_payload=$6::jsonb) AS usage_interval_matches,
 		(source_event_ids=$7::jsonb) AS source_event_ids_match
-		FROM compute_allocation_usage_evidence_sets
+		FROM public.compute_allocation_usage_evidence_sets
 		WHERE tenant_id=$1
 		  AND (evidence_set_id=$2
 		       OR (allocation_id=$3 AND allocation_generation=$4)
@@ -484,7 +484,7 @@ func (r *Repository) GetUsageEvidenceSet(ctx context.Context, tenantID, evidence
 		return UsageEvidenceSet{}, ErrInvalidUsageEvidence
 	}
 	return scanUsageEvidenceSet(r.db.QueryRowContext(ctx,
-		"SELECT "+usageEvidenceSetColumns+" FROM compute_allocation_usage_evidence_sets WHERE tenant_id=$1 AND evidence_set_id=$2",
+		"SELECT "+usageEvidenceSetColumns+" FROM public.compute_allocation_usage_evidence_sets WHERE tenant_id=$1 AND evidence_set_id=$2",
 		tenantID, evidenceSetID,
 	))
 }
