@@ -106,7 +106,6 @@ func TestE1WriterRoleCanReadLockButCannotRewritePolicy(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var err error
 		if query == "TRUNCATE compute_evidence_policy_fences" ||
 			query == "INSERT INTO compute_evidence_policy_fences (tenant_id) VALUES ('forged')" {
 			_, err = tx.ExecContext(ctx, query)
