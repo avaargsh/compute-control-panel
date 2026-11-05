@@ -25,6 +25,7 @@ type TrustedEvidencePolicy struct {
 	Policy         economics.EvidencePolicy
 	EffectiveFrom  time.Time
 	EffectiveUntil time.Time
+	Revision       uint64
 	Revoked        bool
 }
 
@@ -52,19 +53,32 @@ func (fn EvidencePolicyAuthorityFunc) ResolveEvidencePolicy(ctx context.Context,
 func resolveTrustedUsagePolicy(
 	ctx context.Context, authority EvidencePolicyAuthority, p PersistUsageEvidenceParams, now time.Time,
 ) (economics.EvidencePolicy, error) {
+	snapshot, err := resolveTrustedUsagePolicySnapshot(ctx, authority, p, now)
+	if err != nil {
+		return TrustedEvidencePolicy{}, err
+	}
+	return snapshot.Policy, nil
+}
+
+// resolveTrustedUsagePolicySnapshot retains the exact registry-approved
+// policy scope, content and version needed for transactional PostgreSQL
+// fencing. Call the authority only once per attempted E1 write.
+func resolveTrustedUsagePolicySnapshot(
+	ctx context.Context, authority EvidencePolicyAuthority, p PersistUsageEvidenceParams, now time.Time,
+) (TrustedEvidencePolicy, error) {
 	if authority == nil {
-		return economics.EvidencePolicy{}, ErrEvidencePolicyUntrusted
+		return TrustedEvidencePolicy{}, ErrEvidencePolicyUntrusted
 	}
 	tenant, provider, version := p.Evidence.TenantID, p.Evidence.ProviderID, p.Policy.Version
 	if tenant == "" || provider == "" || version == "" ||
 		strings.TrimSpace(tenant) != tenant || strings.TrimSpace(provider) != provider ||
 		strings.TrimSpace(version) != version ||
 		len(tenant) > 255 || len(provider) > 255 || len(version) > 255 {
-		return economics.EvidencePolicy{}, fmt.Errorf("%w: invalid policy lookup scope", ErrEvidencePolicyUntrusted)
+		return TrustedEvidencePolicy{}, fmt.Errorf("%w: invalid policy lookup scope", ErrEvidencePolicyUntrusted)
 	}
 	approved, err := authority.ResolveEvidencePolicy(ctx, tenant, provider, version)
 	if err != nil {
-		return economics.EvidencePolicy{}, fmt.Errorf("%w: policy lookup unavailable", ErrEvidencePolicyUntrusted)
+		return TrustedEvidencePolicy{}, fmt.Errorf("%w: policy lookup unavailable", ErrEvidencePolicyUntrusted)
 	}
 	policy := approved.Policy
 	if approved.Revoked || approved.TenantID != tenant || approved.ProviderID != provider ||
@@ -76,11 +90,12 @@ func resolveTrustedUsagePolicy(
 		policy.MaximumClockSkew != p.Policy.MaximumClockSkew ||
 		!maps.Equal(policy.TrustedSourceTimestampAdapters, p.Policy.TrustedSourceTimestampAdapters) ||
 		!maps.Equal(policy.CertifiedDeviceAdapters, p.Policy.CertifiedDeviceAdapters) {
-		return economics.EvidencePolicy{}, fmt.Errorf("%w: policy not current or caller snapshot differs", ErrEvidencePolicyUntrusted)
+		return TrustedEvidencePolicy{}, fmt.Errorf("%w: policy not current or caller snapshot differs", ErrEvidencePolicyUntrusted)
 	}
 	// Freeze mutable maps returned by the authoritative adapter before using
 	// them in E1 derivation and constructing the persisted audit envelope.
 	policy.TrustedSourceTimestampAdapters = maps.Clone(policy.TrustedSourceTimestampAdapters)
 	policy.CertifiedDeviceAdapters = maps.Clone(policy.CertifiedDeviceAdapters)
-	return policy, nil
+	approved.Policy = policy
+	return approved, nil
 }
