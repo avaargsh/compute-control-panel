@@ -39,22 +39,22 @@ func verifyEvidenceWriterPrivileges(ctx context.Context, q evidenceWriterQueryRo
 		       AND pg_has_role(current_user, other.oid, 'SET')
 		   )
 		   OR has_schema_privilege(current_user, 'public', 'CREATE')
-		   OR has_table_privilege(current_user, 'compute_evidence_policy_fences', 'INSERT')
-		   OR has_table_privilege(current_user, 'compute_evidence_policy_fences', 'DELETE')
-		   OR has_table_privilege(current_user, 'compute_evidence_policy_fences', 'TRUNCATE')
-		   OR has_table_privilege(current_user, 'compute_evidence_policy_fences', 'TRIGGER')
-		   OR has_table_privilege(current_user, 'compute_evidence_policy_fences', 'REFERENCES')
+		   OR has_table_privilege(current_user, 'public.compute_evidence_policy_fences', 'INSERT')
+		   OR has_table_privilege(current_user, 'public.compute_evidence_policy_fences', 'DELETE')
+		   OR has_table_privilege(current_user, 'public.compute_evidence_policy_fences', 'TRUNCATE')
+		   OR has_table_privilege(current_user, 'public.compute_evidence_policy_fences', 'TRIGGER')
+		   OR has_table_privilege(current_user, 'public.compute_evidence_policy_fences', 'REFERENCES')
 		   OR COALESCE((
 		     SELECT bool_or(has_column_privilege(current_user,
-		                      'compute_evidence_policy_fences',
+		                      'public.compute_evidence_policy_fences',
 		                      a.attname, 'UPDATE'))
 		     FROM pg_attribute a
-		     WHERE a.attrelid='compute_evidence_policy_fences'::regclass
+		     WHERE a.attrelid='public.compute_evidence_policy_fences'::regclass
 		       AND a.attnum>0 AND NOT a.attisdropped AND a.attname<>'updated_at'
 		   ), TRUE)),
-		  has_table_privilege(current_user, 'compute_evidence_policy_fences', 'SELECT'),
-		  has_column_privilege(current_user, 'compute_evidence_policy_fences', 'updated_at', 'UPDATE'),
-		  has_table_privilege(current_user, 'compute_allocation_usage_evidence_sets', 'INSERT')
+		  has_table_privilege(current_user, 'public.compute_evidence_policy_fences', 'SELECT'),
+		  has_column_privilege(current_user, 'public.compute_evidence_policy_fences', 'updated_at', 'UPDATE'),
+		  has_table_privilege(current_user, 'public.compute_allocation_usage_evidence_sets', 'INSERT')
 		FROM pg_roles r WHERE r.rolname=current_user
 	`).Scan(&privileged, &hasRead, &hasLockColumn, &canInsertEvidence)
 	if err != nil {
