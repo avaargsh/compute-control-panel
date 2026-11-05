@@ -164,3 +164,82 @@ func TestEvidencePolicyCommitFenceSerializesConcurrentRevocation(t *testing.T) {
 		t.Fatalf("post-revocation write admitted: %v", err)
 	}
 }
+
+func TestPersistUsageEvidenceSetRejectsUnprovisionedRevokedAndStalePolicyRevision(t *testing.T) {
+	db := openIntegrationDB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	a, created, err := func() (WorkloadAcceptance, bool, error) {
+		repo, err := NewRepository(db)
+		if err != nil {
+			return WorkloadAcceptance{}, false, err
+		}
+		params := acceptanceFixture(t, "tenant-e1-fence-"+randomSuffix(t),
+			"workload-key-"+randomSuffix(t), "operation-key-"+randomSuffix(t), "operation-event-"+randomSuffix(t))
+		return repo.AcceptWorkload(ctx, params)
+	}()
+	if err != nil || !created {
+		t.Fatalf("accept Workload: created=%t err=%v", created, err)
+	}
+	markUsageEvidenceProviderOperationSucceeded(t, db, a)
+	params := typedUsageEvidence(a)
+	approved := TrustedEvidencePolicy{
+		TenantID: params.Evidence.TenantID,
+		ProviderID: params.Evidence.ProviderID,
+		Policy: fixtureEvidencePolicy(),
+		EffectiveFrom: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC),
+		EffectiveUntil: time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
+		Revision: 1,
+	}
+	repo, err := NewRepositoryWithEvidencePolicyAuthority(db, staticEvidencePolicyAuthority{policy: approved})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkDenied := func(label string) {
+		t.Helper()
+		if _, persisted, err := repo.PersistUsageEvidenceSet(ctx, params); persisted ||
+			!errors.Is(err, ErrEvidencePolicyUntrusted) {
+			t.Fatalf("%s policy fence accepted FINAL: persisted=%t err=%v", label, persisted, err)
+		}
+		var count int
+		if err := db.QueryRowContext(ctx, `
+			SELECT count(*) FROM compute_allocation_usage_evidence_sets
+			WHERE tenant_id=$1 AND allocation_id=$2
+		`, params.Evidence.TenantID, params.Evidence.AllocationID).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("%s policy fence inserted %d E1 FINAL records", label, count)
+		}
+	}
+	checkDenied("unprovisioned")
+	digest, err := evidencePolicyFenceDigest(approved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO compute_evidence_policy_fences
+		(tenant_id,provider_id,policy_version,policy_digest,effective_from,effective_until,revision,revoked)
+		VALUES($1,$2,$3,$4,$5,$6,1,true)
+	`, approved.TenantID, approved.ProviderID, approved.Policy.Version, digest, approved.EffectiveFrom, approved.EffectiveUntil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkDenied("revoked")
+	_, err = db.ExecContext(ctx, `
+		UPDATE compute_evidence_policy_fences SET revoked=false, revision=2
+		WHERE tenant_id=$1 AND provider_id=$2 AND policy_version=$3
+	`, approved.TenantID, approved.ProviderID, approved.Policy.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkDenied("stale revision")
+	approved.Revision = 2
+	updatedRepo, err := NewRepositoryWithEvidencePolicyAuthority(db, staticEvidencePolicyAuthority{policy: approved})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, persisted, err := updatedRepo.PersistUsageEvidenceSet(ctx, params); err != nil || !persisted {
+		t.Fatalf("newly approved E1 revision should commit: persisted=%t err=%v", persisted, err)
+	}
+}
