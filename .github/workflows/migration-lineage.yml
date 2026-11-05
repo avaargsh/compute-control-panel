@@ -1,0 +1,27 @@
+# Read-only review of migration identity across *all* pull requests,
+# including stacked PRs targeting a branch older than current main.
+# The workflow comes from the trusted base/default branch (pull_request_target).
+# Never check out or execute the PR head here.
+name: Migration lineage guard
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  compare-main:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out trusted default-branch guard, not PR code
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Reject migration version/name/blob collision with current main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 .github/scripts/check_migration_compat.py
