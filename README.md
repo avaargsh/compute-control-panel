@@ -64,7 +64,12 @@ A provider ACK, a PENDING Allocation, a Pod resource request or a queue admissio
 - Tenant and Project identity come from authenticated service identity and authorization; client payloads cannot select trusted Provider or tenant identity.
 - Cost is derived from immutable evidence and effective-dated rates, not directly from desired state or unverified metrics.
 
-## Current repository status — 2026-11-04
+## Current repository status — 2026-11-05
+
+Latest verified main: `c35fea3be8b2b65c0347465e7146670556c1b94f`
+([Go CI #41946906034](https://github.com/avaargsh/compute-control-panel/actions/runs/41946906034), **SUCCESS**).
+This is a repository/test checkpoint, **not** live Provider/Kueue/DRA admission,
+resource-release, tenant DB-role isolation, FinOps billing or production acceptance.
 
 The `main` branch now contains the Go/PostgreSQL foundation, atomic Workload acceptance and the authenticated Workload create/read API. These are **implemented foundations**, not production-enabled endpoints or verified compute capacity. The default service does not mount the Workload handlers. Exact-head CI on a PR is not a substitute for deployed Provider, broker, Kubernetes/Kueue/DRA or production tenant-isolation evidence.
 
@@ -73,6 +78,10 @@ The `main` branch now contains the Go/PostgreSQL foundation, atomic Workload acc
 - [PR #2 — Go/PostgreSQL foundation and Provider operation invariants](https://github.com/avaargsh/compute-control-panel/pull/2) **merged** into main on 2026-11-04.
 - [PR #18 — atomic Workload, initial PENDING Allocation and bound CREATE Operation acceptance](https://github.com/avaargsh/compute-control-panel/pull/18) **merged** on 2026-11-04. The PostgreSQL transaction includes both dispatchable Outbox events; it is not scheduler admission or Provider realization.
 - [PR #20 — authenticated Workload create/read API and SPIFFE identity directory](https://github.com/avaargsh/compute-control-panel/pull/20) **merged** on 2026-11-04. Deployment trust bundle, tenant RLS/DB roles, concrete Guard/Project policy, Provider selector/Inspect and production endpoint mounting remain gated.
+- [PR #31 — UID/Generation-fenced FakeProvider CREATE/UPDATE/DELETE lifecycle](https://github.com/avaargsh/compute-control-panel/pull/31) **merged**; it is a test double, not a real Provider adapter.
+- [PR #34 — Provider registration, durable one-way Drain CAS and append-only audit](https://github.com/avaargsh/compute-control-panel/pull/34) **merged**; REGISTERED is not READY and Drain is not yet an acceptance-time gate.
+- [PR #36 — read-only cross-branch migration identity guard](https://github.com/avaargsh/compute-control-panel/pull/36) **merged**; it prevented a real stacked PR 0005 collision (Issue #35).
+- [Issues #32](https://github.com/avaargsh/compute-control-panel/issues/32) and [#33](https://github.com/avaargsh/compute-control-panel/issues/33) remain open for trusted Provider readiness/cleanup and Kubernetes/Kueue/DRA admission/release evidence.
 - [PR #12 — architecture baseline and proposed OpenAPI/JSON Schema contracts](https://github.com/avaargsh/compute-control-panel/pull/12) remains **Draft**; its base snapshot predates the main implementation merges and requires reconciliation and cross-repository consumer validation.
 - [Issue #3 — P0 integration and release gate](https://github.com/avaargsh/compute-control-panel/issues/3) remains the acceptance tracker; historical status snapshots in its body must not override current PR and main-branch evidence.
 - Original PRs #1, #11 and #15 are closed without merging; their relevant slices were superseded or integrated via newer PRs above.
@@ -83,11 +92,13 @@ The `main` branch now contains the Go/PostgreSQL foundation, atomic Workload acc
 - [PR #9 — E0 economics domain, schemas and golden fixtures](https://github.com/avaargsh/compute-control-panel/pull/9) remains **Draft**.
 - [PR #14 — currency metadata contract alignment](https://github.com/avaargsh/compute-control-panel/pull/14) remains **Draft**.
 - [PR #16 — E1 trusted Allocation usage evidence contract](https://github.com/avaargsh/compute-control-panel/pull/16) remains **Draft**.
-- [PR #23 — consolidated deterministic cost calculator and E1 evidence derivation](https://github.com/avaargsh/compute-control-panel/pull/23) remains **Draft**; exact-head Go validation succeeded on `47219103d2e2f9d02daba9d4805447ba8fad9281`.
-- [PR #26 — immutable, tenant-bound FINAL Allocation usage evidence persistence](https://github.com/avaargsh/compute-control-panel/pull/26) remains **Draft**, stacked on PR #23; exact-head Go validation succeeded on `ae158a57aa2f283fea4dfa0ca4bfd367ac2ed11f`.
-- Historical calculator/derivation PRs #17 and #19 were closed without merging and superseded by consolidation PR #23.
+- [PR #37 — deterministic GPU cost calculator and typed E1 evidence derivation](https://github.com/avaargsh/compute-control-panel/pull/37) **merged** on current main; pure computation and synthetic tests, no live collectors.
+- [PR #38 — immutable FINAL Allocation evidence persistence, migration 0006](https://github.com/avaargsh/compute-control-panel/pull/38) **merged**; repository tests, migration lineage and main CI passed. This is an internal storage primitive, not authoritative source authentication or production billing.
+- Old stacked [PR #23](https://github.com/avaargsh/compute-control-panel/pull/23) and [PR #26](https://github.com/avaargsh/compute-control-panel/pull/26) were **closed unmerged** after their source content was safely rebuilt as #37/#38. Earlier #17/#19 were likewise superseded.
+- [Issue #35 — migration version conflict](https://github.com/avaargsh/compute-control-panel/issues/35) **closed** after renumbering Economics to 0006 and preserving Provider 0005; the new lineage guard passed.
+- [Issue #39 — authoritative evidence policy and source authentication](https://github.com/avaargsh/compute-control-panel/issues/39) remains **OPEN** and blocks use of persisted FINAL records as trusted production metering, cost or resource-finality evidence.
 
-These are separate proof layers, not end-to-end billing or FinOps readiness. The calculator can price only a complete, validated UsageInterval. Production cost posting remains gated on authenticated evidence collection, reviewed trusted-policy provisioning, durable evidence ingestion, append-only WorkloadCostEntry/reversal storage and deployed cross-service validation.
+These are separate proof layers, not end-to-end billing or FinOps readiness. The internal evidence repository currently receives a caller-supplied `EvidencePolicy`; until #39 binds it to an authoritative trusted registry, a stored `FINAL` row cannot be treated as independently certified metering. The calculator can price only a complete, validated UsageInterval. Production cost posting remains gated on authenticated evidence collection, reviewed trusted-policy provisioning, durable evidence ingestion, append-only WorkloadCostEntry/reversal storage and deployed cross-service validation.
 
 ## Delivery sequence
 
