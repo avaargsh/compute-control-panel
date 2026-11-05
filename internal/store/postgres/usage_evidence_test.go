@@ -354,3 +354,45 @@ func TestPersistUsageEvidenceSetRequiresExactProviderRequestDigest(t *testing.T)
 		t.Fatalf("mismatched Provider request digest created %d evidence rows, want 0", count)
 	}
 }
+
+func TestUsageEvidenceMigrationPreservesProviderV5(t *testing.T) {
+	db := openIntegrationDB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	rows, err := db.QueryContext(ctx, `SELECT version, name FROM schema_migrations
+		WHERE version IN (5,6) ORDER BY version`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	got := make(map[int]string)
+	for rows.Next() {
+		var version int
+		var name string
+		if err := rows.Scan(&version, &name); err != nil {
+			t.Fatal(err)
+		}
+		got[version] = name
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if got[5] != "0005_provider_registry_drain.sql" ||
+		got[6] != "0006_allocation_usage_evidence_sets.sql" ||
+		len(got) != 2 {
+		t.Fatalf("migration lineage changed or incomplete: %+v", got)
+	}
+
+	// Both schemas must remain readable after the forward-only migration.
+	var providerRegistryExists, evidenceTableExists bool
+	if err := db.QueryRowContext(ctx,
+		`SELECT to_regclass('compute_providers') IS NOT NULL,
+		        to_regclass('compute_allocation_usage_evidence_sets') IS NOT NULL`,
+	).Scan(&providerRegistryExists, &evidenceTableExists); err != nil {
+		t.Fatal(err)
+	}
+	if !providerRegistryExists || !evidenceTableExists {
+		t.Fatalf("Provider v5 or evidence v6 schema missing: provider=%t evidence=%t",
+			providerRegistryExists, evidenceTableExists)
+	}
+}
