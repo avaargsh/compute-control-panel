@@ -66,7 +66,7 @@ func (p ProviderRegistration) validate() error {
 const providerRecordColumns = `provider_id, cluster_scope, adapter_source, adapter_version,
 	capability_digest, state, version, last_reason_code, registered_at, updated_at`
 
-type providerRecordScanner interface { Scan(...any) error }
+type providerRecordScanner interface{ Scan(...any) error }
 
 func scanProvider(row providerRecordScanner) (ProviderRecord, error) {
 	var p ProviderRecord
