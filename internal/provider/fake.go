@@ -66,11 +66,19 @@ type Adapter interface {
 // FakeProvider is a concurrency-safe, process-local conformance double.
 // It must never be used as a source of production authoritative evidence.
 type FakeProvider struct {
-	mu         sync.Mutex
-	journal    map[string]*fakeRecord
-	resources  map[string]fakeResource
-	nextLost   bool
-	generation uint64
+	mu              sync.Mutex
+	journal         map[string]*fakeRecord
+	idempotencyKeys map[fakeIdempotencyKey]string
+	resources       map[string]fakeResource
+	nextLost        bool
+	generation      uint64
+}
+
+// The durable operation store scopes idempotency keys by tenant, not by
+// provider or workload. The fake must model the same uniqueness boundary.
+type fakeIdempotencyKey struct {
+	tenantID string
+	key      string
 }
 
 // fakeResource tracks *live* target ownership separately from historical
@@ -95,8 +103,9 @@ type fakeRecord struct {
 
 func NewFakeProvider() *FakeProvider {
 	return &FakeProvider{
-		journal:   make(map[string]*fakeRecord),
-		resources: make(map[string]fakeResource),
+		journal:         make(map[string]*fakeRecord),
+		idempotencyKeys: make(map[fakeIdempotencyKey]string),
+		resources:       make(map[string]fakeResource),
 	}
 }
 
@@ -114,6 +123,10 @@ func (f *FakeProvider) DeclareNotAppliedFinal(req Request) error {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	key := fakeIdempotencyKey{tenantID: req.TenantID, key: req.IdempotencyKey}
+	if owner, exists := f.idempotencyKeys[key]; exists && owner != req.OperationID {
+		return ErrOperationConflict
+	}
 	prior, ok := f.journal[req.OperationID]
 	if ok {
 		if !sameRequest(prior.request, req) || prior.applied {
@@ -124,6 +137,7 @@ func (f *FakeProvider) DeclareNotAppliedFinal(req Request) error {
 		f.journal[req.OperationID] = prior
 	}
 	prior.noEffectFinal = true
+	f.idempotencyKeys[key] = req.OperationID
 	f.generation++
 	prior.version = f.generation
 	return nil
@@ -146,6 +160,10 @@ func (f *FakeProvider) Apply(ctx context.Context, req Request) (Acknowledgement,
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	key := fakeIdempotencyKey{tenantID: req.TenantID, key: req.IdempotencyKey}
+	if owner, exists := f.idempotencyKeys[key]; exists && owner != req.OperationID {
+		return Acknowledgement{}, ErrOperationConflict
+	}
 	rec, found := f.journal[req.OperationID]
 	if found && !sameRequest(rec.request, req) {
 		return Acknowledgement{}, ErrOperationConflict
@@ -203,6 +221,7 @@ func (f *FakeProvider) Apply(ctx context.Context, req Request) (Acknowledgement,
 		rec.noEffectFinal = false
 		rec.version = f.generation
 		f.journal[req.OperationID] = rec
+		f.idempotencyKeys[key] = req.OperationID
 	}
 	ack := Acknowledgement{OperationID: req.OperationID, RequestDigest: req.RequestDigest}
 	if f.nextLost {
