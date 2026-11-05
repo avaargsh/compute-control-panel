@@ -22,3 +22,54 @@ CREATE TABLE compute_evidence_policy_fences (
 -- change/revoke rows, disable triggers or bypass permissions.
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
 ON compute_evidence_policy_fences FROM PUBLIC;
+
+-- The policy identity is immutable and the revision changes on EVERY update.
+-- Explicit revision bumps prevent silent rollback or reactivation of an
+-- already-revoked policy using a stale authority snapshot.
+CREATE FUNCTION compute_enforce_evidence_policy_revision()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NEW.tenant_id IS DISTINCT FROM OLD.tenant_id
+       OR NEW.provider_id IS DISTINCT FROM OLD.provider_id
+       OR NEW.policy_version IS DISTINCT FROM OLD.policy_version
+    THEN
+        RAISE EXCEPTION 'evidence policy fence identity is immutable'
+            USING ERRCODE = '23514';
+    END IF;
+    IF OLD.revision = 9223372036854775807
+       OR NEW.revision <> OLD.revision + 1
+    THEN
+        RAISE EXCEPTION 'evidence policy fence revision must increase by one'
+            USING ERRCODE = '23514';
+    END IF;
+    NEW.updated_at := clock_timestamp();
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER compute_evidence_policy_revision_guard
+BEFORE UPDATE ON compute_evidence_policy_fences
+FOR EACH ROW EXECUTE FUNCTION compute_enforce_evidence_policy_revision();
+
+-- No deletion/re-creation of the same version at revision 1. Revocation and
+-- any re-approval must be done by a privileged monotonic UPDATE, with
+-- independent approval/audit outside this migration.
+CREATE FUNCTION compute_reject_evidence_policy_removal()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RAISE EXCEPTION 'evidence policy fence history cannot be removed'
+        USING ERRCODE = '55000';
+END;
+$$;
+
+CREATE TRIGGER compute_evidence_policy_no_delete
+BEFORE DELETE ON compute_evidence_policy_fences
+FOR EACH ROW EXECUTE FUNCTION compute_reject_evidence_policy_removal();
+
+CREATE TRIGGER compute_evidence_policy_no_truncate
+BEFORE TRUNCATE ON compute_evidence_policy_fences
+FOR EACH STATEMENT EXECUTE FUNCTION compute_reject_evidence_policy_removal();
