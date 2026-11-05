@@ -270,6 +270,9 @@ func (r *Repository) PersistUsageEvidenceSet(ctx context.Context, p PersistUsage
 		return UsageEvidenceSet{}, false, fmt.Errorf("begin usage evidence transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := verifyEvidenceWriterPrivileges(ctx, tx); err != nil {
+		return UsageEvidenceSet{}, false, err
+	}
 	if err := lockTrustedEvidencePolicy(ctx, tx, approved); err != nil {
 		return UsageEvidenceSet{}, false, err
 	}
