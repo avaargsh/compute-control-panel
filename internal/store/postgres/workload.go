@@ -25,7 +25,7 @@ const (
 )
 
 type Repository struct {
-	db *sql.DB
+	db                      *sql.DB
 	evidencePolicyAuthority EvidencePolicyAuthority
 }
 
