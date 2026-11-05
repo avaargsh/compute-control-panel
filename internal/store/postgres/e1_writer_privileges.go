@@ -39,6 +39,38 @@ func verifyEvidenceWriterPrivileges(ctx context.Context, q evidenceWriterQueryRo
 		       AND pg_has_role(current_user, other.oid, 'SET')
 		   )
 		   OR has_schema_privilege(current_user, 'public', 'CREATE')
+		   OR EXISTS (
+		     -- A policy-only role check is insufficient: E1 also trusts the
+		     -- immutable evidence row and Provider/Workload/Allocation facts.
+		     -- Fail closed if the effective role can modify those objects
+		     -- beyond the single lock-compatible UPDATE column. The latter
+		     -- remains a separate deployment-hardening gate for mutable rows.
+		     SELECT 1 FROM (VALUES
+		       ('public.compute_evidence_policy_fences'::regclass, 'updated_at'::name, false),
+		       ('public.compute_operations'::regclass, 'updated_at'::name, false),
+		       ('public.compute_workloads'::regclass, 'updated_at'::name, false),
+		       ('public.compute_allocations'::regclass, 'updated_at'::name, false),
+		       ('public.compute_allocation_usage_evidence_sets'::regclass, 'recorded_at'::name, true)
+		     ) AS protected(relation_oid, lock_column, allow_insert)
+		     WHERE has_table_privilege(current_user, protected.relation_oid, 'DELETE')
+		        OR has_table_privilege(current_user, protected.relation_oid, 'TRUNCATE')
+		        OR has_table_privilege(current_user, protected.relation_oid, 'TRIGGER')
+		        OR has_table_privilege(current_user, protected.relation_oid, 'REFERENCES')
+		        OR (NOT protected.allow_insert AND
+		            has_table_privilege(current_user, protected.relation_oid, 'INSERT'))
+		        OR EXISTS (
+		          SELECT 1 FROM pg_attribute a
+		          WHERE a.attrelid=protected.relation_oid
+		            AND a.attnum>0 AND NOT a.attisdropped
+		            AND (
+		              (a.attname<>protected.lock_column AND
+		               has_column_privilege(current_user, protected.relation_oid, a.attname, 'UPDATE'))
+		              OR (NOT protected.allow_insert AND
+		                  has_column_privilege(current_user, protected.relation_oid, a.attname, 'INSERT'))
+		              OR has_column_privilege(current_user, protected.relation_oid, a.attname, 'REFERENCES')
+		            )
+		        )
+		   )
 		   OR has_table_privilege(current_user, 'public.compute_evidence_policy_fences', 'INSERT')
 		   OR has_table_privilege(current_user, 'public.compute_evidence_policy_fences', 'DELETE')
 		   OR has_table_privilege(current_user, 'public.compute_evidence_policy_fences', 'TRUNCATE')
