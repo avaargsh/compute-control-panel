@@ -12,11 +12,11 @@ import (
 func providerRegistrationFixture(t *testing.T) ProviderRegistration {
 	t.Helper()
 	return ProviderRegistration{
-		ProviderID: "provider-reg-" + randomSuffix(t),
-		ClusterScope: "cluster-staging-1",
-		AdapterSource: "kubernetes",
-		AdapterVersion: "kube-adapter/v1",
-		CapabilityDigest: "sha256:" + strings.Repeat("a", 64),
+		ProviderID:		"provider-reg-" + randomSuffix(t),
+		ClusterScope:		"cluster-staging-1",
+		AdapterSource:		"kubernetes",
+		AdapterVersion:		"kube-adapter/v1",
+		CapabilityDigest:	"sha256:" + strings.Repeat("a", 64),
 	}
 }
 
