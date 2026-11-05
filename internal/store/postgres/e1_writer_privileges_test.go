@@ -31,6 +31,10 @@ func testEvidenceWriterDB(t *testing.T, admin *sql.DB) *sql.DB {
 		"GRANT USAGE ON SCHEMA public TO %s",
 		"GRANT SELECT ON ALL TABLES IN SCHEMA public TO %s",
 		"GRANT INSERT ON compute_allocation_usage_evidence_sets TO %s",
+		// E1 immutable replay uses SELECT .. FOR SHARE. PostgreSQL
+		// requires one UPDATE-able column, but its append-only trigger
+		// denies all actual UPDATE attempts.
+		"GRANT UPDATE (recorded_at) ON compute_allocation_usage_evidence_sets TO %s",
 		"GRANT UPDATE (updated_at) ON compute_evidence_policy_fences TO %s",
 		// The existing Provider operation/Workload safety SELECT .. FOR
 		// SHARE clauses also require a minimal UPDATE-column privilege.
