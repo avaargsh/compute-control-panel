@@ -169,27 +169,25 @@ func TestPersistUsageEvidenceSetRejectsUnprovisionedRevokedAndStalePolicyRevisio
 	db := openIntegrationDB(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	a, created, err := func() (WorkloadAcceptance, bool, error) {
-		repo, err := NewRepository(db)
-		if err != nil {
-			return WorkloadAcceptance{}, false, err
-		}
-		params := acceptanceFixture(t, "tenant-e1-fence-"+randomSuffix(t),
-			"workload-key-"+randomSuffix(t), "operation-key-"+randomSuffix(t), "operation-event-"+randomSuffix(t))
-		return repo.AcceptWorkload(ctx, params)
-	}()
+	baseRepo, err := NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	createParams := acceptanceFixture(t, "tenant-e1-fence-"+randomSuffix(t),
+		"workload-key-"+randomSuffix(t), "operation-key-"+randomSuffix(t), "operation-event-"+randomSuffix(t))
+	a, created, err := baseRepo.AcceptWorkload(ctx, createParams)
 	if err != nil || !created {
 		t.Fatalf("accept Workload: created=%t err=%v", created, err)
 	}
 	markUsageEvidenceProviderOperationSucceeded(t, db, a)
 	params := typedUsageEvidence(a)
 	approved := TrustedEvidencePolicy{
-		TenantID: params.Evidence.TenantID,
-		ProviderID: params.Evidence.ProviderID,
-		Policy: fixtureEvidencePolicy(),
-		EffectiveFrom: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC),
+		TenantID:       params.Evidence.TenantID,
+		ProviderID:     params.Evidence.ProviderID,
+		Policy:         fixtureEvidencePolicy(),
+		EffectiveFrom:  time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC),
 		EffectiveUntil: time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
-		Revision: 1,
+		Revision:       1,
 	}
 	repo, err := NewRepositoryWithEvidencePolicyAuthority(db, staticEvidencePolicyAuthority{policy: approved})
 	if err != nil {
