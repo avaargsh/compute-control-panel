@@ -88,6 +88,38 @@ func TestEvidencePolicyCommitFenceRejectsStaleOrRevokedSnapshot(t *testing.T) {
 		t.Fatalf("revoked policy accepted: %v", err)
 	}
 	_ = tx.Rollback()
+
+	// Privileged administrators must not be able to silently reuse a
+	// revoked revision or erase the policy history, even by mistake.
+	for _, probe := range []struct {
+		name, sql string
+	}{
+		{"unrevoke without revision bump", "UPDATE compute_evidence_policy_fences SET revoked=false WHERE tenant_id=$1 AND provider_id=$2 AND policy_version=$3"},
+		{"revision regression", "UPDATE compute_evidence_policy_fences SET revision=revision-1 WHERE tenant_id=$1 AND provider_id=$2 AND policy_version=$3"},
+		{"delete approved policy", "DELETE FROM compute_evidence_policy_fences WHERE tenant_id=$1 AND provider_id=$2 AND policy_version=$3"},
+	} {
+		t.Run(probe.name, func(t *testing.T) {
+			checkTx, err := db.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = checkTx.ExecContext(ctx, probe.sql,
+				approved.TenantID, approved.ProviderID, policy.Version)
+			_ = checkTx.Rollback()
+			if err == nil {
+				t.Fatalf("administrator mutation bypassed policy revision guard: %s", probe.name)
+			}
+		})
+	}
+	checkTx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = checkTx.ExecContext(ctx, "TRUNCATE TABLE compute_evidence_policy_fences")
+	_ = checkTx.Rollback()
+	if err == nil {
+		t.Fatal("policy fence registry accepted destructive TRUNCATE")
+	}
 }
 
 func TestEvidencePolicyCommitFenceSerializesConcurrentRevocation(t *testing.T) {
