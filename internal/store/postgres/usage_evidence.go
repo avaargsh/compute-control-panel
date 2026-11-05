@@ -249,6 +249,17 @@ func scanUsageEvidenceSet(row usageEvidenceScanner) (UsageEvidenceSet, error) {
 // independently checks the successful Provider Operation, resource UID and
 // Workload Project before the immutable row can be inserted.
 func (r *Repository) PersistUsageEvidenceSet(ctx context.Context, p PersistUsageEvidenceParams) (UsageEvidenceSet, bool, error) {
+	// Tenant/Provider ownership in the database is necessary but cannot
+	// authenticate caller-asserted adapter trust. Resolve approved policy
+	// from a separate authority before allowing derivation or any DB write.
+	if r == nil {
+		return UsageEvidenceSet{}, false, ErrEvidencePolicyUntrusted
+	}
+	trustedPolicy, err := resolveTrustedUsagePolicy(ctx, r.evidencePolicyAuthority, p, time.Now().UTC())
+	if err != nil {
+		return UsageEvidenceSet{}, false, err
+	}
+	p.Policy = trustedPolicy
 	derived, err := deriveUsageEvidence(p)
 	if err != nil {
 		return UsageEvidenceSet{}, false, err
