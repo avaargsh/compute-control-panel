@@ -67,7 +67,7 @@ func TestE1WriterRejectsFinalAuthorizationCatalogDrift(t *testing.T) {
 		},
 		{
 			name:    "final approval function replaced",
-			ddl:     "CREATE OR REPLACE FUNCTION public.compute_require_e1_final_authorization() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $ BEGIN RETURN NEW; END; $",
+			ddl:     "CREATE OR REPLACE FUNCTION public.compute_require_e1_final_authorization() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $unsafe$ BEGIN RETURN NEW; END; $unsafe$",
 			restore: "restore-original-function",
 		},
 		{
