@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/avaargsh/compute-control-panel/internal/economics"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 const (
@@ -25,6 +26,7 @@ var (
 	ErrInvalidUsageEvidence  = errors.New("invalid Allocation usage evidence")
 	ErrUsageEvidenceNotReady = errors.New("Allocation usage evidence is not backed by a successful Provider operation")
 	ErrUsageEvidenceConflict = errors.New("Allocation usage evidence conflicts with an existing immutable record")
+	ErrEvidenceFinalUnauthorized = errors.New("independent exact-row E1 FINAL authorization denied")
 )
 
 // PersistUsageEvidenceParams contains source facts and trusted platform policy.
@@ -350,6 +352,15 @@ func (r *Repository) PersistUsageEvidenceSet(ctx context.Context, p PersistUsage
 		return insertedRecord, true, nil
 	}
 	if !errors.Is(insertErr, sql.ErrNoRows) {
+		var pgErr *pgconn.PgError
+		if errors.As(insertErr, &pgErr) {
+			switch pgErr.Code {
+			case "E1P01": // DB policy row missing, revoked or expired while waiting.
+				return UsageEvidenceSet{}, false, fmt.Errorf("%w: %s", ErrEvidencePolicyUntrusted, pgErr.Message)
+			case "E1A01": // No independently issued, exact-row authorization.
+				return UsageEvidenceSet{}, false, fmt.Errorf("%w: %s", ErrEvidenceFinalUnauthorized, pgErr.Message)
+			}
+		}
 		return UsageEvidenceSet{}, false, fmt.Errorf("insert usage evidence set: %w", insertErr)
 	}
 

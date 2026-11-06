@@ -59,7 +59,7 @@ SECURITY DEFINER
 SET search_path = pg_catalog, public, pg_temp
 AS $e1_final_auth$
 DECLARE
-    db_now TIMESTAMPTZ := clock_timestamp();
+    db_now TIMESTAMPTZ;
     authorized BOOLEAN := false;
 BEGIN
     -- An immutable row already bound by a unique key can only cause an
@@ -76,6 +76,25 @@ BEGIN
     ) THEN
         RETURN NEW;
     END IF;
+
+    -- A current approved policy is necessary even for a direct SQL writer.
+    -- Distinguish a revoked/expired policy from a missing per-evidence ticket
+    -- so the Go caller preserves ErrEvidencePolicyUntrusted on lock delays.
+    IF NOT EXISTS (
+        SELECT 1 FROM public.compute_evidence_policy_fences policy
+        WHERE policy.tenant_id = NEW.tenant_id
+          AND policy.provider_id = NEW.provider_id
+          AND policy.policy_version = NEW.evidence_policy_version
+          AND policy.revoked = false
+          AND policy.effective_from <= clock_timestamp()
+          AND policy.effective_until > clock_timestamp()
+        FOR SHARE
+    ) THEN
+        RAISE EXCEPTION 'E1 FINAL policy is absent, revoked or expired'
+            USING ERRCODE = 'E1P01';
+    END IF;
+    -- The clock is read AFTER waiting for the authority row-share lock.
+    db_now := clock_timestamp();
 
     SELECT true INTO authorized
     FROM public.compute_e1_final_authorizations approval
@@ -101,7 +120,7 @@ BEGIN
 
     IF COALESCE(authorized, false) IS NOT true THEN
         RAISE EXCEPTION 'E1 FINAL requires independently authorized exact evidence'
-            USING ERRCODE = '23514';
+            USING ERRCODE = 'E1A01';
     END IF;
     RETURN NEW;
 END;
