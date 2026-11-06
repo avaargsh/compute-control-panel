@@ -49,25 +49,27 @@ func verifyEvidenceWriterPrivileges(ctx context.Context, q evidenceWriterQueryRo
 		     SELECT 1 FROM (VALUES
 		       ('public.compute_evidence_policy_fences'::regclass,
 		        'compute_evidence_policy_revision_guard'::name,
-		        'public.compute_enforce_evidence_policy_revision()'::regprocedure, 19),
+		        'public.compute_enforce_evidence_policy_revision()'::regprocedure, 19, '02892e13304f82ef1437ba17ae2a3c5a'),
 		       ('public.compute_evidence_policy_fences'::regclass,
 		        'compute_evidence_policy_no_delete'::name,
-		        'public.compute_reject_evidence_policy_removal()'::regprocedure, 11),
+		        'public.compute_reject_evidence_policy_removal()'::regprocedure, 11, '380edb09a1ec70141294358d043252b6'),
 		       ('public.compute_evidence_policy_fences'::regclass,
 		        'compute_evidence_policy_no_truncate'::name,
-		        'public.compute_reject_evidence_policy_removal()'::regprocedure, 34),
+		        'public.compute_reject_evidence_policy_removal()'::regprocedure, 34, '380edb09a1ec70141294358d043252b6'),
 		       ('public.compute_allocation_usage_evidence_sets'::regclass,
 		        'compute_usage_evidence_scope_guard'::name,
-		        'public.compute_validate_usage_evidence_set()'::regprocedure, 7),
+		        'public.compute_validate_usage_evidence_set()'::regprocedure, 7, 'cb547f395690abc9b4866fcc204fea97'),
 		       ('public.compute_allocation_usage_evidence_sets'::regclass,
 		        'compute_usage_evidence_append_only'::name,
-		        'public.compute_reject_usage_evidence_mutation()'::regprocedure, 27),
+		        'public.compute_reject_usage_evidence_mutation()'::regprocedure, 27, 'b232e93c435de335ccc98fe8a39b7fd1'),
 		       ('public.compute_allocation_usage_evidence_sets'::regclass,
 		        'compute_usage_evidence_no_truncate'::name,
-		        'public.compute_reject_usage_evidence_mutation()'::regprocedure, 34)
-		     ) AS required(relation_oid, trigger_name, handler_oid, event_bits)
+		        'public.compute_reject_usage_evidence_mutation()'::regprocedure, 34, 'b232e93c435de335ccc98fe8a39b7fd1')
+		     ) AS required(relation_oid, trigger_name, handler_oid, event_bits, source_md5)
 		     LEFT JOIN pg_catalog.pg_trigger t
 		       ON t.tgrelid=required.relation_oid AND t.tgname=required.trigger_name
+		     LEFT JOIN pg_catalog.pg_proc p ON p.oid=t.tgfoid
+		     LEFT JOIN pg_catalog.pg_language l ON l.oid=p.prolang
 		     WHERE t.oid IS NULL
 		        OR t.tgenabled NOT IN ('O', 'A')
 		        OR t.tgfoid<>required.handler_oid
@@ -77,6 +79,20 @@ func verifyEvidenceWriterPrivileges(ctx context.Context, q evidenceWriterQueryRo
 		        OR t.tgattr::text<>''
 		        OR t.tgdeferrable
 		        OR t.tginitdeferred
+		        -- CREATE OR REPLACE FUNCTION preserves the handler OID. A
+		        -- checksum of the *applied migration* does not bind the
+		        -- actual pg_proc.prosrc after a privileged DDL/restore.
+		        -- These four MD5 baselines are from the unchanged v0006/v0007
+		        -- PL/pgSQL AS $...$ bodies, not caller-provided policy.
+		        OR p.oid IS NULL
+		        OR l.lanname <> 'plpgsql'
+		        OR md5(p.prosrc) <> required.source_md5
+		        OR p.prosecdef
+		        OR p.proconfig IS NOT NULL
+		        OR p.provolatile <> 'v'
+		        OR p.proparallel <> 'u'
+		        OR p.proleakproof
+		        OR p.prorettype <> 'pg_catalog.trigger'::regtype
 		   )
 		   OR EXISTS (
 		     -- A policy-only role check is insufficient: E1 also trusts the
