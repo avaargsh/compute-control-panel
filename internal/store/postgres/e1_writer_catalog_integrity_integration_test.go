@@ -68,3 +68,37 @@ func TestE1WriterCannotDisableIntegrityTriggers(t *testing.T) {
 		}
 	}
 }
+// PG16 permits a superuser to GRANT SET on session_replication_role without
+// granting the writer table ownership. Replica mode skips ordinary triggers,
+// so the E1 attestation must reject that *transaction's* effective mode.
+func TestE1WriterRejectsReplicaSessionMode(t *testing.T) {
+	admin := openIntegrationDB(t)
+	writer := testEvidenceWriterDB(t, admin)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	var login string
+	if err := writer.QueryRowContext(ctx, "SELECT current_user").Scan(&login); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.ExecContext(ctx,
+		fmt.Sprintf("GRANT SET ON PARAMETER session_replication_role TO %s", login)); err != nil {
+		t.Fatalf("grant test-only parameter SET: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := admin.ExecContext(context.Background(),
+			fmt.Sprintf("REVOKE SET ON PARAMETER session_replication_role FROM %s", login)); err != nil {
+			t.Errorf("revoke test-only parameter SET: %v", err)
+		}
+	})
+	tx, err := writer.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, "SET LOCAL session_replication_role = replica"); err != nil {
+		t.Fatalf("set replica session with granted permission: %v", err)
+	}
+	if err := verifyEvidenceWriterPrivileges(ctx, tx); !errors.Is(err, ErrEvidencePolicyUntrusted) {
+		t.Fatalf("E1 attestation accepted replica session that can skip integrity triggers: %v", err)
+	}
+}
