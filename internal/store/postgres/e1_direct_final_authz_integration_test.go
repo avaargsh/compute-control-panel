@@ -34,7 +34,26 @@ func TestE1DirectFinalInsertRequiresIndependentEvidenceApproval(t *testing.T) {
 				t.Fatalf("accept Workload: created=%t err=%v", created, err)
 			}
 			// These are genuine permanent Provider facts, not pg_temp fakes.
-			markUsageEvidenceProviderOperationSucceeded(t, admin, a)
+			// Use genuine permanent Provider facts, deliberately without asking
+			// the separate approval issuer to authorize this evidence row.
+			_, err = admin.ExecContext(ctx, `
+				UPDATE public.compute_allocations SET phase='BOUND', updated_at=clock_timestamp()
+				WHERE tenant_id=$1 AND allocation_id=$2
+			`, a.Workload.TenantID, a.Allocation.AllocationID)
+			if err != nil {
+				t.Fatalf("bind real Allocation: %v", err)
+			}
+			_, err = admin.ExecContext(ctx, `
+				UPDATE public.compute_operations
+				SET status='SUCCEEDED', provider_resource_id=$3, provider_resource_uid=$4,
+					updated_at=clock_timestamp()
+				WHERE tenant_id=$1 AND compute_operation_id=$2
+			`, a.Workload.TenantID, a.Operation.ID,
+				"provider-resource-"+a.Allocation.AllocationID,
+				"provider-uid-"+a.Allocation.AllocationID)
+			if err != nil {
+				t.Fatalf("complete real Provider operation: %v", err)
+			}
 			derived, err := deriveUsageEvidence(typedUsageEvidence(a))
 			if err != nil {
 				t.Fatalf("derive test evidence: %v", err)

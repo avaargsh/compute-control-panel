@@ -270,6 +270,8 @@ func TestPersistUsageEvidenceSetRejectsUnprovisionedRevokedAndStalePolicyRevisio
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Rev2 needs a new independent approval; a Rev1 ticket cannot roll forward.
+	seedTestE1FinalAuthorization(t, db, a, 2)
 	if _, persisted, err := updatedRepo.PersistUsageEvidenceSet(ctx, params); err != nil || !persisted {
 		t.Fatalf("newly approved E1 revision should commit: persisted=%t err=%v", persisted, err)
 	}

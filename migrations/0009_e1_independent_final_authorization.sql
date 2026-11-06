@@ -110,6 +110,6 @@ $e1_final_auth$;
 REVOKE ALL ON FUNCTION public.compute_require_e1_final_authorization() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.compute_protect_e1_final_authorizations() FROM PUBLIC;
 
-CREATE TRIGGER compute_e1_final_authorization_guard
+CREATE TRIGGER compute_usage_evidence_z_authorization_guard
 BEFORE INSERT ON public.compute_allocation_usage_evidence_sets
 FOR EACH ROW EXECUTE FUNCTION public.compute_require_e1_final_authorization();
