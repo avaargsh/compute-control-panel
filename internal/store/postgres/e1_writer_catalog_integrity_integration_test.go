@@ -68,6 +68,7 @@ func TestE1WriterCannotDisableIntegrityTriggers(t *testing.T) {
 		}
 	}
 }
+
 // PG16 permits a superuser to GRANT SET on session_replication_role without
 // granting the writer table ownership. Replica mode skips ordinary triggers,
 // so the E1 attestation must reject that *transaction's* effective mode.
