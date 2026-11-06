@@ -150,8 +150,8 @@ func verifyE1FinalAuthorizationCatalog(ctx context.Context, q evidenceWriterQuer
 		return fmt.Errorf("%w: E1 approval PK drift: %v", ErrEvidencePolicyUntrusted, err)
 	}
 	for _, f := range []struct {
-		name string
-		src string
+		name            string
+		src             string
 		securityDefiner bool
 	}{
 		{"public.compute_require_e1_final_authorization()", expectedE1FinalAuth, true},
@@ -177,7 +177,7 @@ func verifyE1FinalAuthorizationCatalog(ctx context.Context, q evidenceWriterQuer
 	}
 	for _, t := range []struct {
 		relation, trigger, function string
-		event int
+		event                       int
 	}{
 		{"public.compute_allocation_usage_evidence_sets", "compute_usage_evidence_z_authorization_guard", "public.compute_require_e1_final_authorization()", 7},
 		{"public.compute_e1_final_authorizations", "compute_e1_final_auth_immutable", "public.compute_protect_e1_final_authorizations()", 27},
