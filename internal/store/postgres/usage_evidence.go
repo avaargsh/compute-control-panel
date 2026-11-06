@@ -23,9 +23,9 @@ const (
 )
 
 var (
-	ErrInvalidUsageEvidence  = errors.New("invalid Allocation usage evidence")
-	ErrUsageEvidenceNotReady = errors.New("Allocation usage evidence is not backed by a successful Provider operation")
-	ErrUsageEvidenceConflict = errors.New("Allocation usage evidence conflicts with an existing immutable record")
+	ErrInvalidUsageEvidence      = errors.New("invalid Allocation usage evidence")
+	ErrUsageEvidenceNotReady     = errors.New("Allocation usage evidence is not backed by a successful Provider operation")
+	ErrUsageEvidenceConflict     = errors.New("Allocation usage evidence conflicts with an existing immutable record")
 	ErrEvidenceFinalUnauthorized = errors.New("independent exact-row E1 FINAL authorization denied")
 )
 
