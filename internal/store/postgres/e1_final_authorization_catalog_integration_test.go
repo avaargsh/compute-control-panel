@@ -51,33 +51,33 @@ func TestE1WriterRejectsIndependentAuthorizationIssuerGrants(t *testing.T) {
 // startup/transaction attestation must reject unsafe catalog drift.
 func TestE1WriterRejectsFinalAuthorizationCatalogDrift(t *testing.T) {
 	tests := []struct {
-		name string
-		ddl  string
+		name    string
+		ddl     string
 		restore string
 	}{
 		{
-			name: "approval ledger UNLOGGED",
-			ddl:  "ALTER TABLE public.compute_e1_final_authorizations SET UNLOGGED",
+			name:    "approval ledger UNLOGGED",
+			ddl:     "ALTER TABLE public.compute_e1_final_authorizations SET UNLOGGED",
 			restore: "ALTER TABLE public.compute_e1_final_authorizations SET LOGGED",
 		},
 		{
-			name: "final approval trigger disabled",
-			ddl:  "ALTER TABLE public.compute_allocation_usage_evidence_sets DISABLE TRIGGER compute_usage_evidence_z_authorization_guard",
+			name:    "final approval trigger disabled",
+			ddl:     "ALTER TABLE public.compute_allocation_usage_evidence_sets DISABLE TRIGGER compute_usage_evidence_z_authorization_guard",
 			restore: "ALTER TABLE public.compute_allocation_usage_evidence_sets ENABLE TRIGGER compute_usage_evidence_z_authorization_guard",
 		},
 		{
-			name: "final approval function replaced",
-			ddl:  "CREATE OR REPLACE FUNCTION public.compute_require_e1_final_authorization() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $ BEGIN RETURN NEW; END; $",
+			name:    "final approval function replaced",
+			ddl:     "CREATE OR REPLACE FUNCTION public.compute_require_e1_final_authorization() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $ BEGIN RETURN NEW; END; $",
 			restore: "restore-original-function",
 		},
 		{
-			name: "final approval function search_path weakened",
-			ddl:  "ALTER FUNCTION public.compute_require_e1_final_authorization() SET search_path=pg_temp,public",
+			name:    "final approval function search_path weakened",
+			ddl:     "ALTER FUNCTION public.compute_require_e1_final_authorization() SET search_path=pg_temp,public",
 			restore: "ALTER FUNCTION public.compute_require_e1_final_authorization() SET search_path = pg_catalog, public, pg_temp",
 		},
 		{
-			name: "immutable issuer ledger row trigger disabled",
-			ddl:  "ALTER TABLE public.compute_e1_final_authorizations DISABLE TRIGGER compute_e1_final_auth_immutable",
+			name:    "immutable issuer ledger row trigger disabled",
+			ddl:     "ALTER TABLE public.compute_e1_final_authorizations DISABLE TRIGGER compute_e1_final_auth_immutable",
 			restore: "ALTER TABLE public.compute_e1_final_authorizations ENABLE TRIGGER compute_e1_final_auth_immutable",
 		},
 	}
