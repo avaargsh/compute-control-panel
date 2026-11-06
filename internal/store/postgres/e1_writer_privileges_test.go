@@ -177,3 +177,48 @@ func TestE1WriterRoleRejectsSuperuserSessionSetRoleToWriter(t *testing.T) {
 		t.Fatalf("superuser login using SET LOCAL ROLE writer was accepted: %v", err)
 	}
 }
+
+func TestE1WriterRejectsInheritedIssuerGrantWithoutSetRole(t *testing.T) {
+	admin := openIntegrationDB(t)
+	writer := testEvidenceWriterDB(t, admin)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	var login string
+	if err := writer.QueryRowContext(ctx, "SELECT current_user").Scan(&login); err != nil {
+		t.Fatal(err)
+	}
+	issuerRole := "e1_inherited_issuer_" + randomSuffix(t)
+	if _, err := admin.ExecContext(ctx, fmt.Sprintf("CREATE ROLE %s NOLOGIN", issuerRole)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = admin.ExecContext(context.Background(), fmt.Sprintf("REVOKE %s FROM %s", issuerRole, login))
+		_, _ = admin.ExecContext(context.Background(), fmt.Sprintf("DROP OWNED BY %s", issuerRole))
+		_, _ = admin.ExecContext(context.Background(), fmt.Sprintf("DROP ROLE %s", issuerRole))
+	})
+	if _, err := admin.ExecContext(ctx, fmt.Sprintf(
+		"GRANT INSERT ON public.compute_e1_final_authorizations TO %s", issuerRole)); err != nil {
+		t.Fatal(err)
+	}
+	// PG16 supports membership without SET ROLE. Effective inherited DML
+	// is still forbidden to the E1 runtime writer.
+	if _, err := admin.ExecContext(ctx, fmt.Sprintf(
+		"GRANT %s TO %s WITH INHERIT TRUE, SET FALSE", issuerRole, login)); err != nil {
+		t.Fatal(err)
+	}
+	var inheritedInsert, maySetRole bool
+	if err := writer.QueryRowContext(ctx, `
+		SELECT has_table_privilege(current_user,
+			'public.compute_e1_final_authorizations', 'INSERT'),
+			pg_has_role(current_user, $1, 'SET')
+	`, issuerRole).Scan(&inheritedInsert, &maySetRole); err != nil {
+		t.Fatal(err)
+	}
+	if !inheritedInsert || maySetRole {
+		t.Fatalf("expected inherited issuer INSERT without SET ROLE: INSERT=%t SET=%t",
+			inheritedInsert, maySetRole)
+	}
+	if err := verifyEvidenceWriterPrivileges(ctx, writer); !errors.Is(err, ErrEvidencePolicyUntrusted) {
+		t.Fatalf("E1 writer accepted inherited issuer privilege: %v", err)
+	}
+}
