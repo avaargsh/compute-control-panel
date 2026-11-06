@@ -97,8 +97,7 @@ func verifyE1FinalAuthorizationCatalog(ctx context.Context, q evidenceWriterQuer
 			JOIN pg_catalog.pg_namespace ns ON ns.oid=c.relnamespace
 			WHERE c.oid='public.compute_e1_final_authorizations'::regclass
 			  AND ns.nspname='public' AND c.relkind='r' AND c.relpersistence='p'
-			  AND c.relowner=(SELECT relowner FROM pg_catalog.pg_class
-			                  WHERE oid='public.compute_allocation_usage_evidence_sets'::regclass)
+			  -- The independent issuer/migrator may own a separate schema relation.
 			  AND NOT EXISTS (
 				  SELECT 1 FROM pg_catalog.aclexplode(
 					  coalesce(c.relacl,pg_catalog.acldefault('r',c.relowner))) a
