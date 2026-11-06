@@ -65,7 +65,7 @@ func TestE1WriterRejectsUnsafeIntegrityFunctionAttributes(t *testing.T) {
 		restore string
 	}{
 		{"security-definer", "SECURITY DEFINER", "SECURITY INVOKER"},
-		{"untrusted-function-search-path", "SET search_path = pg_temp, public", "RESET search_path"},
+		{"untrusted-function-search-path", "SET search_path = pg_temp, public", "SET search_path = pg_catalog, public, pg_temp"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
