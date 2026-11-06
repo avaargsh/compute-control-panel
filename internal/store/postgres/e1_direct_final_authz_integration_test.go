@@ -2,8 +2,11 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // RED: A credentialed E1 writer must not be able to turn an otherwise
@@ -13,11 +16,15 @@ import (
 // attestation of source provenance and exact derived bytes.
 func TestE1DirectFinalInsertRequiresIndependentEvidenceApproval(t *testing.T) {
 	for _, tc := range []struct {
-		name            string
-		provisionPolicy bool
+		name              string
+		provisionPolicy   bool
+		provisionApproval bool
+		revokeApproval    bool
+		wantSQLState      string
 	}{
-		{"no administered policy", false},
-		{"policy fence exists but no evidence authorization", true},
+		{"no administered policy", false, false, false, "E1P01"},
+		{"policy fence exists but no evidence authorization", true, false, false, "E1A01"},
+		{"revoked exact-row authorization", true, true, true, "E1A01"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			admin := openIntegrationDB(t)
@@ -83,6 +90,22 @@ func TestE1DirectFinalInsertRequiresIndependentEvidenceApproval(t *testing.T) {
 					t.Fatalf("provision genuine admin policy: %v", err)
 				}
 			}
+			if tc.provisionApproval {
+				seedTestE1FinalAuthorization(t, admin, a, 1)
+			}
+			if tc.revokeApproval {
+				result, err := admin.ExecContext(ctx, `
+					UPDATE public.compute_e1_final_authorizations SET revoked=true
+					WHERE tenant_id=$1 AND evidence_set_id=$2 AND policy_revision=1
+				`, row.TenantID, row.EvidenceSetID)
+				if err != nil {
+					t.Fatalf("revoke exact-row authorization: %v", err)
+				}
+				count, err := result.RowsAffected()
+				if err != nil || count != 1 {
+					t.Fatalf("expected exactly one revoked approval; rows=%d err=%v", count, err)
+				}
+			}
 			// Deliberately bypass PersistUsageEvidenceSet / Go policy resolver.
 			_, insertErr := writer.ExecContext(ctx, `
 		INSERT INTO public.compute_allocation_usage_evidence_sets (
@@ -116,8 +139,9 @@ func TestE1DirectFinalInsertRequiresIndependentEvidenceApproval(t *testing.T) {
             `, row.TenantID, row.EvidenceSetID).Scan(&durable); err != nil {
 				t.Fatal(err)
 			}
-			if insertErr == nil || durable != 0 {
-				t.Fatalf("direct E1 SQL bypassed independent evidence authorization: insertErr=%v permanent_FINAL=%d", insertErr, durable)
+			var pgErr *pgconn.PgError
+			if !errors.As(insertErr, &pgErr) || pgErr.Code != tc.wantSQLState || durable != 0 {
+				t.Fatalf("direct E1 SQL authorization rejection mismatch: SQL err=%v, expected state=%s, permanent_FINAL=%d", insertErr, tc.wantSQLState, durable)
 			}
 		})
 	}
