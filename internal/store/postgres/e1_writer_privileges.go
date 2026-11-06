@@ -39,6 +39,45 @@ func verifyEvidenceWriterPrivileges(ctx context.Context, q evidenceWriterQueryRo
 		       AND pg_has_role(current_user, other.oid, 'SET')
 		   )
 		   OR has_schema_privilege(current_user, 'public', 'CREATE')
+		   -- Ordinary (origin) trigger mode is part of the E1 write contract.
+		   -- PG16 permits a separately granted SET on this parameter.
+		   OR current_setting('session_replication_role') <> 'origin'
+		   OR EXISTS (
+		     -- Applied migration checksums are not proof that required
+		     -- triggers are still enabled or still target their handlers.
+		     -- Check the actual catalog on the very same write transaction.
+		     SELECT 1 FROM (VALUES
+		       ('public.compute_evidence_policy_fences'::regclass,
+		        'compute_evidence_policy_revision_guard'::name,
+		        'public.compute_enforce_evidence_policy_revision()'::regprocedure, 19),
+		       ('public.compute_evidence_policy_fences'::regclass,
+		        'compute_evidence_policy_no_delete'::name,
+		        'public.compute_reject_evidence_policy_removal()'::regprocedure, 11),
+		       ('public.compute_evidence_policy_fences'::regclass,
+		        'compute_evidence_policy_no_truncate'::name,
+		        'public.compute_reject_evidence_policy_removal()'::regprocedure, 34),
+		       ('public.compute_allocation_usage_evidence_sets'::regclass,
+		        'compute_usage_evidence_scope_guard'::name,
+		        'public.compute_validate_usage_evidence_set()'::regprocedure, 7),
+		       ('public.compute_allocation_usage_evidence_sets'::regclass,
+		        'compute_usage_evidence_append_only'::name,
+		        'public.compute_reject_usage_evidence_mutation()'::regprocedure, 27),
+		       ('public.compute_allocation_usage_evidence_sets'::regclass,
+		        'compute_usage_evidence_no_truncate'::name,
+		        'public.compute_reject_usage_evidence_mutation()'::regprocedure, 34)
+		     ) AS required(relation_oid, trigger_name, handler_oid, event_bits)
+		     LEFT JOIN pg_catalog.pg_trigger t
+		       ON t.tgrelid=required.relation_oid AND t.tgname=required.trigger_name
+		     WHERE t.oid IS NULL
+		        OR t.tgenabled NOT IN ('O', 'A')
+		        OR t.tgfoid<>required.handler_oid
+		        OR t.tgtype<>required.event_bits
+		        OR t.tgqual IS NOT NULL
+		        OR t.tgnargs<>0
+		        OR t.tgattr::text<>''
+		        OR t.tgdeferrable
+		        OR t.tginitdeferred
+		   )
 		   OR EXISTS (
 		     -- A policy-only role check is insufficient: E1 also trusts the
 		     -- immutable evidence row and Provider/Workload/Allocation facts.
