@@ -111,6 +111,7 @@ func verifyEvidenceWriterPrivileges(ctx context.Context, q evidenceWriterQueryRo
 		       ('public.compute_operations'::regclass, 'updated_at'::name, false),
 		       ('public.compute_workloads'::regclass, 'updated_at'::name, false),
 		       ('public.compute_allocations'::regclass, 'updated_at'::name, false),
+		       ('public.compute_e1_final_authorizations'::regclass, 'approved_at'::name, false),
 		       ('public.compute_allocation_usage_evidence_sets'::regclass, 'recorded_at'::name, true)
 		     ) AS protected(relation_oid, lock_column, allow_insert)
 		     WHERE has_table_privilege(current_user, protected.relation_oid, 'DELETE')
@@ -132,6 +133,7 @@ func verifyEvidenceWriterPrivileges(ctx context.Context, q evidenceWriterQueryRo
 		            )
 		        )
 		   )
+		   OR has_column_privilege(current_user, 'public.compute_e1_final_authorizations', 'approved_at', 'UPDATE')
 		   OR has_table_privilege(current_user, 'public.compute_evidence_policy_fences', 'INSERT')
 		   OR has_table_privilege(current_user, 'public.compute_evidence_policy_fences', 'DELETE')
 		   OR has_table_privilege(current_user, 'public.compute_evidence_policy_fences', 'TRUNCATE')
@@ -156,5 +158,5 @@ func verifyEvidenceWriterPrivileges(ctx context.Context, q evidenceWriterQueryRo
 	if privileged || !hasRead || !hasLockColumn || !canInsertEvidence {
 		return fmt.Errorf("%w: E1 writer requires a separate narrowly scoped database role", ErrEvidencePolicyUntrusted)
 	}
-	return nil
+	return verifyE1FinalAuthorizationCatalog(ctx, q)
 }
