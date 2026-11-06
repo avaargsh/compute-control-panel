@@ -53,26 +53,32 @@ func TestE1WriterRejectsFinalAuthorizationCatalogDrift(t *testing.T) {
 	tests := []struct {
 		name string
 		ddl  string
+		restore string
 	}{
 		{
 			name: "approval ledger UNLOGGED",
 			ddl:  "ALTER TABLE public.compute_e1_final_authorizations SET UNLOGGED",
+			restore: "ALTER TABLE public.compute_e1_final_authorizations SET LOGGED",
 		},
 		{
 			name: "final approval trigger disabled",
 			ddl:  "ALTER TABLE public.compute_allocation_usage_evidence_sets DISABLE TRIGGER compute_usage_evidence_z_authorization_guard",
+			restore: "ALTER TABLE public.compute_allocation_usage_evidence_sets ENABLE TRIGGER compute_usage_evidence_z_authorization_guard",
 		},
 		{
 			name: "final approval function replaced",
-			ddl:  "CREATE OR REPLACE FUNCTION public.compute_require_e1_final_authorization() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$ BEGIN RETURN NEW; END; $$",
+			ddl:  "CREATE OR REPLACE FUNCTION public.compute_require_e1_final_authorization() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $ BEGIN RETURN NEW; END; $",
+			restore: "restore-original-function",
 		},
 		{
 			name: "final approval function search_path weakened",
 			ddl:  "ALTER FUNCTION public.compute_require_e1_final_authorization() SET search_path=pg_temp,public",
+			restore: "ALTER FUNCTION public.compute_require_e1_final_authorization() SET search_path = pg_catalog, public, pg_temp",
 		},
 		{
 			name: "immutable issuer ledger row trigger disabled",
 			ddl:  "ALTER TABLE public.compute_e1_final_authorizations DISABLE TRIGGER compute_e1_final_auth_immutable",
+			restore: "ALTER TABLE public.compute_e1_final_authorizations ENABLE TRIGGER compute_e1_final_auth_immutable",
 		},
 	}
 	for _, tc := range tests {
@@ -84,6 +90,22 @@ func TestE1WriterRejectsFinalAuthorizationCatalogDrift(t *testing.T) {
 			if err := verifyEvidenceWriterPrivileges(ctx, writer); err != nil {
 				t.Fatalf("baseline catalog attestation rejected: %v", err)
 			}
+			// Every test shares the PostgreSQL integration database. Restore the
+			// *actual* DDL even if a subsequent assertion fails or is fatal;
+			// otherwise a leftover UNLOGGED relation poisons later cases.
+			restore := tc.restore
+			if restore == "restore-original-function" {
+				if err := admin.QueryRowContext(ctx,
+					"SELECT pg_get_functiondef('public.compute_require_e1_final_authorization()'::regprocedure)",
+				).Scan(&restore); err != nil {
+					t.Fatalf("capture original final authorization function: %v", err)
+				}
+			}
+			t.Cleanup(func() {
+				if _, err := admin.ExecContext(context.Background(), restore); err != nil {
+					t.Errorf("restore original E1 approval catalog after %s: %v", tc.name, err)
+				}
+			})
 			if _, err := admin.ExecContext(ctx, tc.ddl); err != nil {
 				t.Fatalf("inject privileged catalog drift: %v", err)
 			}
