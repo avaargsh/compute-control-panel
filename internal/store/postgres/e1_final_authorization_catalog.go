@@ -106,7 +106,22 @@ func verifyE1FinalAuthorizationCatalog(ctx context.Context, q evidenceWriterQuer
 		)
 	`).Scan(&ok)
 	if err != nil || !ok {
-		return fmt.Errorf("%w: E1 approval relation durability, owner or PUBLIC ACL drift: %v", ErrEvidencePolicyUntrusted, err)
+		var relkind, persistence, namespace, acl string
+		var publicGrant bool
+		probeErr := q.QueryRowContext(ctx, `
+			SELECT c.relkind::text, c.relpersistence::text, ns.nspname,
+			       coalesce(c.relacl::text, 'NULL'),
+			       EXISTS (
+					SELECT 1 FROM pg_catalog.aclexplode(
+						coalesce(c.relacl,pg_catalog.acldefault('r',c.relowner))) a
+					WHERE a.grantee=0
+			       )
+			FROM pg_catalog.pg_class c
+			JOIN pg_catalog.pg_namespace ns ON ns.oid=c.relnamespace
+			WHERE c.oid='public.compute_e1_final_authorizations'::regclass
+		`).Scan(&relkind, &persistence, &namespace, &acl, &publicGrant)
+		return fmt.Errorf("%w: E1 approval relation durability or PUBLIC ACL drift: %v (diagnostic kind=%s persistence=%s namespace=%s public=%t acl=%s probe=%v)",
+			ErrEvidencePolicyUntrusted, err, relkind, persistence, namespace, publicGrant, acl, probeErr)
 	}
 	err = q.QueryRowContext(ctx, `
 		WITH expected(name,typ) AS (
