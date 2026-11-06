@@ -88,7 +88,13 @@ func verifyEvidenceWriterPrivileges(ctx context.Context, q evidenceWriterQueryRo
 		        OR l.lanname <> 'plpgsql'
 		        OR md5(p.prosrc) <> required.source_md5
 		        OR p.prosecdef
-		        OR p.proconfig IS NOT NULL
+		        OR CASE WHEN required.handler_oid =
+		             'public.compute_validate_usage_evidence_set()'::regprocedure
+		             -- v0008 pins permanent public authority ahead of
+		             -- pg_temp inside the original v0006 trigger function.
+		             THEN p.proconfig IS DISTINCT FROM
+		               ARRAY['search_path=pg_catalog, public, pg_temp']::text[]
+		             ELSE p.proconfig IS NOT NULL END
 		        OR p.provolatile <> 'v'
 		        OR p.proparallel <> 'u'
 		        OR p.proleakproof
