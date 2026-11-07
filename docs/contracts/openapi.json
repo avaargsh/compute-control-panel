@@ -75,6 +75,9 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -246,14 +249,33 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           }
         },
-        "x-implementation-status": "proposed"
+        "x-implementation-status": "proposed",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Stable key for one logical delete intent; retries reuse the same key and canonical mutation.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          }
+        ]
       }
     },
     "/api/v1/workloads/{workload_id}/allocations": {
@@ -406,7 +428,10 @@
         "description": "The idempotency key was reused with a different request digest or the requested generation is stale."
       },
       "UnprocessableEntity": {
-        "description": "The request failed schema or capability validation."
+        "description": "Authenticated, well-formed request rejected by domain policy or unsupported compute capability."
+      },
+      "BadRequest": {
+        "description": "Invalid request shape, malformed JSON or missing/invalid Idempotency-Key; no durable mutation."
       }
     }
   }
