@@ -1,0 +1,555 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.compute-control-panel.dev/v1/compute-operation-v1.schema.json",
+  "title": "Compute Provider Operation resource v1",
+  "type": "object",
+  "required": [
+    "compute_operation_id",
+    "tenant_id",
+    "workload_id",
+    "allocation_id",
+    "provider_id",
+    "operation_kind",
+    "desired_generation",
+    "provider_request_digest",
+    "idempotency_key",
+    "version",
+    "fence_token",
+    "status"
+  ],
+  "properties": {
+    "compute_operation_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tenant_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workload_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "allocation_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provider_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "operation_kind": {
+      "enum": [
+        "CREATE",
+        "UPDATE",
+        "DELETE"
+      ]
+    },
+    "desired_generation": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "provider_request_digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "fence_token": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "status": {
+      "enum": [
+        "PENDING",
+        "LEASED",
+        "IN_FLIGHT",
+        "UNKNOWN",
+        "RECONCILING",
+        "SUCCEEDED",
+        "FAILED",
+        "MANUAL_REVIEW",
+        "SUPERSEDED"
+      ]
+    },
+    "lease_owner": {
+      "type": "string",
+      "minLength": 1
+    },
+    "lease_expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "target_resource_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "target_resource_uid": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provider_resource_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provider_resource_uid": {
+      "type": "string",
+      "minLength": 1
+    },
+    "error_code": {
+      "type": "string",
+      "minLength": 1
+    },
+    "manual_review_code": {
+      "type": "string",
+      "minLength": 1
+    },
+    "cleanup_required": {
+      "type": "boolean"
+    },
+    "reconcile_required": {
+      "type": "boolean"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "enum": [
+              "LEASED",
+              "IN_FLIGHT",
+              "RECONCILING"
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "lease_owner",
+          "lease_expires_at"
+        ],
+        "properties": {
+          "fence_token": {
+            "minimum": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "enum": [
+              "PENDING",
+              "UNKNOWN",
+              "SUCCEEDED",
+              "FAILED",
+              "MANUAL_REVIEW",
+              "SUPERSEDED"
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "lease_owner"
+              ]
+            },
+            {
+              "required": [
+                "lease_expires_at"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation_kind": {
+            "const": "CREATE"
+          }
+        },
+        "required": [
+          "operation_kind"
+        ]
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "target_resource_id"
+              ]
+            },
+            {
+              "required": [
+                "target_resource_uid"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation_kind": {
+            "enum": [
+              "UPDATE",
+              "DELETE"
+            ]
+          }
+        },
+        "required": [
+          "operation_kind"
+        ]
+      },
+      "then": {
+        "required": [
+          "target_resource_id",
+          "target_resource_uid"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "enum": [
+              "PENDING",
+              "LEASED",
+              "IN_FLIGHT",
+              "UNKNOWN",
+              "RECONCILING"
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "provider_resource_id"
+              ]
+            },
+            {
+              "required": [
+                "provider_resource_uid"
+              ]
+            },
+            {
+              "required": [
+                "error_code"
+              ]
+            },
+            {
+              "required": [
+                "manual_review_code"
+              ]
+            }
+          ]
+        },
+        "properties": {
+          "cleanup_required": {
+            "const": false
+          },
+          "reconcile_required": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "SUCCEEDED"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "oneOf": [
+          {
+            "properties": {
+              "operation_kind": {
+                "const": "CREATE"
+              }
+            },
+            "required": [
+              "operation_kind",
+              "provider_resource_id",
+              "provider_resource_uid"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "error_code"
+                  ]
+                },
+                {
+                  "required": [
+                    "manual_review_code"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "properties": {
+              "operation_kind": {
+                "const": "UPDATE"
+              }
+            },
+            "required": [
+              "operation_kind",
+              "target_resource_id",
+              "target_resource_uid",
+              "provider_resource_id",
+              "provider_resource_uid"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "error_code"
+                  ]
+                },
+                {
+                  "required": [
+                    "manual_review_code"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "properties": {
+              "operation_kind": {
+                "const": "DELETE"
+              }
+            },
+            "required": [
+              "operation_kind",
+              "target_resource_id",
+              "target_resource_uid"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "provider_resource_id"
+                  ]
+                },
+                {
+                  "required": [
+                    "provider_resource_uid"
+                  ]
+                },
+                {
+                  "required": [
+                    "error_code"
+                  ]
+                },
+                {
+                  "required": [
+                    "manual_review_code"
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        "properties": {
+          "cleanup_required": {
+            "const": false
+          },
+          "reconcile_required": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "FAILED"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "error_code"
+        ],
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "provider_resource_id"
+              ]
+            },
+            {
+              "required": [
+                "provider_resource_uid"
+              ]
+            },
+            {
+              "required": [
+                "manual_review_code"
+              ]
+            }
+          ]
+        },
+        "properties": {
+          "cleanup_required": {
+            "const": false
+          },
+          "reconcile_required": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "MANUAL_REVIEW"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "manual_review_code"
+        ],
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "provider_resource_id"
+              ]
+            },
+            {
+              "required": [
+                "provider_resource_uid"
+              ]
+            },
+            {
+              "required": [
+                "error_code"
+              ]
+            }
+          ]
+        },
+        "properties": {
+          "cleanup_required": {
+            "const": false
+          },
+          "reconcile_required": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "SUPERSEDED"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "reconcile_required"
+        ],
+        "properties": {
+          "reconcile_required": {
+            "const": true
+          },
+          "cleanup_required": {
+            "type": "boolean"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "cleanup_required": {
+                  "const": true
+                }
+              },
+              "required": [
+                "cleanup_required"
+              ]
+            },
+            "then": {
+              "required": [
+                "provider_resource_id",
+                "provider_resource_uid"
+              ]
+            }
+          }
+        ],
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "error_code"
+              ]
+            },
+            {
+              "required": [
+                "manual_review_code"
+              ]
+            }
+          ]
+        },
+        "dependentRequired": {
+          "provider_resource_id": [
+            "provider_resource_uid"
+          ],
+          "provider_resource_uid": [
+            "provider_resource_id"
+          ]
+        }
+      }
+    }
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.compute-control-panel.dev/v1/compute-workload-accepted-v1.schema.json",
+  "title": "Compute Workload accepted response v1",
+  "type": "object",
+  "required": [
+    "workload_id",
+    "desired_generation",
+    "desired_state",
+    "observed_phase",
+    "allocation_id",
+    "allocation_phase",
+    "compute_operation_id",
+    "status_url"
+  ],
+  "properties": {
+    "workload_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "desired_generation": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "desired_state": {
+      "const": "ACTIVE"
+    },
+    "observed_phase": {
+      "const": "ACCEPTED"
+    },
+    "allocation_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "allocation_phase": {
+      "const": "PENDING"
+    },
+    "compute_operation_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status_url": {
+      "type": "string",
+      "format": "uri-reference"
+    }
+  },
+  "additionalProperties": false
+}

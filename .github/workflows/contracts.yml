@@ -1,0 +1,30 @@
+name: Contract validation
+
+on:
+  pull_request:
+    paths:
+      - "docs/contracts/**"
+      - ".github/workflows/contracts.yml"
+  push:
+    branches: [main]
+    paths:
+      - "docs/contracts/**"
+      - ".github/workflows/contracts.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pinned validator
+        run: python -m pip install -r docs/contracts/requirements-contracts.txt
+      - name: Validate JSON Schema and OpenAPI contract
+        run: python -m unittest discover -s docs/contracts/tests -v

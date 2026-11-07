@@ -126,3 +126,19 @@ The internal evidence repository requires an independently resolved policy match
 ## Retired repository
 
 `gpu-compute-platform` is retired as an active delivery repository. It is historical migration/reference input only; all new Compute implementation, provider adapters, economics and release evidence belong here. The consolidation record is maintained in the [GPU Compute Platform migration matrix](https://github.com/avaargsh/compute-control-panel/blob/feat/p0-contract-artifacts/docs/migration/GPU-COMPUTE-PLATFORM-CONSOLIDATION.md).
+
+## Architecture and contract references (PR #12)
+
+These documents and schemas are proposed cross-repository contracts, not proof that every API endpoint or integration exists in production:
+
+- [Architecture baseline](docs/architecture/BASELINE.md)
+- [Domain ownership and Kubernetes/Kueue boundary](docs/architecture/DOMAIN-OWNERSHIP.md)
+- [Workload and Provider operation contract v1](docs/architecture/WORKLOAD-OPERATION-V1.md)
+- [Compute Workload API and event contract v1](docs/contracts/COMPUTE-WORKLOAD-V1.md)
+- [OpenAPI 3.1 contract and JSON Schemas](docs/contracts/openapi.json)
+- [Cross-repository ownership ADR](docs/adr/ADR-001-CROSS-REPO-OWNERSHIP.md)
+- [Reliability acceptance matrix](docs/testing/RELIABILITY-ACCEPTANCE.md)
+- [Implementation plan](tasks/plan.md)
+- [Tracked tasks and cross-repository gates](tasks/todo.md)
+
+The OpenAPI implementation-status markers distinguish the present, unmounted POST/GET Workload handlers from proposed endpoints. Consumer-driven contract tests, production tenant isolation and independent Provider/Kueue/DRA acceptance remain open gates.

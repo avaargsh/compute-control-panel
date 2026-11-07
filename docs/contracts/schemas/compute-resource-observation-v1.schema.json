@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.compute-control-panel.dev/v1/compute-resource-observation-v1.schema.json",
+  "title": "Compute Resource Observation v1",
+  "type": "object",
+  "required": [
+    "observation_id",
+    "tenant_id",
+    "workload_id",
+    "provider_id",
+    "desired_generation",
+    "resource_kind",
+    "result",
+    "source",
+    "adapter_version",
+    "observed_at"
+  ],
+  "properties": {
+    "observation_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tenant_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workload_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "allocation_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "compute_operation_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provider_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "desired_generation": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "resource_kind": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provider_resource_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provider_resource_uid": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provider_resource_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "result": {
+      "enum": [
+        "NOT_FOUND",
+        "PENDING",
+        "ADMITTED",
+        "SCHEDULED",
+        "RUNNING",
+        "READY",
+        "DEGRADED",
+        "DELETING",
+        "TERMINAL",
+        "UNKNOWN"
+      ]
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1
+    },
+    "adapter_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "observed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source_timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "response_digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "evidence_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "freshness_expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "details": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false
+}
