@@ -145,7 +145,8 @@ Errors use the platform envelope with code, message, retryable, correlation_id a
 
 | Condition | HTTP | Required behavior |
 |---|---:|---|
-| Invalid schema or unsupported resource capability | 422 | No provider side effect |
+| Malformed JSON, invalid request shape, or missing/invalid Idempotency-Key | 400 | No provider side effect |
+| Well-formed request rejected by domain policy or unsupported resource capability | 422 | No provider side effect |
 | Unauthenticated | 401 | No resource disclosure |
 | Tenant/project mismatch | 403 | Do not reveal cross-tenant resource existence |
 | Resource absent in caller scope | 404 | No cross-tenant lookup leak |
