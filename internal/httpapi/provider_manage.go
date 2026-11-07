@@ -242,7 +242,7 @@ func writeProviderManagementRecord(w http.ResponseWriter, status int, p postgres
 		AdapterVersion: p.AdapterVersion, CapabilityDigest: p.CapabilityDigest,
 		State: string(p.State), Version: p.Version, LastReasonCode: p.LastReasonCode,
 		RegisteredAt: p.RegisteredAt.UTC().Format(time.RFC3339Nano),
-		UpdatedAt: p.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		UpdatedAt:    p.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	})
 }
 
