@@ -290,24 +290,24 @@ func TestProviderManageConstructorRejectsTypedNilDependencies(t *testing.T) {
 			name: "nil authenticator",
 			deps: ProviderManagementDependencies{
 				Authenticator: (*SPIFFEWorkloadAuthenticator)(nil),
-				Authorizer: &providerManagementAuthorizerStub{},
-				Repository: &providerManagementRepositoryStub{},
+				Authorizer:    &providerManagementAuthorizerStub{},
+				Repository:    &providerManagementRepositoryStub{},
 			},
 		},
 		{
 			name: "nil authorizer",
 			deps: ProviderManagementDependencies{
 				Authenticator: testPrincipalAuthenticator{},
-				Authorizer: (*ExactProviderManagementAuthorizer)(nil),
-				Repository: &providerManagementRepositoryStub{},
+				Authorizer:    (*ExactProviderManagementAuthorizer)(nil),
+				Repository:    &providerManagementRepositoryStub{},
 			},
 		},
 		{
 			name: "nil repository",
 			deps: ProviderManagementDependencies{
 				Authenticator: testPrincipalAuthenticator{},
-				Authorizer: &providerManagementAuthorizerStub{},
-				Repository: (*postgres.Repository)(nil),
+				Authorizer:    &providerManagementAuthorizerStub{},
+				Repository:    (*postgres.Repository)(nil),
 			},
 		},
 	}
