@@ -1,0 +1,769 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/avaargsh/compute-control-panel/main/schemas/compute-economics/workload-cost-entry.schema.json",
+  "title": "Compute Economics WorkloadCostEntry v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "costEntryId",
+    "entryType",
+    "tenantId",
+    "projectId",
+    "workloadId",
+    "allocationId",
+    "providerId",
+    "poolId",
+    "profileId",
+    "usageIntervalId",
+    "pricedWindow",
+    "pricedQuantity",
+    "unit",
+    "rateCardId",
+    "rateCardVersion",
+    "rateAmount",
+    "currency",
+    "amount",
+    "calculationVersion",
+    "roundingMode",
+    "calculationStatus",
+    "recordedAt",
+    "sourceCoverage",
+    "currencyMinorUnit",
+    "calculationInputDigest",
+    "currencyMetadataVersion"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "compute.economics.workload-cost-entry.v1"
+    },
+    "costEntryId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "entryType": {
+      "enum": [
+        "CHARGE",
+        "REVERSAL"
+      ]
+    },
+    "tenantId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "projectId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workloadId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "allocationId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "providerId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "poolId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "profileId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "usageIntervalId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "pricedWindow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start",
+        "end"
+      ],
+      "properties": {
+        "start": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "end": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "pricedQuantity": {
+      "type": "string",
+      "pattern": "^(?=.*[1-9])(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,18})?$",
+      "description": "Strictly positive base-10 decimal string. Never use binary floating point for accounting values."
+    },
+    "unit": {
+      "const": "GPU_HOUR"
+    },
+    "rateCardId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "rateCardVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "rateAmount": {
+      "type": "string",
+      "pattern": "^(?=.*[1-9])(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+      "description": "Strictly positive base-10 decimal string. Never use binary floating point for accounting values."
+    },
+    "currency": {
+      "type": "string",
+      "enum": [
+        "AED",
+        "AUD",
+        "BHD",
+        "BRL",
+        "CAD",
+        "CHF",
+        "CLF",
+        "CLP",
+        "CNY",
+        "CZK",
+        "DKK",
+        "EUR",
+        "GBP",
+        "HKD",
+        "INR",
+        "IQD",
+        "ISK",
+        "JOD",
+        "JPY",
+        "KRW",
+        "KWD",
+        "LYD",
+        "MXN",
+        "MYR",
+        "NOK",
+        "NZD",
+        "OMR",
+        "PHP",
+        "PLN",
+        "SAR",
+        "SEK",
+        "SGD",
+        "THB",
+        "TND",
+        "TWD",
+        "USD",
+        "VND",
+        "XAF",
+        "XOF",
+        "XPF",
+        "ZAR"
+      ],
+      "description": "ISO 4217 currency code in the explicit Compute Economics v1 supported subset. Other ISO codes require a reviewed metadata snapshot update."
+    },
+    "amount": {
+      "type": "string",
+      "pattern": "^(?=.*[1-9])(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
+      "description": "Strictly positive decimal magnitude, exactly representable as a whole number of minor units for the stated currencyMinorUnit (0-4). Rates retain independent arbitrary precision."
+    },
+    "calculationVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "calculationInputDigest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$",
+      "description": "SHA-256 digest over canonical usage interval content, priced segment, rate-card identity/version, calculation version, currency, currency minor unit and currency metadata snapshot version."
+    },
+    "roundingMode": {
+      "const": "CURRENCY_MINOR_UNIT_HALF_UP"
+    },
+    "calculationStatus": {
+      "const": "FINAL",
+      "description": "Only complete, fully covered postings are persisted as WorkloadCostEntry records. Incomplete calculations return an outcome without posting a cost entry."
+    },
+    "reversesEntryId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "recordedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sourceCoverage": {
+      "const": 1
+    },
+    "currencyMinorUnit": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4,
+      "description": "Must exactly match the minor-unit value in currencyMetadataVersion; mismatches are rejected."
+    },
+    "currencyMetadataVersion": {
+      "const": "six-list-one-2026-09-17-subset-v1",
+      "description": "Pinned application currency metadata snapshot. Persist this exact version for reproducible cost calculations."
+    },
+    "replacesEntryId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "For a replacement CHARGE, references the earlier charge being superseded; required by correction workflow but optional for an original charge."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "entryType": {
+            "const": "REVERSAL"
+          }
+        },
+        "required": [
+          "entryType"
+        ]
+      },
+      "then": {
+        "required": [
+          "reversesEntryId"
+        ],
+        "not": {
+          "required": [
+            "replacesEntryId"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "entryType": {
+            "const": "CHARGE"
+          }
+        },
+        "required": [
+          "entryType"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "reversesEntryId"
+          ]
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {
+          "properties": {
+            "currency": {
+              "const": "AED"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "AUD"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "BHD"
+            },
+            "currencyMinorUnit": {
+              "const": 3
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "BRL"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "CAD"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "CHF"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "CLF"
+            },
+            "currencyMinorUnit": {
+              "const": 4
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "CLP"
+            },
+            "currencyMinorUnit": {
+              "const": 0
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "CNY"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "CZK"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "DKK"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "EUR"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "GBP"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "HKD"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "INR"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "IQD"
+            },
+            "currencyMinorUnit": {
+              "const": 3
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "ISK"
+            },
+            "currencyMinorUnit": {
+              "const": 0
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "JOD"
+            },
+            "currencyMinorUnit": {
+              "const": 3
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "JPY"
+            },
+            "currencyMinorUnit": {
+              "const": 0
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "KRW"
+            },
+            "currencyMinorUnit": {
+              "const": 0
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "KWD"
+            },
+            "currencyMinorUnit": {
+              "const": 3
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "LYD"
+            },
+            "currencyMinorUnit": {
+              "const": 3
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "MXN"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "MYR"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "NOK"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "NZD"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "OMR"
+            },
+            "currencyMinorUnit": {
+              "const": 3
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "PHP"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "PLN"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "SAR"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "SEK"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "SGD"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "THB"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "TND"
+            },
+            "currencyMinorUnit": {
+              "const": 3
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "TWD"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "USD"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "VND"
+            },
+            "currencyMinorUnit": {
+              "const": 0
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "XAF"
+            },
+            "currencyMinorUnit": {
+              "const": 0
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "XOF"
+            },
+            "currencyMinorUnit": {
+              "const": 0
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "XPF"
+            },
+            "currencyMinorUnit": {
+              "const": 0
+            }
+          }
+        },
+        {
+          "properties": {
+            "currency": {
+              "const": "ZAR"
+            },
+            "currencyMinorUnit": {
+              "const": 2
+            }
+          }
+        }
+      ]
+    },
+    {
+      "if": {
+        "properties": {
+          "currencyMinorUnit": {
+            "const": 0
+          }
+        },
+        "required": [
+          "currencyMinorUnit"
+        ]
+      },
+      "then": {
+        "properties": {
+          "amount": {
+            "pattern": "^[1-9][0-9]*$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "currencyMinorUnit": {
+            "const": 1
+          }
+        },
+        "required": [
+          "currencyMinorUnit"
+        ]
+      },
+      "then": {
+        "properties": {
+          "amount": {
+            "pattern": "^(?=.*[1-9])(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,1})?$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "currencyMinorUnit": {
+            "const": 2
+          }
+        },
+        "required": [
+          "currencyMinorUnit"
+        ]
+      },
+      "then": {
+        "properties": {
+          "amount": {
+            "pattern": "^(?=.*[1-9])(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,2})?$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "currencyMinorUnit": {
+            "const": 3
+          }
+        },
+        "required": [
+          "currencyMinorUnit"
+        ]
+      },
+      "then": {
+        "properties": {
+          "amount": {
+            "pattern": "^(?=.*[1-9])(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,3})?$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "currencyMinorUnit": {
+            "const": 4
+          }
+        },
+        "required": [
+          "currencyMinorUnit"
+        ]
+      },
+      "then": {
+        "properties": {
+          "amount": {
+            "pattern": "^(?=.*[1-9])(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,4})?$"
+          }
+        }
+      }
+    }
+  ],
+  "description": "Append-only direct cost posting for one usage interval segment and one effective-dated rate. Reversals are new entries; amounts are unsigned magnitudes and entryType determines accounting direction."
+}

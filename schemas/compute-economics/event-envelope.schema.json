@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/avaargsh/compute-control-panel/main/schemas/compute-economics/event-envelope.schema.json",
+  "title": "Compute Economics Event Envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "eventId",
+    "eventType",
+    "producer",
+    "tenantId",
+    "aggregate",
+    "occurredAt",
+    "emittedAt",
+    "payloadSchemaId",
+    "payload"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "compute.economics.event-envelope.v1"
+    },
+    "eventId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable across retries and redelivery."
+    },
+    "eventType": {
+      "enum": [
+        "USAGE_SAMPLE_RECORDED",
+        "USAGE_INTERVAL_MATERIALIZED",
+        "WORKLOAD_COST_ENTRY_POSTED",
+        "WORKLOAD_COST_ENTRY_REVERSED",
+        "CAPACITY_SNAPSHOT_RECORDED"
+      ]
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "service",
+        "version"
+      ],
+      "properties": {
+        "service": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "tenantId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "aggregate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "id",
+        "version"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "emittedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "payloadSchemaId": {
+      "type": "string",
+      "format": "uri"
+    },
+    "causationId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "correlationId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "payload": {
+      "type": "object"
+    },
+    "retentionClass": {
+      "enum": [
+        "RAW_TELEMETRY",
+        "USAGE_EVIDENCE",
+        "FINANCIAL_LEDGER",
+        "AUDIT_EVENT"
+      ]
+    }
+  },
+  "description": "Tenant-scoped immutable event envelope for at-least-once delivery. Consumers deduplicate eventId and apply aggregate versions contiguously; the envelope does not imply distributed exactly-once effects."
+}

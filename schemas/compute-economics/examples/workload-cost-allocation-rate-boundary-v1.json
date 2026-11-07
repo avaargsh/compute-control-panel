@@ -1,0 +1,110 @@
+{
+  "fixture": "workload-cost-allocation-rate-boundary-v1",
+  "description": "Two allocated GPUs run for three hours. The procurement rate changes halfway through; the interval is split at the effective-time boundary.",
+  "currency": "CNY",
+  "usageInterval": {
+    "schemaVersion": "compute.economics.usage-interval.v1",
+    "usageIntervalId": "usage-int-001",
+    "tenantId": "tenant-demo",
+    "projectId": "project-demo",
+    "workloadId": "workload-demo",
+    "allocationId": "allocation-demo",
+    "allocationGeneration": 1,
+    "providerId": "provider-demo",
+    "poolId": "pool-h100",
+    "profileId": "gpu-h100-80gb",
+    "resourceClass": "GPU",
+    "gpuModel": "H100",
+    "window": {
+      "start": "2026-11-01T09:00:00Z",
+      "end": "2026-11-01T12:00:00Z"
+    },
+    "quantity": {
+      "gpuCount": "2"
+    },
+    "unit": "GPU_DEVICE_COUNT",
+    "meteringPolicyVersion": "metering-v1",
+    "sourceEventIds": [
+      "allocation-boundary-start-001",
+      "allocation-boundary-end-001"
+    ],
+    "quality": "DERIVED",
+    "attributionMethod": "ALLOCATION_BOUNDARY",
+    "sourceCoverage": 1,
+    "observedAt": "2026-11-01T12:00:05Z",
+    "recordedAt": "2026-11-01T12:00:06Z"
+  },
+  "rateCards": [
+    {
+      "schemaVersion": "compute.economics.provider-rate-card.v1",
+      "rateCardId": "rate-h100-v1",
+      "version": 1,
+      "providerId": "provider-demo",
+      "poolId": "pool-h100",
+      "profileId": "gpu-h100-80gb",
+      "rateBasis": "ALLOCATED_GPU_HOUR",
+      "unit": "GPU_HOUR",
+      "rateAmount": "10.00",
+      "currency": "CNY",
+      "effectiveFrom": "2026-01-01T00:00:00Z",
+      "effectiveTo": "2026-11-01T10:30:00Z",
+      "sourceRef": "contract-demo#rate-1",
+      "currencyMinorUnit": 2,
+      "currencyMetadataVersion": "six-list-one-2026-09-17-subset-v1"
+    },
+    {
+      "schemaVersion": "compute.economics.provider-rate-card.v1",
+      "rateCardId": "rate-h100-v2",
+      "version": 2,
+      "providerId": "provider-demo",
+      "poolId": "pool-h100",
+      "profileId": "gpu-h100-80gb",
+      "rateBasis": "ALLOCATED_GPU_HOUR",
+      "unit": "GPU_HOUR",
+      "rateAmount": "12.00",
+      "currency": "CNY",
+      "effectiveFrom": "2026-11-01T10:30:00Z",
+      "effectiveTo": null,
+      "sourceRef": "contract-demo#rate-2",
+      "currencyMinorUnit": 2,
+      "currencyMetadataVersion": "six-list-one-2026-09-17-subset-v1"
+    }
+  ],
+  "expected": {
+    "segments": [
+      {
+        "start": "2026-11-01T09:00:00Z",
+        "end": "2026-11-01T10:30:00Z",
+        "gpuCount": "2",
+        "durationHours": "1.5",
+        "pricedQuantityGpuHours": "3.0",
+        "rateAmountPerGpuHour": "10.00",
+        "amount": "30.00",
+        "rateCardId": "rate-h100-v1",
+        "rateCardVersion": 1,
+        "currencyMinorUnit": 2,
+        "currencyMetadataVersion": "six-list-one-2026-09-17-subset-v1",
+        "calculationInputDigest": "sha256:da3127529e53452faa4f62a7db17e7f9e5f5602c9beb342d3cc4479e30363b88"
+      },
+      {
+        "start": "2026-11-01T10:30:00Z",
+        "end": "2026-11-01T12:00:00Z",
+        "gpuCount": "2",
+        "durationHours": "1.5",
+        "pricedQuantityGpuHours": "3.0",
+        "rateAmountPerGpuHour": "12.00",
+        "amount": "36.00",
+        "rateCardId": "rate-h100-v2",
+        "rateCardVersion": 2,
+        "currencyMinorUnit": 2,
+        "currencyMetadataVersion": "six-list-one-2026-09-17-subset-v1",
+        "calculationInputDigest": "sha256:d33c805db6165cd0a8e78fff390486b44b5e1d3b7d0157889a0e0b722eb70cb0"
+      }
+    ],
+    "totalAllocatedGpuHours": "6.0",
+    "totalDirectWorkloadCost": "66.00",
+    "currency": "CNY",
+    "calculationStatus": "FINAL",
+    "currencyMetadataVersion": "six-list-one-2026-09-17-subset-v1"
+  }
+}
