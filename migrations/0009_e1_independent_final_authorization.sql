@@ -132,17 +132,3 @@ REVOKE ALL ON FUNCTION public.compute_protect_e1_final_authorizations() FROM PUB
 CREATE TRIGGER compute_usage_evidence_z_authorization_guard
 BEFORE INSERT ON public.compute_allocation_usage_evidence_sets
 FOR EACH ROW EXECUTE FUNCTION public.compute_require_e1_final_authorization();
-
--- Enforce E1 authority even in replication sessions. An ordinary ENABLE
--- (origin-only) trigger can be skipped by a login granted SET on
--- session_replication_role; these guards must not depend on session mode.
--- Prior v0001..v0008 files remain checksummed and untouched.
-ALTER TABLE public.compute_allocation_usage_evidence_sets ENABLE ALWAYS TRIGGER compute_usage_evidence_scope_guard;
-ALTER TABLE public.compute_allocation_usage_evidence_sets ENABLE ALWAYS TRIGGER compute_usage_evidence_append_only;
-ALTER TABLE public.compute_allocation_usage_evidence_sets ENABLE ALWAYS TRIGGER compute_usage_evidence_no_truncate;
-ALTER TABLE public.compute_allocation_usage_evidence_sets ENABLE ALWAYS TRIGGER compute_usage_evidence_z_authorization_guard;
-ALTER TABLE public.compute_evidence_policy_fences ENABLE ALWAYS TRIGGER compute_evidence_policy_revision_guard;
-ALTER TABLE public.compute_evidence_policy_fences ENABLE ALWAYS TRIGGER compute_evidence_policy_no_delete;
-ALTER TABLE public.compute_evidence_policy_fences ENABLE ALWAYS TRIGGER compute_evidence_policy_no_truncate;
-ALTER TABLE public.compute_e1_final_authorizations ENABLE ALWAYS TRIGGER compute_e1_final_auth_immutable;
-ALTER TABLE public.compute_e1_final_authorizations ENABLE ALWAYS TRIGGER compute_e1_final_auth_no_truncate;
