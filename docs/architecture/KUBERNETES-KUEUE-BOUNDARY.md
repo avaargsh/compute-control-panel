@@ -27,7 +27,7 @@ The Kueue Workload must never be called or persisted as the platform's ComputeWo
 Use one path:
 
 ~~~text
-Agent Control Panel
+Agent Runtime (direct Run capacity) OR SandboxProvider (sandbox claim capacity)
   -> Compute CP API: Create ComputeWorkload
        -> durable ComputeWorkload + ComputeOperation
             -> Compute Kubernetes adapter creates one suspended Job
