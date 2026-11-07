@@ -174,6 +174,9 @@ func markUsageEvidenceProviderOperationSucceeded(t *testing.T, db *sql.DB, a Wor
 	if err != nil {
 		t.Fatalf("mark Provider operation successful: %v", err)
 	}
+	// Test-only independent issuer signs off one exact source-derived row.
+	// Production evidence issuers must authenticate observations externally.
+	seedTestE1FinalAuthorization(t, db, a, 1)
 }
 
 func TestPersistUsageEvidenceSetRequiresSuccessfulProviderOperation(t *testing.T) {

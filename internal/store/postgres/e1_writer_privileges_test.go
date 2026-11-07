@@ -47,6 +47,12 @@ func testEvidenceWriterDB(t *testing.T, admin *sql.DB) *sql.DB {
 			t.Fatal(err)
 		}
 	}
+	// A SECURITY DEFINER trigger reads the issuer ledger. The E1 writer
+	// must not inherit global SELECT from the ordinary evidence/read fixture.
+	if _, err := admin.ExecContext(ctx, fmt.Sprintf(
+		"REVOKE SELECT ON public.compute_e1_final_authorizations FROM %s", role)); err != nil {
+		t.Fatalf("remove issuer ledger visibility from writer fixture: %v", err)
+	}
 	parsed, err := url.Parse(os.Getenv("DATABASE_URL"))
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		t.Fatalf("PostgreSQL integration DSN must be an URL: %v", err)
@@ -175,5 +181,177 @@ func TestE1WriterRoleRejectsSuperuserSessionSetRoleToWriter(t *testing.T) {
 	}
 	if err := verifyEvidenceWriterPrivileges(ctx, tx); !errors.Is(err, ErrEvidencePolicyUntrusted) {
 		t.Fatalf("superuser login using SET LOCAL ROLE writer was accepted: %v", err)
+	}
+}
+
+func TestE1WriterRejectsInheritedIssuerGrantWithoutSetRole(t *testing.T) {
+	admin := openIntegrationDB(t)
+	writer := testEvidenceWriterDB(t, admin)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	var login string
+	if err := writer.QueryRowContext(ctx, "SELECT current_user").Scan(&login); err != nil {
+		t.Fatal(err)
+	}
+	issuerRole := "e1_inherited_issuer_" + randomSuffix(t)
+	if _, err := admin.ExecContext(ctx, fmt.Sprintf("CREATE ROLE %s NOLOGIN", issuerRole)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = admin.ExecContext(context.Background(), fmt.Sprintf("REVOKE %s FROM %s", issuerRole, login))
+		_, _ = admin.ExecContext(context.Background(), fmt.Sprintf("DROP OWNED BY %s", issuerRole))
+		_, _ = admin.ExecContext(context.Background(), fmt.Sprintf("DROP ROLE %s", issuerRole))
+	})
+	if _, err := admin.ExecContext(ctx, fmt.Sprintf(
+		"GRANT INSERT ON public.compute_e1_final_authorizations TO %s", issuerRole)); err != nil {
+		t.Fatal(err)
+	}
+	// PG16 supports membership without SET ROLE. Effective inherited DML
+	// is still forbidden to the E1 runtime writer.
+	if _, err := admin.ExecContext(ctx, fmt.Sprintf(
+		"GRANT %s TO %s WITH INHERIT TRUE, SET FALSE", issuerRole, login)); err != nil {
+		t.Fatal(err)
+	}
+	var inheritedInsert, maySetRole bool
+	if err := writer.QueryRowContext(ctx, `
+		SELECT has_table_privilege(current_user,
+			'public.compute_e1_final_authorizations', 'INSERT'),
+			pg_has_role(current_user, $1, 'SET')
+	`, issuerRole).Scan(&inheritedInsert, &maySetRole); err != nil {
+		t.Fatal(err)
+	}
+	if !inheritedInsert || maySetRole {
+		t.Fatalf("expected inherited issuer INSERT without SET ROLE: INSERT=%t SET=%t",
+			inheritedInsert, maySetRole)
+	}
+	if err := verifyEvidenceWriterPrivileges(ctx, writer); !errors.Is(err, ErrEvidencePolicyUntrusted) {
+		t.Fatalf("E1 writer accepted inherited issuer privilege: %v", err)
+	}
+}
+
+func TestE1WriterRejectsDirectOrColumnIssuerReadGrants(t *testing.T) {
+	admin := openIntegrationDB(t)
+	writer := testEvidenceWriterDB(t, admin)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	var login string
+	if err := writer.QueryRowContext(ctx, "SELECT current_user").Scan(&login); err != nil {
+		t.Fatal(err)
+	}
+	var readable bool
+	if err := writer.QueryRowContext(ctx, `
+		SELECT has_column_privilege(current_user,
+			'public.compute_e1_final_authorizations', 'expected_final', 'SELECT')
+	`).Scan(&readable); err != nil {
+		t.Fatal(err)
+	}
+	if readable {
+		t.Fatal("E1 test writer has direct cross-tenant issuer authorization visibility")
+	}
+	if err := verifyEvidenceWriterPrivileges(ctx, writer); err != nil {
+		t.Fatalf("isolated E1 writer unexpectedly rejected: %v", err)
+	}
+	for _, tc := range []struct {
+		name, privilege string
+	}{
+		{"table-level issuer SELECT", "SELECT"},
+		{"column-level issuer expected_final SELECT", "SELECT(expected_final)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			statement := fmt.Sprintf(
+				"GRANT %s ON public.compute_e1_final_authorizations TO %s",
+				tc.privilege, login)
+			if _, err := admin.ExecContext(ctx, statement); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if _, err := admin.ExecContext(context.Background(), fmt.Sprintf(
+					"REVOKE %s ON public.compute_e1_final_authorizations FROM %s",
+					tc.privilege, login)); err != nil {
+					t.Errorf("restore issuer ACL: %v", err)
+				}
+			})
+			if err := verifyEvidenceWriterPrivileges(ctx, writer); !errors.Is(err, ErrEvidencePolicyUntrusted) {
+				t.Fatalf("E1 writer accepted issuer readable grant %s: %v", tc.privilege, err)
+			}
+		})
+	}
+}
+
+func TestE1WriterRejectsSessionReplicationRoleSetPrivilege(t *testing.T) {
+	admin := openIntegrationDB(t)
+	writer := testEvidenceWriterDB(t, admin)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	var login, replicationRole string
+	if err := writer.QueryRowContext(ctx,
+		"SELECT current_user, current_setting('session_replication_role')").Scan(
+		&login, &replicationRole); err != nil {
+		t.Fatal(err)
+	}
+	if replicationRole != "origin" {
+		t.Fatalf("test writer did not start with ordinary triggers: %s", replicationRole)
+	}
+	if err := verifyEvidenceWriterPrivileges(ctx, writer); err != nil {
+		t.Fatalf("ordinary restricted writer rejected: %v", err)
+	}
+	// A GRANT on this superuser-only GUC does not change the current value.
+	// A credentialed direct SQL writer could subsequently set 'replica'
+	// and bypass ordinary FINAL INSERT triggers. The role must be rejected
+	// before accepting it for any E1 evidence-writing connection.
+	if _, err := admin.ExecContext(ctx, fmt.Sprintf(
+		"GRANT SET ON PARAMETER session_replication_role TO %s", login)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := admin.ExecContext(context.Background(), fmt.Sprintf(
+			"REVOKE SET ON PARAMETER session_replication_role FROM %s", login)); err != nil {
+			t.Errorf("restore E1 writer replication parameter privileges: %v", err)
+		}
+	})
+	var canDisableTriggers bool
+	if err := writer.QueryRowContext(ctx,
+		"SELECT has_parameter_privilege(current_user, 'session_replication_role', 'SET')").
+		Scan(&canDisableTriggers); err != nil {
+		t.Fatal(err)
+	}
+	if !canDisableTriggers {
+		t.Fatal("fixture failed to grant trigger-bypass parameter privilege")
+	}
+	if err := verifyEvidenceWriterPrivileges(ctx, writer); !errors.Is(err, ErrEvidencePolicyUntrusted) {
+		t.Fatalf("E1 writer accepted trigger-bypass SET privilege: %v", err)
+	}
+}
+
+func TestE1WriterRejectsSessionReplicationRoleAlterSystemPrivilege(t *testing.T) {
+	admin := openIntegrationDB(t)
+	writer := testEvidenceWriterDB(t, admin)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	var login string
+	if err := writer.QueryRowContext(ctx, "SELECT current_user").Scan(&login); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.ExecContext(ctx, fmt.Sprintf(
+		"GRANT ALTER SYSTEM ON PARAMETER session_replication_role TO %s", login)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := admin.ExecContext(context.Background(), fmt.Sprintf(
+			"REVOKE ALTER SYSTEM ON PARAMETER session_replication_role FROM %s", login)); err != nil {
+			t.Errorf("restore E1 writer ALTER SYSTEM privilege: %v", err)
+		}
+	})
+	var canChangeServerDefault bool
+	if err := writer.QueryRowContext(ctx,
+		"SELECT has_parameter_privilege(current_user, 'session_replication_role', 'ALTER SYSTEM')").
+		Scan(&canChangeServerDefault); err != nil {
+		t.Fatal(err)
+	}
+	if !canChangeServerDefault {
+		t.Fatal("fixture failed to grant dangerous ALTER SYSTEM privilege")
+	}
+	if err := verifyEvidenceWriterPrivileges(ctx, writer); !errors.Is(err, ErrEvidencePolicyUntrusted) {
+		t.Fatalf("E1 writer accepted instance-wide trigger-bypass config privilege: %v", err)
 	}
 }

@@ -40,9 +40,17 @@ func verifyEvidenceWriterPrivileges(ctx context.Context, q evidenceWriterQueryRo
 		   )
 		   OR has_schema_privilege(current_user, 'public', 'CREATE')
 		   -- Ordinary (origin) trigger mode is part of the E1 write contract.
-		   -- PG16 permits a separately granted SET on this parameter.
+		   -- PG16 permits a separately granted SET on this parameter. Merely
+		   -- inspecting the current value is insufficient: a credentialed E1
+		   -- writer could switch to replica before a direct SQL FINAL INSERT.
+		   -- Refuse both effective SET and ALTER SYSTEM grants (including roles
+		   -- inherited from other principals), even while origin is active.
 		   OR current_setting('session_replication_role') <> 'origin'
+		   OR pg_catalog.has_parameter_privilege(current_user, 'session_replication_role', 'SET')
+		   OR pg_catalog.has_parameter_privilege(current_user, 'session_replication_role', 'ALTER SYSTEM')
 		   OR EXISTS (
+		     -- v0009 promotes E1 authority/integrity triggers to ALWAYS; reverting
+		     -- any one to origin-only permits replication-mode direct SQL bypass.
 		     -- Applied migration checksums are not proof that required
 		     -- triggers are still enabled or still target their handlers.
 		     -- Check the actual catalog on the very same write transaction.
@@ -71,7 +79,7 @@ func verifyEvidenceWriterPrivileges(ctx context.Context, q evidenceWriterQueryRo
 		     LEFT JOIN pg_catalog.pg_proc p ON p.oid=t.tgfoid
 		     LEFT JOIN pg_catalog.pg_language l ON l.oid=p.prolang
 		     WHERE t.oid IS NULL
-		        OR t.tgenabled NOT IN ('O', 'A')
+		        OR t.tgenabled <> 'A'
 		        OR t.tgfoid<>required.handler_oid
 		        OR t.tgtype<>required.event_bits
 		        OR t.tgqual IS NOT NULL
@@ -111,6 +119,7 @@ func verifyEvidenceWriterPrivileges(ctx context.Context, q evidenceWriterQueryRo
 		       ('public.compute_operations'::regclass, 'updated_at'::name, false),
 		       ('public.compute_workloads'::regclass, 'updated_at'::name, false),
 		       ('public.compute_allocations'::regclass, 'updated_at'::name, false),
+		       ('public.compute_e1_final_authorizations'::regclass, 'approved_at'::name, false),
 		       ('public.compute_allocation_usage_evidence_sets'::regclass, 'recorded_at'::name, true)
 		     ) AS protected(relation_oid, lock_column, allow_insert)
 		     WHERE has_table_privilege(current_user, protected.relation_oid, 'DELETE')
@@ -132,6 +141,17 @@ func verifyEvidenceWriterPrivileges(ctx context.Context, q evidenceWriterQueryRo
 		            )
 		        )
 		   )
+		   -- The SECURITY DEFINER issuer check needs ledger SELECT, but the
+		   -- E1 writer never does. Reject table grants and column grants,
+		   -- including inherited permissions from other roles.
+		   OR EXISTS (
+		     SELECT 1 FROM pg_catalog.pg_attribute a
+		     WHERE a.attrelid='public.compute_e1_final_authorizations'::regclass
+		       AND a.attnum>0 AND NOT a.attisdropped
+		       AND has_column_privilege(
+		         current_user, a.attrelid, a.attname, 'SELECT')
+		   )
+		   OR has_column_privilege(current_user, 'public.compute_e1_final_authorizations', 'approved_at', 'UPDATE')
 		   OR has_table_privilege(current_user, 'public.compute_evidence_policy_fences', 'INSERT')
 		   OR has_table_privilege(current_user, 'public.compute_evidence_policy_fences', 'DELETE')
 		   OR has_table_privilege(current_user, 'public.compute_evidence_policy_fences', 'TRUNCATE')
@@ -156,5 +176,5 @@ func verifyEvidenceWriterPrivileges(ctx context.Context, q evidenceWriterQueryRo
 	if privileged || !hasRead || !hasLockColumn || !canInsertEvidence {
 		return fmt.Errorf("%w: E1 writer requires a separate narrowly scoped database role", ErrEvidencePolicyUntrusted)
 	}
-	return nil
+	return verifyE1FinalAuthorizationCatalog(ctx, q)
 }

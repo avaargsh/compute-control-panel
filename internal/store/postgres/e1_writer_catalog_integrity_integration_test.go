@@ -35,7 +35,7 @@ func TestE1WriterRejectsDisabledIntegrityTriggers(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.trigger, func(t *testing.T) {
 			disable := fmt.Sprintf("ALTER TABLE %s DISABLE TRIGGER %s", tc.relation, tc.trigger)
-			enable := fmt.Sprintf("ALTER TABLE %s ENABLE TRIGGER %s", tc.relation, tc.trigger)
+			enable := fmt.Sprintf("ALTER TABLE %s ENABLE ALWAYS TRIGGER %s", tc.relation, tc.trigger)
 			if _, err := admin.ExecContext(ctx, disable); err != nil {
 				t.Fatalf("disable test-only trigger: %v", err)
 			}
@@ -101,5 +101,28 @@ func TestE1WriterRejectsReplicaSessionMode(t *testing.T) {
 	}
 	if err := verifyEvidenceWriterPrivileges(ctx, tx); !errors.Is(err, ErrEvidencePolicyUntrusted) {
 		t.Fatalf("E1 attestation accepted replica session that can skip integrity triggers: %v", err)
+	}
+}
+
+func TestE1WriterRejectsOriginOnlyIntegrityTriggerDowngrade(t *testing.T) {
+	admin := openIntegrationDB(t)
+	writer := testEvidenceWriterDB(t, admin)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	if err := verifyEvidenceWriterPrivileges(ctx, writer); err != nil {
+		t.Fatalf("baseline ALWAYS integrity triggers rejected: %v", err)
+	}
+	const downgrade = "ALTER TABLE public.compute_allocation_usage_evidence_sets ENABLE TRIGGER compute_usage_evidence_scope_guard"
+	const restore = "ALTER TABLE public.compute_allocation_usage_evidence_sets ENABLE ALWAYS TRIGGER compute_usage_evidence_scope_guard"
+	if _, err := admin.ExecContext(ctx, downgrade); err != nil {
+		t.Fatalf("downgrade trigger to origin only: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := admin.ExecContext(context.Background(), restore); err != nil {
+			t.Errorf("restore ALWAYS evidence scope guard: %v", err)
+		}
+	})
+	if err := verifyEvidenceWriterPrivileges(ctx, writer); !errors.Is(err, ErrEvidencePolicyUntrusted) {
+		t.Fatalf("E1 writer accepted origin-only integrity trigger: %v", err)
 	}
 }
