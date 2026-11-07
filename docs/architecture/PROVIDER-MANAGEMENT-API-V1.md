@@ -116,66 +116,35 @@ prove DRA ResourceClaim absence, close Provider cost liability or finalize
 the Provider as RETIRED. `READY`, `RETIRED`, `DELETE` and raw
 reconciliation mutation are intentionally absent from this API.
 
-## PostgreSQL minimum-writer-role blocker — verified RED
+## PostgreSQL audit writer boundary
 
-A disposable PostgreSQL 16 role probe on 2026-11-07 validated the
-unresolved audit writer problem, independently of the HTTP handler:
+Historical migration v0005 required the request writer to INSERT audit rows itself. With only Provider SELECT/INSERT/UPDATE, registration failed with SQLSTATE 42501. Granting direct audit INSERT made a structurally valid but false DRAINING/version-2 event possible. The old PostgreSQL 16 [RED run #42338996338](https://github.com/avaargsh/compute-control-panel/actions/runs/42338996338) and the retained rollback-only candidate test document that original gap.
 
-- When granted `USAGE(public)` and `SELECT/INSERT/UPDATE` on
-  `compute_providers` but **no audit INSERT**, Provider registration
-  fails inside `compute_provider_lifecycle_audit_append()` with
-  SQLSTATE **42501** (audit table permission denied).
-- Granting that role direct `INSERT` on
-  `compute_provider_lifecycle_audit` makes registration possible,
-  but also lets it forge an audit-only DRAINING/version-2 row while
-  the actual Provider remains REGISTERED. The row-level mutation
-  protection does not cover INSERT, so this grant is **not acceptable**.
+Forward migration `0013_provider_audit_writer_boundary.sql` replaces audit insertion with a `SECURITY DEFINER` function owned by a separately provisioned audit-only role. It uses `public.compute_provider_lifecycle_audit`, fixed `search_path = pg_catalog, pg_temp`, revokes PUBLIC EXECUTE and accepts only an AFTER ROW INSERT/UPDATE from the exact permanent Provider table. That source check also rejects a fake trigger attached before EXECUTE revocation. Provider and audit integrity triggers run in ALWAYS mode.
 
-The role was disposable and all probes were rolled back. The behavioral
-RED evidence is [GitHub Actions #42338996338](https://github.com/avaargsh/compute-control-panel/actions/runs/42338996338)
-at test-only commit `1e6668a52ac5c7cd02a723b3d841a4793732572b`.
-The deliberately failing probe was removed from the final PR; this is
-an **unresolved deployment security gate**, not a patched vulnerability.
+The repository's registration/read/Drain queries explicitly target `public.compute_providers`. TEMP or caller-selected schema names cannot redirect those operations or divert audit insertion. Other repository and identity APIs still require their own deployment review; this is not a claim of global search-path hardening.
 
-### Candidate least-privilege audit function — test-only GREEN
+### Provisioning before migration
 
-`TestProviderAuditHardenedFunctionCandidateRestrictedWriter` uses a
-rollback-only PostgreSQL 16 transaction to replace the audit trigger
-function *for that transaction*, grant audit INSERT only to a dedicated
-NOLOGIN function owner, and grant Provider SELECT/INSERT/UPDATE only to
-a separate NOLOGIN writer. The candidate function is
-`SECURITY DEFINER`, schema-qualifies the audit table, and pins
-`search_path = pg_catalog, pg_temp`; PUBLIC EXECUTE is revoked.
+Roles are cluster-wide, while migration locks and ledgers are per database. The migration deliberately does not create or silently reuse an unrestricted role. A trusted administrator must independently reserve this dedicated role before applying migrations:
 
-This disposable-role test confirms Provider registration and CAS-like
-Drain (REGISTERED/v1 to DRAINING/v2), two authoritative audit rows, and
-SQLSTATE 42501 for direct audit forgery, TRUNCATE and disabling the
-Provider audit trigger. A `pg_temp` table shadowing the audit name
-does not intercept writes. [Go/PG16 CI #42339904778](https://github.com/avaargsh/compute-control-panel/actions/runs/42339904778)
-passed on the actual PR merge tree `f3489bb4586ba5faa2cadee2b8fbe5b0f41f3f15`
-(merge of `884014f1ef56f31d40fabd9f7a1cabb3efd6eb50`
-into `main` `d38ff508c74be389f9eb1fdc0dc296d51802d8da`).
+```sql
+CREATE ROLE ccp_provider_audit_owner
+    NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE
+    NOREPLICATION NOBYPASSRLS;
+```
 
-**This is only a tested migration candidate**, not an applied,
-checksummed, deployed or independently audited Provider database
-hardening change. The experiment bootstraps roles as a superuser
-then runs DML with `SET LOCAL ROLE`; a real separate database login,
-production role provisioning, function/catalog provenance, privilege
-revocation, permissions of related tables/functions, and the ordered
-forward-only migration remain pending. No readiness or production
-manage ingress follows from this CI.
+Reserve it for this CCP database and its approved migrator. Do not share it with arbitrary applications or grant runtime writers membership. Migration 0013 rejects unsafe role attributes, unrelated ownership/privileges and untrusted role reachability. It also rejects old table-level or column-level audit INSERT workarounds; independently review and revoke those grants before migration rather than expect automatic grant cleanup.
 
-Minimum viable remediation is a forward-only migration containing a
-catalog-attested, schema-qualified, locked-down owner-executed audit
-insertion path, with a separate unprivileged role test proving both
-successful Provider register/drain and denial of direct audit writes,
-trigger alteration, truncation, and `pg_temp` shadowing. Review
-function owner, EXECUTE privileges and fixed `search_path`. Retain
-the checksum-pinned `0005` migration unchanged. Draft economics
-PR #41 has merged `0007`–`0012`; coordinate a contiguous
-migration sequence rather than allocating `0007` again in this
-Draft PR. No production Manage listener is authorized until this
-gate is green.
+A non-superuser migrator must own the database objects and have schema-grant/ownership-transfer authority. A trusted administrator can grant that migrator membership in the audit-owner role with `INHERIT FALSE, SET TRUE`. Runtime writers must never receive that membership. Inside the migration transaction, schema CREATE is temporarily granted to the audit owner solely for PostgreSQL ownership transfer, then revoked before commit. The final role has schema USAGE and audit INSERT, and owns only the audit function. The migration runner still applies checksummed versions once; v0001 through v0012 remain unchanged.
+
+### Repository-level verification and remaining deployment gates
+
+PostgreSQL 16 tests use separate, real LOGIN credentials for Provider writes, not administrator sessions with SET ROLE. They verify registration/read/replay/conflict, Drain and concurrent CAS, exactly two permanent audit rows and `actor_db_role` equal to the actual writer `session_user`. Structurally valid audit forgery, audit mutation/truncation, trigger/function changes, owner-role switching and replication-mode changes are denied. TEMP Provider/audit tables remain separate from authoritative records; a preattached foreign trigger cannot forge a permanent audit event.
+
+Separate tests inspect the applied function/role/catalog, reject unsafe provisioning in rolled-back transactions, and apply all migrations twice to a fresh database owned by a real NOSUPERUSER/NOCREATEROLE migration LOGIN. The CI role bootstrap is only for its disposable database. None of these fixtures provisions production credentials or certifies cross-database role reuse.
+
+Production enrollment still requires independent deployment grant/catalog inspection, issuer and writer credential provisioning, verified caller identity, audit correlation with that caller and operational restore/revocation checks. The database actor is a service LOGIN, not proof of the human or SPIFFE caller. No production Manage listener follows from repository tests; #32 remains open for these controls and real Provider lifecycle/release evidence.
 
 ## Further gates (not claimed)
 
@@ -194,6 +163,6 @@ gate is green.
    and client identities. `#41` economic evidence and finance posting
    remain separate gated areas.
 
-Current PR scope is just the unmounted Provider registry management transport,
-its deterministic HTTP tests and this documentation; no new migrations,
-runtime workers or external provider side effects.
+The implementation includes the unmounted Provider management transport, its
+HTTP/PostgreSQL tests and the forward-only audit boundary migration. No runtime
+worker or external Provider side effect is enabled by these additions.
