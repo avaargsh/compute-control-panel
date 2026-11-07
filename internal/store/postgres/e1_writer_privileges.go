@@ -40,8 +40,14 @@ func verifyEvidenceWriterPrivileges(ctx context.Context, q evidenceWriterQueryRo
 		   )
 		   OR has_schema_privilege(current_user, 'public', 'CREATE')
 		   -- Ordinary (origin) trigger mode is part of the E1 write contract.
-		   -- PG16 permits a separately granted SET on this parameter.
+		   -- PG16 permits a separately granted SET on this parameter. Merely
+		   -- inspecting the current value is insufficient: a credentialed E1
+		   -- writer could switch to replica before a direct SQL FINAL INSERT.
+		   -- Refuse both effective SET and ALTER SYSTEM grants (including roles
+		   -- inherited from other principals), even while origin is active.
 		   OR current_setting('session_replication_role') <> 'origin'
+		   OR pg_catalog.has_parameter_privilege(current_user, 'session_replication_role', 'SET')
+		   OR pg_catalog.has_parameter_privilege(current_user, 'session_replication_role', 'ALTER SYSTEM')
 		   OR EXISTS (
 		     -- Applied migration checksums are not proof that required
 		     -- triggers are still enabled or still target their handlers.
