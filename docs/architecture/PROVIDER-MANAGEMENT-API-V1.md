@@ -51,6 +51,36 @@ are no-store. The `provider_id` is a global bootstrap registry key and
 or Project Workload grants**. The injected administrator authorizer must
 check the operation independently and **before any repository call**.
 
+### Explicit administrator policy — staged, not production-wired
+
+`NewExactProviderManagementAuthorizer` accepts only independently supplied,
+explicit `ProviderManagementGrant` entries with **exact**
+`Subject` (canonical SPIFFE URI), `TenantID`, `Service`,
+`ProviderID` and one action: `register`, `read`, or `drain`.
+No wildcard, inferred role, Project grant, caller-supplied action or
+`Service=compute-admin` shortcut is accepted. Duplicate, missing and
+invalid grants fail closed when constructing the authorizer.
+
+The existing `NewSPIFFEWorkloadAuthenticator` is reused to verify TLS
+client-certificate chains against the configured trust domain and resolve
+the currently active principal from the service identity directory.
+The privileged policy then compares the **resolved** principal, not a
+caller header. The repository handler remains unmounted by the default
+service entry point.
+
+The exact-grant policy is an **in-process bootstrap allowlist**, not an
+authorization database, dynamic policy engine, installed management
+configuration or production readiness claim. Updating/revoking a static
+grant requires trusted configuration replacement and handler rotation;
+revoking the underlying SPIFFE identity in the authoritative directory
+is enforced on subsequent authentication. Real deployment provisioning,
+secret/config trust, revocation latency, policy auditing, least-privilege
+database roles and independently verified TLS admission remain
+separate gates. Unit tests cover exact grant matching and a real
+`httptest` TLS client-certificate handshake with an in-memory identity
+resolver; they do **not** prove the deployed PostgreSQL identity directory
+is on that end-to-end TLS path.
+
 ### Registration request
 
 ```json
