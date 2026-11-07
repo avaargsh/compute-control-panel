@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.compute-control-panel.dev/v1/compute-workload-v1.schema.json",
+  "title": "Compute Workload resource v1",
+  "type": "object",
+  "required": [
+    "workload_id",
+    "project_id",
+    "desired_generation",
+    "version",
+    "desired_state",
+    "observed_phase",
+    "latest_allocation_id"
+  ],
+  "properties": {
+    "workload_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "project_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "owner_ref": {
+      "$ref": "./owner-ref-v1.schema.json"
+    },
+    "compute_profile_ref": {
+      "type": "object",
+      "required": [
+        "id",
+        "revision"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "desired_generation": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "desired_state": {
+      "enum": [
+        "ACTIVE",
+        "DELETE_REQUESTED"
+      ]
+    },
+    "observed_phase": {
+      "enum": [
+        "REQUESTED",
+        "ACCEPTED",
+        "PROVISIONING",
+        "ALLOCATED",
+        "RELEASING",
+        "RELEASED",
+        "REJECTED",
+        "FAILED_CONFIRMED"
+      ]
+    },
+    "latest_allocation_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.compute-control-panel.dev/v1/compute-allocation-v1.schema.json",
+  "title": "Compute Allocation resource v1",
+  "type": "object",
+  "required": [
+    "allocation_id",
+    "workload_id",
+    "provider_id",
+    "pool_id",
+    "desired_generation",
+    "phase",
+    "version"
+  ],
+  "properties": {
+    "allocation_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workload_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provider_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "pool_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "desired_generation": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "phase": {
+      "enum": [
+        "PENDING",
+        "BOUND",
+        "RELEASING",
+        "RELEASED",
+        "REJECTED",
+        "FAILED_CONFIRMED"
+      ]
+    },
+    "provider_resource_refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "resource_kind",
+          "provider_resource_id"
+        ],
+        "properties": {
+          "resource_kind": {
+            "type": "string",
+            "minLength": 1
+          },
+          "provider_resource_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "namespace": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "provider_resource_digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "observed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    }
+  },
+  "additionalProperties": false
+}

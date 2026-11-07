@@ -13,13 +13,11 @@ It does not calculate commercial revenue, billable usage, active GPU time, share
 ## 2. Inputs and versioned contracts
 
 - Usage interval: [usage-interval.schema.json](../../../schemas/compute-economics/usage-interval.schema.json)
-- Allocation Usage Evidence: [allocation-usage-evidence-v1.md](ALLOCATION-USAGE-EVIDENCE-V1.md)
 - Provider procurement rate: [provider-rate-card.schema.json](../../../schemas/compute-economics/provider-rate-card.schema.json)
-- Currency metadata snapshot: [currency-metadata-registry-v1.json](../../../internal/economics/currency-metadata-registry-v1.json)
 - Cost posting: [workload-cost-entry.schema.json](../../../schemas/compute-economics/workload-cost-entry.schema.json)
 - Golden fixture: [workload-cost-allocation-rate-boundary-v1.json](../../../schemas/compute-economics/examples/workload-cost-allocation-rate-boundary-v1.json)
 
-For v1, the costable usage interval must be derived from the complete Provider/Kueue/device evidence gate in [Allocation Usage Evidence v1](ALLOCATION-USAGE-EVIDENCE-V1.md) and exactly attributed to one tenant, project, Workload, Allocation, Provider, Pool and GPU Profile. Ambiguous or missing identity is not costable input. GPU quantity is a positive whole-device count; fractional GPU/MIG pricing requires a separate profile-scoped contract. The accepted Allocation interval must be supported by the P0 projection/evidence contract (including applicable Provider resource, Kueue admission and DRA/device evidence); a Provider acknowledgement alone is insufficient. V1 supports full GPU device counts only. Fractional shares and MIG/device partitions require a separate profile-scoped unit contract.
+For v1, the costable usage interval must be exactly attributed to one tenant, project, Workload, Allocation, Provider, Pool and GPU Profile. Ambiguous or missing identity is not costable input. GPU quantity is a positive whole-device count; fractional GPU/MIG pricing requires a separate profile-scoped contract. The accepted Allocation interval must be supported by the P0 projection/evidence contract (including applicable Provider resource, Kueue admission and DRA/device evidence); a Provider acknowledgement alone is insufficient. V1 supports full GPU device counts only. Fractional shares and MIG/device partitions require a separate profile-scoped unit contract.
 
 ## 3. Calculation
 
@@ -42,7 +40,7 @@ The rate basis must be ALLOCATED_GPU_HOUR and must match the usage quantity. A d
 
 ## 4. Rate selection and coverage
 
-For every instant in the costable interval, exactly one matching ProviderRateCard must exist for Provider + Pool/Profile dimensions, currency, currency precision and currency metadata snapshot. Every rate carries `currencyMetadataVersion`; v1 accepts only `six-list-one-2026-09-17-subset-v1` and the explicit currency subset in the pinned registry file. Unknown codes, unknown snapshot versions and a `currencyMinorUnit` different from the registry value are rejected before arithmetic. Different currency metadata versions inside one interval fail closed. V1 rates are fixed ALLOCATED_GPU_HOUR prices; tiered/minimum-commitment pricing is deferred.
+For every instant in the costable interval, exactly one matching ProviderRateCard must exist for Provider + Pool/Profile dimensions, currency and currency precision. V1 rates are fixed ALLOCATED_GPU_HOUR prices; tiered/minimum-commitment pricing is deferred.
 
 - A rate gap means the calculation is INCOMPLETE.
 - Overlapping matching rates mean the calculation is ambiguous and must fail closed.
@@ -56,11 +54,30 @@ A final cost entry requires complete time and identity coverage. Incomplete tele
 
 - Parse decimal strings into exact decimal arithmetic; do not use IEEE-754 binary floating point for quantities, rates or currency.
 - Compute duration from timestamp instants, not local wall-clock arithmetic. Store all calculation boundaries as offset-aware timestamps; UTC is preferred for persisted examples.
-- Resolve the currency's minor-unit scale from the exact `currencyMetadataVersion` snapshot carried by each ProviderRateCard. The initial snapshot is an explicit supported subset of SIX Group ISO 4217 List One published 2026-09-17; unsupported currencies fail closed until an additive, reviewed snapshot is added. ProviderRateCard and WorkloadCostEntry both persist currencyMetadataVersion and currencyMinorUnit; code/precision mismatches and metadata-version changes inside one usage interval fail closed. Round each segment amount to that scale using HALF_UP. Sum the rounded segment amounts for the Workload total so the total reconciles exactly to its constituent postings. A fully covered segment that rounds to zero at the currency scale is retained in the calculation result with its input digest and `SKIPPED_ZERO_MINOR_UNITS` status, but receives no `CostEntryID` and creates no WorkloadCostEntry. Only positive minor-unit amounts are marked `POSTABLE`; the ledger schema continues to reject zero-valued entries.
+- Resolve the currency's minor-unit scale from a versioned ISO 4217 currency registry at the boundary. V1 pins the explicit allowlist subset `six-list-one-2026-09-17-subset-v1` from SIX Group's List One; the snapshot file records supported currency/minor-unit pairs and does not claim full ISO 4217 coverage. ProviderRateCard and WorkloadCostEntry both persist `currencyMetadataVersion` and `currencyMinorUnit`; a currency precision change inside one usage interval fails closed. Round each segment amount to that scale using HALF_UP. Sum the rounded segment amounts for the Workload total so the total reconciles exactly to its constituent postings. A fully covered segment that rounds to zero at the currency scale is retained in the calculation result with its input digest and `SKIPPED_ZERO_MINOR_UNITS` status, but receives no `CostEntryID` and creates no WorkloadCostEntry. Only positive minor-unit amounts are marked `POSTABLE`; the ledger schema continues to reject zero-valued entries.
 - Persist `pricedQuantity` (GPU-hours) to a fixed maximum of **18 fractional decimal places**, rounded HALF_UP; trim trailing zeroes but retain at least one fractional digit. This is the canonical serialized quantity precision for v1.
 - Compute currency cost from the exact unrounded rational quantity (whole GPU count × exact nanoseconds / nanoseconds per hour) multiplied by the exact decimal rate. **Never calculate cost from the rounded 18-place quantity.** Round each segment amount only at the currency minor-unit boundary.
-- The calculation input digest binds the exact source interval boundaries, source event IDs, Allocation/Provider/Profile identity, rate-card ID/version/source reference, unit rate, currency, currency precision and currencyMetadataVersion. The exact source remains reproducible even when the serialized quantity is rounded.
+- The calculation input digest binds the exact source interval boundaries, source event IDs, Allocation/Provider/Profile identity, rate-card ID/version/source reference, unit rate, **currency code**, currency metadata snapshot version and currency precision. Every WorkloadCostEntry persists the same currency metadata version and minor-unit scale as the ProviderRateCard that priced its segment. The exact source remains reproducible even when the serialized quantity is rounded.
 - Preserve the calculation version and source facts so a result can be reproduced.
+
+### 5.1 Canonical calculation input digest v1
+
+The calculationInputDigest is SHA-256 of a single typed JSON preimage for each priced segment. It is not a hash of floating-point arithmetic, language-specific object representation or the rounded displayed GPU-hour quantity. The executable contract oracle is calculation_input_digest in scripts/test_compute_economics_contracts.py.
+
+- The top-level object has exactly five members: schemaVersion = "compute.economics.calculation-input.v1", calculationVersion = "cost-v1", usage, segment and rate.
+- The usage object contains exactly: usageIntervalId, tenantId, projectId, workloadId, allocationId, allocationGeneration, providerId, poolId, profileId, gpuCount, unit, resourceClass, gpuModel, meteringPolicyVersion, quality, attributionMethod, sourceCoverage, sourceEventIds, windowStart and windowEnd. Optional allocationGeneration is JSON null when absent, never omitted. sourceCoverage is the JSON string "1"; only fully covered OBSERVED or DERIVED evidence is costable.
+- The segment object contains exactly start and end (the exact priced subinterval boundaries).
+- The rate object contains exactly: rateCardId, version, providerId, poolId, profileId, rateBasis, unit, rateAmount, currency, currencyMinorUnit, currencyMetadataVersion, sourceRef, effectiveFrom and effectiveTo. Missing optional poolId and effectiveTo are represented by JSON null, not omitted. Version and currencyMinorUnit are JSON integers.
+- Timestamps normalize to UTC RFC3339 with **exactly nine fractional digits** (YYYY-MM-DDTHH:MM:SS.nnnnnnnnnZ). Offset spelling and locale are not identity. Positive numeric strings (gpuCount and rateAmount) use positional base-10 notation with no exponent, redundant trailing fractional zeros or decimal point. Exact nanosecond boundaries are included even if the displayed quantity has at most 18 decimals.
+- sourceEventIds is a lexicographically sorted JSON array of unique source identity strings; duplicates and empty lists are rejected rather than deduplicated. Local collector timestamps do not enter the hash.
+- Serialize the object to UTF-8 JSON with lexicographically sorted object keys, comma/colon separators, no insignificant whitespace, ensure_ascii=False and allow_nan=False. Hash these exact bytes and prefix the lowercase 64-digit SHA-256 hex with "sha256:". Do not add salts or platform-dependent formatting.
+
+**Golden SHA-256 digests** in increasing priced segment time for the rate-boundary fixture:
+
+1. sha256:da3127529e53452faa4f62a7db17e7f9e5f5602c9beb342d3cc4479e30363b88 (09:00-10:30, CNY rate v1).
+2. sha256:d33c805db6165cd0a8e78fff390486b44b5e1d3b7d0157889a0e0b722eb70cb0 (10:30-12:00, CNY rate v2).
+
+The executable golden tests compare both exact hashes, and verify source event ordering and equivalent rateAmount decimal spelling yield the same digest. A change to source identity, exact window, currency metadata or rate fact changes it. This contract does not enable financial posting.
 
 ## 6. Idempotency, correction and replay
 
@@ -70,9 +87,11 @@ A cost posting is identified by a stable calculation identity derived from:
 - exact priced segment window;
 - ProviderRateCard ID + version;
 - calculation version;
-- currency, currency metadata snapshot version and unit.
+- currency and unit.
 
 Replaying identical inputs must return the same posting identity and must not create a second charge. If any source fact or rate is corrected, append an explicit reversal of the superseded posting and a replacement posting linked to it. Never mutate or delete historical financial evidence.
+
+The original CHARGE is immutable. A REVERSAL records the original charge's costEntryId as reversesEntryId; a replacement CHARGE records the original charge's costEntryId as replacesEntryId and carries a newly computed calculationInputDigest. Both links are separate: reversesEntryId is forbidden on CHARGE, and replacesEntryId is forbidden on REVERSAL. The schema validates positive unsigned magnitudes, and the entryType controls the ledger sign. The [correction fixture](../../../schemas/compute-economics/examples/workload-cost-correction-v1.json) validates the original CHARGE, its reversal, and the linked replacement with new rate evidence. A ledger must enforce existence/uniqueness and append-only references independently; JSON Schema alone cannot prove referenced entries exist.
 
 ## 7. Allocation boundary and inactive GPUs
 
@@ -94,7 +113,7 @@ Expected result:
 ## 9. Acceptance checks
 
 1. Split exactly at rate-effective boundaries and price every segment once.
-2. Reject rate gaps, overlaps, currency mismatch, currency-precision mismatch, unsupported currency codes/snapshot versions and unsupported rate basis.
+2. Reject rate gaps, overlaps, currency mismatch, currency-precision mismatch and unsupported rate basis.
 3. Reject non-positive interval duration, non-positive GPU quantity and fractional GPU device counts.
 4. Repeated source events or calculation attempts do not double-post.
 5. A correction creates a traceable reversal/replacement chain.

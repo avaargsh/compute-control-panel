@@ -2,9 +2,10 @@ name: Compute Economics Contract Validation
 
 on:
   push:
-    branches: [main, "docs/compute-economics-domain-v0.1"]
+    branches: [main, "docs/compute-economics-domain-v0.1", "fix/economics-currency-registry-contract-20261104"]
     paths:
       - "schemas/compute-economics/**"
+      - "internal/economics/currency-metadata-registry-v1.json"
       - "docs/architecture/COMPUTE-ECONOMICS-DOMAIN.md"
       - "docs/architecture/compute-economics/**"
       - "scripts/test_compute_economics_contracts.py"
@@ -13,6 +14,7 @@ on:
   pull_request:
     paths:
       - "schemas/compute-economics/**"
+      - "internal/economics/currency-metadata-registry-v1.json"
       - "docs/architecture/COMPUTE-ECONOMICS-DOMAIN.md"
       - "docs/architecture/compute-economics/**"
       - "scripts/test_compute_economics_contracts.py"

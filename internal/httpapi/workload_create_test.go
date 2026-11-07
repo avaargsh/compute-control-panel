@@ -1,0 +1,561 @@
+package httpapi
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/avaargsh/compute-control-panel/internal/operation"
+	"github.com/avaargsh/compute-control-panel/internal/store/postgres"
+)
+
+type testPrincipalAuthenticator struct {
+	principal WorkloadPrincipal
+	err       error
+}
+
+func (a testPrincipalAuthenticator) Authenticate(context.Context, *http.Request) (WorkloadPrincipal, error) {
+	return a.principal, a.err
+}
+
+type testWorkloadAuthorizer struct {
+	err         error
+	calls       int
+	lastRequest WorkloadCreateRequest
+	lastDigest  string
+}
+
+func (a *testWorkloadAuthorizer) AuthorizeCreate(_ context.Context, _ WorkloadPrincipal, request WorkloadCreateRequest, digest string) error {
+	a.calls++
+	a.lastRequest = request
+	a.lastDigest = digest
+	return a.err
+}
+
+type testProviderSelector struct {
+	selection   WorkloadProviderSelection
+	err         error
+	calls       int
+	lastRequest WorkloadCreateRequest
+}
+
+func (s *testProviderSelector) SelectProvider(_ context.Context, _ WorkloadPrincipal, request WorkloadCreateRequest) (WorkloadProviderSelection, error) {
+	s.calls++
+	s.lastRequest = request
+	return s.selection, s.err
+}
+
+type testAcceptanceRepository struct {
+	result       postgres.WorkloadAcceptance
+	lookupFound  bool
+	lookupErr    error
+	lookupParams postgres.AcceptanceLookup
+	lookupCalls  int
+	created      bool
+	err          error
+	params       postgres.AcceptWorkloadParams
+	calls        int
+}
+
+func (r *testAcceptanceRepository) GetAcceptanceByIdempotency(_ context.Context, lookup postgres.AcceptanceLookup) (postgres.WorkloadAcceptance, bool, error) {
+	r.lookupCalls++
+	r.lookupParams = lookup
+	return r.result, r.lookupFound, r.lookupErr
+}
+
+func (r *testAcceptanceRepository) AcceptWorkload(_ context.Context, params postgres.AcceptWorkloadParams) (postgres.WorkloadAcceptance, bool, error) {
+	r.calls++
+	r.params = params
+	return r.result, r.created, r.err
+}
+
+type sequentialWorkloadIDs struct{ next int }
+
+func (g *sequentialWorkloadIDs) NewID(prefix string) (string, error) {
+	g.next++
+	return prefix + "-" + string(rune('a'+g.next-1)), nil
+}
+
+func newAcceptanceTestHandler(t *testing.T, auth testPrincipalAuthenticator, authorizer *testWorkloadAuthorizer, selector *testProviderSelector, repo *testAcceptanceRepository) http.Handler {
+	t.Helper()
+	handler, err := NewWorkloadCreateHandler(WorkloadCreateDependencies{
+		Authenticator:    auth,
+		Authorizer:       authorizer,
+		ProviderSelector: selector,
+		Repository:       repo,
+		IDs:              &sequentialWorkloadIDs{},
+	})
+	if err != nil {
+		t.Fatalf("NewWorkloadCreateHandler: %v", err)
+	}
+	return handler
+}
+
+func validCreateBody() string {
+	return `{
+		"api_version": "compute.platform/v1",
+		"project_id": "project-001",
+		"owner_ref": {
+			"service": "agent-runtime",
+			"resource_type": "run",
+			"resource_id": "run-001"
+		},
+		"compute_profile_ref": {"id": "gpu-inference", "revision": "3"},
+		"constraints": {"pool_selector": {"capability": "gpu.h100"}, "max_duration_seconds": 7200}
+	}`
+}
+
+func newAcceptanceFixture() (WorkloadPrincipal, *testWorkloadAuthorizer, *testProviderSelector, *testAcceptanceRepository) {
+	principal := WorkloadPrincipal{
+		TenantID:   "tenant-001",
+		Subject:    "spiffe://cluster.local/ns/agent-runtime/sa/runtime",
+		Service:    "agent-runtime",
+		ProjectIDs: []string{"project-001"},
+	}
+	authorizer := &testWorkloadAuthorizer{}
+	selector := &testProviderSelector{selection: WorkloadProviderSelection{ProviderID: "provider-server-selected", PoolID: "pool-server-selected"}}
+	repo := &testAcceptanceRepository{
+		created: true,
+		result: postgres.WorkloadAcceptance{
+			Workload: postgres.Workload{
+				WorkloadID:        "workload-stable",
+				TenantID:          "tenant-001",
+				ProjectID:         "project-001",
+				DesiredGeneration: 1,
+				DesiredState:      "ACTIVE",
+				ObservedPhase:     "ACCEPTED",
+			},
+			Allocation: postgres.Allocation{
+				AllocationID: "allocation-stable",
+				Phase:        "PENDING",
+			},
+			Operation: operation.Operation{ID: "operation-stable"},
+		},
+	}
+	return principal, authorizer, selector, repo
+}
+
+func performCreate(handler http.Handler, body string, idempotencyKey string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/workloads", strings.NewReader(body))
+	if idempotencyKey != "" {
+		req.Header.Set("Idempotency-Key", idempotencyKey)
+	}
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	return recorder
+}
+
+func TestCreateWorkloadRequiresAuthenticatedPrincipal(t *testing.T) {
+	principal, authorizer, selector, repo := newAcceptanceFixture()
+	handler := newAcceptanceTestHandler(t, testPrincipalAuthenticator{principal: principal, err: errors.New("invalid service token")}, authorizer, selector, repo)
+
+	recorder := performCreate(handler, validCreateBody(), "request-001")
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if repo.calls != 0 || selector.calls != 0 || authorizer.calls != 0 {
+		t.Fatalf("unauthenticated request reached downstream dependencies: repo=%d selector=%d authorizer=%d", repo.calls, selector.calls, authorizer.calls)
+	}
+}
+
+func TestCreateWorkloadRejectsProjectOutsidePrincipalScope(t *testing.T) {
+	principal, authorizer, selector, repo := newAcceptanceFixture()
+	principal.ProjectIDs = nil
+	handler := newAcceptanceTestHandler(t, testPrincipalAuthenticator{principal: principal}, authorizer, selector, repo)
+
+	recorder := performCreate(handler, validCreateBody(), "request-001")
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if selector.calls != 0 || repo.calls != 0 {
+		t.Fatalf("unauthorized project reached selector/repository: selector=%d repo=%d", selector.calls, repo.calls)
+	}
+}
+
+func TestCreateWorkloadRejectsOwnerServiceMismatch(t *testing.T) {
+	principal, authorizer, selector, repo := newAcceptanceFixture()
+	principal.Service = "sandbox-provider"
+	handler := newAcceptanceTestHandler(t, testPrincipalAuthenticator{principal: principal}, authorizer, selector, repo)
+
+	recorder := performCreate(handler, validCreateBody(), "request-001")
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if selector.calls != 0 || repo.calls != 0 {
+		t.Fatalf("owner mismatch reached selector/repository: selector=%d repo=%d", selector.calls, repo.calls)
+	}
+}
+
+func TestCreateWorkloadRejectsDuplicateJSONKeys(t *testing.T) {
+	principal, authorizer, selector, repo := newAcceptanceFixture()
+	body := strings.Replace(validCreateBody(), `"project_id": "project-001",`, `"project_id": "project-001", "project_id": "project-001",`, 1)
+	handler := newAcceptanceTestHandler(t, testPrincipalAuthenticator{principal: principal}, authorizer, selector, repo)
+
+	recorder := performCreate(handler, body, "request-001")
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if repo.calls != 0 {
+		t.Fatalf("duplicate-key body reached repository: %d calls", repo.calls)
+	}
+}
+
+func TestCreateWorkloadRejectsClientSelectedProvider(t *testing.T) {
+	principal, authorizer, selector, repo := newAcceptanceFixture()
+	body := strings.Replace(validCreateBody(), `"compute_profile_ref":`, `"provider_id": "client-choice", "compute_profile_ref":`, 1)
+	handler := newAcceptanceTestHandler(t, testPrincipalAuthenticator{principal: principal}, authorizer, selector, repo)
+
+	recorder := performCreate(handler, body, "request-001")
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if selector.calls != 0 || repo.calls != 0 {
+		t.Fatalf("client provider selection was not rejected before downstream calls")
+	}
+}
+
+func TestCreateWorkloadPersistsAuthorizedAtomicAcceptance(t *testing.T) {
+	principal, authorizer, selector, repo := newAcceptanceFixture()
+	handler := newAcceptanceTestHandler(t, testPrincipalAuthenticator{principal: principal}, authorizer, selector, repo)
+
+	recorder := performCreate(handler, validCreateBody(), "request-001")
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if authorizer.calls != 1 || selector.calls != 1 || repo.calls != 1 {
+		t.Fatalf("dependency calls = authorizer:%d selector:%d repo:%d", authorizer.calls, selector.calls, repo.calls)
+	}
+	p := repo.params
+	if p.Workload.TenantID != principal.TenantID || p.Workload.ProjectID != "project-001" {
+		t.Fatalf("tenant/project were not taken from authorized principal/request scope: %+v", p.Workload)
+	}
+	if p.ProviderID != "provider-server-selected" || p.PoolID != "pool-server-selected" {
+		t.Fatalf("provider selection must be server-side: provider=%q pool=%q", p.ProviderID, p.PoolID)
+	}
+	if p.Operation.AllocationID != p.AllocationID || p.Operation.ProviderID != p.ProviderID || p.Operation.Status != operation.Pending {
+		t.Fatalf("CREATE operation is not bound to initial Allocation: %+v", p.Operation)
+	}
+	if p.Operation.Generation != 1 || p.Operation.Kind != operation.Create || p.Workload.IdempotencyKey != "request-001" {
+		t.Fatalf("invalid initial operation/Workload intent: workload=%+v operation=%+v", p.Workload, p.Operation)
+	}
+	if !json.Valid(p.Workload.NormalizedRequest) || p.Workload.RequestDigest == "" {
+		t.Fatalf("normalized request or digest missing")
+	}
+	var response map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response["observed_phase"] != "ACCEPTED" || response["allocation_phase"] != "PENDING" ||
+		response["allocation_id"] != "allocation-stable" || response["compute_operation_id"] != "operation-stable" {
+		t.Fatalf("response lost acceptance/Allocation state distinction: %+v", response)
+	}
+}
+
+func TestValidWorkloadDigestRequiresCanonicalLowercaseHex(t *testing.T) {
+	if !validWorkloadDigest("sha256:" + strings.Repeat("a", 64)) {
+		t.Fatal("lowercase SHA-256 digest should be accepted")
+	}
+	if validWorkloadDigest("sha256:" + strings.Repeat("A", 64)) {
+		t.Fatal("uppercase SHA-256 digest must be rejected as non-canonical")
+	}
+}
+func TestDecodeWorkloadCreateExcludesGuardPermitFromPersistedIntent(t *testing.T) {
+	base := validCreateBody()
+	permitA := `"authorization":{"guard_operation_id":"guard-001","permit_ref":"permit-v1","action_hash":"sha256:` + strings.Repeat("a", 64) + `","audience":"compute-control-panel"},`
+	permitB := `"authorization":{"guard_operation_id":"guard-001","permit_ref":"permit-v2","action_hash":"sha256:` + strings.Repeat("b", 64) + `","audience":"compute-control-panel"},`
+	bodyA := strings.Replace(base, `"compute_profile_ref":`, permitA+`"compute_profile_ref":`, 1)
+	bodyB := strings.Replace(base, `"compute_profile_ref":`, permitB+`"compute_profile_ref":`, 1)
+
+	requestA, normalizedA, digestA, err := decodeWorkloadCreate([]byte(bodyA))
+	if err != nil {
+		t.Fatalf("decode Permit A: %v", err)
+	}
+	requestB, normalizedB, digestB, err := decodeWorkloadCreate([]byte(bodyB))
+	if err != nil {
+		t.Fatalf("decode Permit B: %v", err)
+	}
+	if requestA.Authorization == nil || requestB.Authorization == nil {
+		t.Fatal("authorization proof must remain available to the Authorizer")
+	}
+	if digestA != digestB || string(normalizedA) != string(normalizedB) {
+		t.Fatalf("Permit rotation changed persisted Workload intent: %q != %q", digestA, digestB)
+	}
+	if strings.Contains(string(normalizedA), "permit_ref") || strings.Contains(string(normalizedA), "action_hash") {
+		t.Fatalf("transient authorization proof was persisted: %s", normalizedA)
+	}
+}
+
+func TestProviderSelectorDoesNotReceiveGuardPermit(t *testing.T) {
+	principal, authorizer, selector, repo := newAcceptanceFixture()
+	body := strings.Replace(
+		validCreateBody(),
+		`"compute_profile_ref":`,
+		`"authorization":{"guard_operation_id":"guard-001","permit_ref":"secret-permit-ref","action_hash":"sha256:`+strings.Repeat("a", 64)+`","audience":"compute-control-panel"}, "compute_profile_ref":`,
+		1,
+	)
+	handler := newAcceptanceTestHandler(t, testPrincipalAuthenticator{principal: principal}, authorizer, selector, repo)
+
+	recorder := performCreate(handler, body, "request-001")
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if authorizer.lastRequest.Authorization == nil {
+		t.Fatal("Authorizer did not receive delegated authorization proof")
+	}
+	if selector.lastRequest.Authorization != nil {
+		t.Fatal("Provider selector received delegated authorization proof")
+	}
+	if strings.Contains(string(repo.params.Workload.NormalizedRequest), "permit_ref") ||
+		strings.Contains(string(repo.params.Workload.NormalizedRequest), "action_hash") {
+		t.Fatalf("persisted Workload request contains authorization proof: %s", repo.params.Workload.NormalizedRequest)
+	}
+}
+
+func TestCreateWorkloadIdempotentReplaySkipsProviderSelection(t *testing.T) {
+	principal, authorizer, selector, repo := newAcceptanceFixture()
+	repo.lookupFound = true
+	selector.err = errors.New("capacity changed after original acceptance")
+	handler := newAcceptanceTestHandler(t, testPrincipalAuthenticator{principal: principal}, authorizer, selector, repo)
+
+	recorder := performCreate(handler, validCreateBody(), "request-001")
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if repo.lookupCalls != 1 || repo.calls != 0 || selector.calls != 0 {
+		t.Fatalf("replay must use durable acceptance without provider resolution: lookup=%d accept=%d selector=%d", repo.lookupCalls, repo.calls, selector.calls)
+	}
+	if authorizer.calls != 1 {
+		t.Fatalf("authorization must still be rechecked on replay: calls=%d", authorizer.calls)
+	}
+	if repo.lookupParams.TenantID != principal.TenantID ||
+		repo.lookupParams.IdempotencyKey != "request-001" ||
+		repo.lookupParams.ProjectID != "project-001" ||
+		repo.lookupParams.OperationIdempotencyKey == "" ||
+		repo.lookupParams.OperationRequestDigest == "" {
+		t.Fatalf("incomplete durable acceptance lookup: %+v", repo.lookupParams)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response["workload_id"] != "workload-stable" ||
+		response["allocation_id"] != "allocation-stable" ||
+		response["compute_operation_id"] != "operation-stable" {
+		t.Fatalf("idempotent replay did not return original identities: %+v", response)
+	}
+}
+
+func TestCreateWorkloadIdempotencyConflictIsCheckedBeforeProviderSelection(t *testing.T) {
+	principal, authorizer, selector, repo := newAcceptanceFixture()
+	repo.lookupErr = postgres.ErrIdempotencyConflict
+	handler := newAcceptanceTestHandler(t, testPrincipalAuthenticator{principal: principal}, authorizer, selector, repo)
+
+	recorder := performCreate(handler, validCreateBody(), "request-001")
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if selector.calls != 0 || repo.calls != 0 {
+		t.Fatalf("idempotency conflict reached provider selection or acceptance write")
+	}
+}
+
+func TestCreateWorkloadAuthorizesBeforeProviderSelection(t *testing.T) {
+	principal, authorizer, selector, repo := newAcceptanceFixture()
+	authorizer.err = errors.New("Guard Permit rejected")
+	handler := newAcceptanceTestHandler(t, testPrincipalAuthenticator{principal: principal}, authorizer, selector, repo)
+
+	recorder := performCreate(handler, validCreateBody(), "request-001")
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if selector.calls != 0 || repo.calls != 0 {
+		t.Fatalf("unauthorized mutation reached provider selection/repository")
+	}
+}
+
+func TestCreateWorkloadMapsIdempotencyConflict(t *testing.T) {
+	principal, authorizer, selector, repo := newAcceptanceFixture()
+	repo.err = postgres.ErrIdempotencyConflict
+	handler := newAcceptanceTestHandler(t, testPrincipalAuthenticator{principal: principal}, authorizer, selector, repo)
+
+	recorder := performCreate(handler, validCreateBody(), "request-001")
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestCreateWorkloadRequiresIdempotencyKey(t *testing.T) {
+	principal, authorizer, selector, repo := newAcceptanceFixture()
+	handler := newAcceptanceTestHandler(t, testPrincipalAuthenticator{principal: principal}, authorizer, selector, repo)
+
+	recorder := performCreate(handler, validCreateBody(), "")
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if repo.calls != 0 {
+		t.Fatalf("missing idempotency key reached repository")
+	}
+}
+
+func TestCreateWorkloadRejectsProviderResolutionFailure(t *testing.T) {
+	principal, authorizer, selector, repo := newAcceptanceFixture()
+	selector.err = errors.New("no eligible provider")
+	handler := newAcceptanceTestHandler(t, testPrincipalAuthenticator{principal: principal}, authorizer, selector, repo)
+
+	recorder := performCreate(handler, validCreateBody(), "request-001")
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if repo.calls != 0 {
+		t.Fatalf("provider-resolution failure reached repository")
+	}
+}
+
+func TestCreateWorkloadMethodBoundary(t *testing.T) {
+	principal, authorizer, selector, repo := newAcceptanceFixture()
+	handler := newAcceptanceTestHandler(t, testPrincipalAuthenticator{principal: principal}, authorizer, selector, repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workloads", nil)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusMethodNotAllowed || recorder.Header().Get("Allow") != http.MethodPost {
+		t.Fatalf("GET status/Allow = %d/%q, want 405/POST", recorder.Code, recorder.Header().Get("Allow"))
+	}
+}
+
+// This is a consumer-boundary regression: the HTTP create handler must reject
+// requests that cannot satisfy the published Compute Workload v1 JSON Schema
+// before invoking authorization, Provider selection, or the Repository.
+func TestCreateWorkloadRejectsSchemaIncompatibleInputs(t *testing.T) {
+	withResources := func(resources string) string {
+		return strings.Replace(validCreateBody(), `"compute_profile_ref": {"id": "gpu-inference", "revision": "3"}`, `"resources": `+resources, 1)
+	}
+	cases := []struct {
+		name string
+		body string
+	}{
+		{name: "nonnumeric CPU", body: withResources(`{"cpu":"eight","memory":"32Gi"}`)},
+		{name: "negative CPU", body: withResources(`{"cpu":"-2","memory":"32Gi"}`)},
+		{name: "exponent CPU", body: withResources(`{"cpu":"2e3","memory":"32Gi"}`)},
+		{name: "memory over 64 characters", body: withResources(`{"cpu":"8","memory":"` + strings.Repeat("m", 65) + `"}`)},
+		{name: "empty explicitly supplied storage", body: withResources(`{"cpu":"8","memory":"32Gi","storage":""}`)},
+		{name: "owner reference over 256 characters", body: strings.Replace(validCreateBody(), `"resource_id": "run-001"`, `"resource_id": "`+strings.Repeat("r", 257)+`"`, 1)},
+		{name: "project reference over 256 characters", body: strings.Replace(validCreateBody(), `"project_id": "project-001"`, `"project_id": "`+strings.Repeat("p", 257)+`"`, 1)},
+		{name: "profile revision over 128 characters", body: strings.Replace(validCreateBody(), `"revision": "3"`, `"revision": "`+strings.Repeat("v", 129)+`"`, 1)},
+		{name: "explicit zero max duration", body: strings.Replace(validCreateBody(), `"max_duration_seconds": 7200`, `"max_duration_seconds": 0`, 1)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			principal, authorizer, selector, repo := newAcceptanceFixture()
+			handler := newAcceptanceTestHandler(t, testPrincipalAuthenticator{principal: principal}, authorizer, selector, repo)
+			recorder := performCreate(handler, tc.body, "request-schema-test")
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("invalid v1 Workload request returned %d, want 400; response=%s", recorder.Code, recorder.Body.String())
+			}
+			if authorizer.calls != 0 || selector.calls != 0 || repo.lookupCalls != 0 || repo.calls != 0 {
+				t.Fatalf("schema-invalid input crossed trust boundary: authorizer=%d selector=%d lookups=%d writes=%d",
+					authorizer.calls, selector.calls, repo.lookupCalls, repo.calls)
+			}
+		})
+	}
+}
+
+// TestWorkloadCreatePinnedConsumerShapeFixtures executes the same JSON bodies
+// validated by docs/contracts/tests/test_contracts.py through the actual Go
+// HTTP boundary. This uses a fake authorizer and does NOT prove live Guard
+// Permit verification, ACP/Runtime deployment, or mTLS provisioning.
+func TestWorkloadCreatePinnedConsumerShapeFixtures(t *testing.T) {
+	data, err := os.ReadFile("../../docs/contracts/fixtures/workload-create-consumers.v1.json")
+	if err != nil {
+		t.Fatalf("read consumer shape fixture: %v", err)
+	}
+	var suite struct {
+		Cases []struct {
+			Name              string          `json:"name"`
+			ExpectSchemaValid bool            `json:"expect_schema_valid"`
+			Body              json.RawMessage `json:"body"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(data, &suite); err != nil {
+		t.Fatalf("decode consumer shape fixture: %v", err)
+	}
+	if len(suite.Cases) < 12 {
+		t.Fatalf("expected >=12 cross-plane shape cases, got %d", len(suite.Cases))
+	}
+	for _, tc := range suite.Cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			var request WorkloadCreateRequest
+			if err := json.Unmarshal(tc.Body, &request); err != nil {
+				t.Fatalf("fixture must be syntactically decodable JSON: %v", err)
+			}
+			principal, authorizer, selector, repo := newAcceptanceFixture()
+			principal.Service = request.OwnerRef.Service
+			handler := newAcceptanceTestHandler(t, testPrincipalAuthenticator{principal: principal}, authorizer, selector, repo)
+			response := performCreate(handler, string(tc.Body), "consumer-shape-fixture")
+			if tc.ExpectSchemaValid {
+				if response.Code != http.StatusAccepted {
+					t.Fatalf("schema-valid shape got %d, want 202: %s", response.Code, response.Body.String())
+				}
+				if authorizer.calls != 1 || selector.calls != 1 || repo.lookupCalls != 1 || repo.calls != 1 {
+					t.Fatalf("valid body did not pass acceptance once: authorizer=%d selector=%d lookup=%d writes=%d",
+						authorizer.calls, selector.calls, repo.lookupCalls, repo.calls)
+				}
+				return
+			}
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("schema-invalid shape got %d, want 400: %s", response.Code, response.Body.String())
+			}
+			if authorizer.calls != 0 || selector.calls != 0 || repo.lookupCalls != 0 || repo.calls != 0 {
+				t.Fatalf("invalid body crossed trust boundary: authorizer=%d selector=%d lookup=%d writes=%d",
+					authorizer.calls, selector.calls, repo.lookupCalls, repo.calls)
+			}
+		})
+	}
+}
+
+// TestWorkloadCreateRejectsExplicitNullsAtAnyDepth proves the JSON Schema v1
+// rejects null even for optional fields; omission is allowed, null is not.
+// A null body must never reach authorization, idempotency lookup, provider
+// selection or persistence.
+func TestWorkloadCreateRejectsExplicitNullsAtAnyDepth(t *testing.T) {
+	base := validCreateBody()
+	withResources := func(resources string) string {
+		return strings.Replace(base, `"compute_profile_ref": {"id": "gpu-inference", "revision": "3"}`, `"resources": `+resources, 1)
+	}
+	cases := []struct {
+		name string
+		body string
+	}{
+		{name: "authorization omitted versus null", body: strings.Replace(base, `"compute_profile_ref":`, `"authorization": null, "compute_profile_ref":`, 1)},
+		{name: "constraints present as null", body: strings.Replace(base, `"constraints": {"pool_selector": {"capability": "gpu.h100"}, "max_duration_seconds": 7200}`, `"constraints": null`, 1)},
+		{name: "compute_profile_ref null with resources", body: strings.Replace(base, `"compute_profile_ref": {"id": "gpu-inference", "revision": "3"}`, `"compute_profile_ref": null, "resources": {"cpu":"8","memory":"32Gi"}`, 1)},
+		{name: "resources null with profile", body: strings.Replace(base, `"compute_profile_ref":`, `"resources": null, "compute_profile_ref":`, 1)},
+		{name: "storage field null", body: withResources(`{"cpu":"8","memory":"32Gi","storage":null}`)},
+		{name: "accelerators field null", body: withResources(`{"cpu":"8","memory":"32Gi","accelerators":null}`)},
+		{name: "accelerators array null element", body: withResources(`{"cpu":"8","memory":"32Gi","accelerators":[null]}`)},
+		{name: "pool_selector field null", body: strings.Replace(base, `"pool_selector": {"capability": "gpu.h100"}`, `"pool_selector": null`, 1)},
+		{name: "pool_selector value null", body: strings.Replace(base, `"capability": "gpu.h100"`, `"capability": null`, 1)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if !json.Valid([]byte(tc.body)) {
+				t.Fatalf("test fixture must be syntactically valid JSON: %s", tc.body)
+			}
+			principal, authorizer, selector, repo := newAcceptanceFixture()
+			handler := newAcceptanceTestHandler(t, testPrincipalAuthenticator{principal: principal}, authorizer, selector, repo)
+			recorder := performCreate(handler, tc.body, "explicit-null-contract")
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("schema-invalid null returned %d, want 400; response=%s", recorder.Code, recorder.Body.String())
+			}
+			if authorizer.calls != 0 || selector.calls != 0 || repo.lookupCalls != 0 || repo.calls != 0 {
+				t.Fatalf("null passed trust boundary: authorizer=%d selector=%d lookups=%d writes=%d",
+					authorizer.calls, selector.calls, repo.lookupCalls, repo.calls)
+			}
+		})
+	}
+}
