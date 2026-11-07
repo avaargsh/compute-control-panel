@@ -133,6 +133,16 @@ func verifyEvidenceWriterPrivileges(ctx context.Context, q evidenceWriterQueryRo
 		            )
 		        )
 		   )
+		   -- The SECURITY DEFINER issuer check needs ledger SELECT, but the
+		   -- E1 writer never does. Reject table grants and column grants,
+		   -- including inherited permissions from other roles.
+		   OR EXISTS (
+		     SELECT 1 FROM pg_catalog.pg_attribute a
+		     WHERE a.attrelid='public.compute_e1_final_authorizations'::regclass
+		       AND a.attnum>0 AND NOT a.attisdropped
+		       AND has_column_privilege(
+		         current_user, a.attrelid, a.attname, 'SELECT')
+		   )
 		   OR has_column_privilege(current_user, 'public.compute_e1_final_authorizations', 'approved_at', 'UPDATE')
 		   OR has_table_privilege(current_user, 'public.compute_evidence_policy_fences', 'INSERT')
 		   OR has_table_privilege(current_user, 'public.compute_evidence_policy_fences', 'DELETE')
