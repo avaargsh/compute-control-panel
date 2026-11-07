@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 	"time"
@@ -21,10 +22,12 @@ func TestE1DirectFinalInsertRequiresIndependentEvidenceApproval(t *testing.T) {
 		provisionApproval bool
 		revokeApproval    bool
 		wantSQLState      string
+		replicaMode       bool
 	}{
-		{"no administered policy", false, false, false, "E1P01"},
-		{"policy fence exists but no evidence authorization", true, false, false, "E1A01"},
-		{"revoked exact-row authorization", true, true, true, "E1A01"},
+		{"no administered policy", false, false, false, "E1P01", false},
+		{"policy fence exists but no evidence authorization", true, false, false, "E1A01", false},
+		{"revoked exact-row authorization", true, true, true, "E1A01", false},
+		{"replica mode must still reject missing authorization", false, false, false, "E1P01", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			admin := openIntegrationDB(t)
@@ -107,7 +110,20 @@ func TestE1DirectFinalInsertRequiresIndependentEvidenceApproval(t *testing.T) {
 				}
 			}
 			// Deliberately bypass PersistUsageEvidenceSet / Go policy resolver.
-			_, insertErr := writer.ExecContext(ctx, `
+			// The separate replica-mode case proves the native DB trigger still
+			// denies an unauthorized FINAL even when the session skips normal
+			// origin-only triggers. Use a rollback-only admin transaction solely
+			// for this controlled PG16 fault injection; production writers must
+			// NEVER receive permission to set session_replication_role.
+			var insertExecutor interface { ExecContext(context.Context, string, ...any) (sql.Result, error) } = writer
+			if tc.replicaMode {
+				faultTx, txErr := admin.BeginTx(ctx, nil)
+				if txErr != nil { t.Fatal(txErr) }
+				defer faultTx.Rollback()
+				if _, txErr = faultTx.ExecContext(ctx, "SET LOCAL session_replication_role = replica"); txErr != nil { t.Fatal(txErr) }
+				insertExecutor = faultTx
+			}
+			_, insertErr := insertExecutor.ExecContext(ctx, `
 		INSERT INTO public.compute_allocation_usage_evidence_sets (
 			evidence_set_id, schema_version, tenant_id, project_id, workload_id,
 			allocation_id, allocation_generation, provider_id, compute_operation_id,
