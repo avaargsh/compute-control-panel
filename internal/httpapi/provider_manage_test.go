@@ -224,3 +224,20 @@ func TestProviderManageConstructorFailsClosed(t *testing.T) {
 		t.Fatal("nil dependencies must deny registration of Manage routes")
 	}
 }
+
+func TestProviderManageUnsupportedRoutesRemainNoStore(t *testing.T) {
+	h, _, _ := providerManagementFixture(t)
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodDelete, "/api/v1/manage/providers/provider-001"},
+		{http.MethodPost, "/api/v1/manage/providers/provider-001/ready"},
+		{http.MethodGet, "/api/v1/manage/providers"},
+	} {
+		response := providerManagementRequest(h, tc.method, tc.path, "")
+		if response.Code != http.StatusMethodNotAllowed && response.Code != http.StatusNotFound {
+			t.Fatalf("unexpected route %s %s returned %d", tc.method, tc.path, response.Code)
+		}
+		if response.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("%s %s did not disable caching", tc.method, tc.path)
+		}
+	}
+}
