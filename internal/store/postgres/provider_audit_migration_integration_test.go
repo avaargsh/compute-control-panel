@@ -135,6 +135,16 @@ func TestProviderAuditMigrationRejectsUnsafePreprovisioning(t *testing.T) {
 			},
 		},
 		{
+			name: "admin-only audit owner membership",
+			setup: func(suffix string) []string {
+				role := "ccp_audit_admin_only_" + suffix
+				return []string{
+					"CREATE ROLE " + role + " NOLOGIN",
+					"GRANT " + providerAuditOwnerRole + " TO " + role + " WITH INHERIT FALSE, SET FALSE, ADMIN TRUE",
+				}
+			},
+		},
+		{
 			name: "direct table insert grant",
 			setup: func(suffix string) []string {
 				role := "ccp_audit_untrusted_" + suffix
