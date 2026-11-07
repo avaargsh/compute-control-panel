@@ -110,6 +110,7 @@ GET /api/v1/workloads/{workload_id}
 GET /api/v1/workloads/{workload_id}/allocations
 GET /api/v1/compute-operations/{compute_operation_id}
 DELETE /api/v1/workloads/{workload_id}
+Idempotency-Key: compute-delete-<stable-opaque-id>
 ```
 
 DELETE records desired_state=DELETE_REQUESTED and returns 202. It does not report RELEASED because the API or Kubernetes accepted a deletion request. The caller waits for authoritative provider absence and applicable Kueue reservation release.
