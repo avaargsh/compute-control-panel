@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import re
 import unittest
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
@@ -38,23 +40,67 @@ CURRENCY_METADATA_VERSION = CURRENCY_REGISTRY["registryVersion"]
 CURRENCY_MINOR_UNITS = CURRENCY_REGISTRY["supportedCurrencies"]
 
 
-def parse_instant(value: str) -> datetime:
-    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise ValueError("timestamps must contain an explicit UTC offset")
-    return parsed.astimezone(timezone.utc)
+# All cost windows use UTC integer nanoseconds, not datetime's microsecond
+# precision or a decimal context with implicit intermediate rounding.
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+_NS_PER_SECOND = 1_000_000_000
+_NS_PER_GPU_HOUR = 3_600_000_000_000
+_INSTANT = re.compile(
+    r"^(?P<date>\d{4}-\d{2}-\d{2})T(?P<clock>\d{2}:\d{2}:\d{2})"
+    r"(?:\.(?P<fraction>\d{1,9}))?(?P<offset>Z|[+-]\d{2}:\d{2})$"
+)
 
 
-def duration_hours(start: datetime, end: datetime) -> Decimal:
-    delta = end - start
-    if delta <= timedelta(0):
-        raise ValueError("usage interval must have positive duration")
-    total_microseconds = (
-        delta.days * 86_400_000_000
-        + delta.seconds * 1_000_000
-        + delta.microseconds
+def parse_instant(value: str) -> int:
+    """Parse an offset-aware RFC3339 instant as exact Unix nanoseconds."""
+    match = _INSTANT.fullmatch(value)
+    if match is None:
+        raise ValueError("timestamp must have UTC offset and <=9 fractional digits")
+    base = datetime.fromisoformat(
+        match["date"] + "T" + match["clock"] + match["offset"].replace("Z", "+00:00")
     )
-    return Decimal(total_microseconds) / Decimal(3_600_000_000)
+    utc_delta = base.astimezone(timezone.utc) - _EPOCH
+    seconds = utc_delta.days * 86_400 + utc_delta.seconds
+    fractional_ns = int((match["fraction"] or "").ljust(9, "0"))
+    return seconds * _NS_PER_SECOND + fractional_ns
+
+
+def format_instant(instant_ns: int, *, canonical: bool = False) -> str:
+    seconds, nanos = divmod(instant_ns, _NS_PER_SECOND)
+    date = (_EPOCH + timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%S")
+    if canonical:
+        return f"{date}.{nanos:09d}Z"
+    if nanos:
+        return f"{date}.{str(nanos).zfill(9).rstrip('0')}Z"
+    return date + "Z"
+
+
+def duration_hours(start: int, end: int) -> Fraction:
+    if end <= start:
+        raise ValueError("usage interval must have positive duration")
+    return Fraction(end - start, _NS_PER_GPU_HOUR)
+
+
+def round_positive_half_up(value: Fraction) -> int:
+    if value < 0:
+        raise ValueError("negative currency amount")
+    return (2 * value.numerator + value.denominator) // (2 * value.denominator)
+
+
+def format_minor_units(units: int, scale: int) -> str:
+    if scale == 0:
+        return str(units)
+    factor = 10**scale
+    whole, part = divmod(units, factor)
+    return f"{whole}.{part:0{scale}d}"
+
+
+def format_priced_quantity(quantity: Fraction) -> str:
+    # The persisted quantity has at most 18 decimals; currency arithmetic
+    # must use the unrounded Fraction, not this presentation value.
+    scaled = round_positive_half_up(quantity * 10**18)
+    whole, fraction = divmod(scaled, 10**18)
+    return f"{whole}.{str(fraction).zfill(18).rstrip('0') or '0'}"
 
 
 def rate_matches_dimensions(rate: dict[str, Any], usage: dict[str, Any]) -> bool:
@@ -72,14 +118,19 @@ def calculate_direct_cost(
 
     This is a deterministic v1 contract oracle, not a production billing engine.
     """
+    if (usage.get("sourceCoverage") != 1 or isinstance(usage.get("sourceCoverage"), bool)
+            or usage.get("quality") not in ("OBSERVED", "DERIVED")):
+        raise ValueError("incomplete_usage_evidence")
+
     start = parse_instant(usage["window"]["start"])
     end = parse_instant(usage["window"]["end"])
     if end <= start:
         raise ValueError("invalid_usage_window")
 
-    gpu_count = Decimal(usage["quantity"]["gpuCount"])
-    if gpu_count <= 0:
+    gpu_quantity = Decimal(usage["quantity"]["gpuCount"])
+    if gpu_quantity <= 0 or gpu_quantity != gpu_quantity.to_integral_value():
         raise ValueError("invalid_gpu_quantity")
+    gpu_count = int(gpu_quantity)
 
     candidates = [
         rate for rate in rate_cards if rate_matches_dimensions(rate, usage)
@@ -150,18 +201,19 @@ def calculate_direct_cost(
 
         hours = duration_hours(segment_start, segment_end)
         quantity = gpu_count * hours
-        rounding_quantum = Decimal(1).scaleb(-currency_minor_unit)
-        amount = (quantity * Decimal(rate["rateAmount"])).quantize(
-            rounding_quantum, rounding=ROUND_HALF_UP
-        )
+        # Fraction(Decimal) converts base-10 rates exactly. Do not depend on
+        # the default 28-digit Decimal context or quantize intermediates.
+        exact_cost = quantity * Fraction(Decimal(rate["rateAmount"]))
+        units = round_positive_half_up(exact_cost * 10**currency_minor_unit)
+        amount = format_minor_units(units, currency_minor_unit)
         segments.append(
             {
-                "start": segment_start.isoformat().replace("+00:00", "Z"),
-                "end": segment_end.isoformat().replace("+00:00", "Z"),
-                "priced_quantity_gpu_hours": format(quantity, "f"),
+                "start": format_instant(segment_start),
+                "end": format_instant(segment_end),
+                "priced_quantity_gpu_hours": format_priced_quantity(quantity),
                 "rate_card_id": rate["rateCardId"],
                 "rate_card_version": rate["version"],
-                "amount": format(amount, f".{currency_minor_unit}f"),
+                "amount": amount,
                 "currency": currency,
                 "currency_minor_unit": currency_minor_unit,
                 "currency_metadata_version": currency_metadata_version,
