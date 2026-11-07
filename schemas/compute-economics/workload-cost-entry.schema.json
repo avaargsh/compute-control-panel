@@ -168,7 +168,7 @@
     "amount": {
       "type": "string",
       "pattern": "^(?=.*[1-9])(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?$",
-      "description": "Strictly positive base-10 decimal string. Never use binary floating point for accounting values."
+      "description": "Strictly positive decimal magnitude, exactly representable as a whole number of minor units for the stated currencyMinorUnit (0-4). Rates retain independent arbitrary precision."
     },
     "calculationVersion": {
       "type": "string",
@@ -206,6 +206,11 @@
     "currencyMetadataVersion": {
       "const": "six-list-one-2026-09-17-subset-v1",
       "description": "Pinned application currency metadata snapshot. Persist this exact version for reproducible cost calculations."
+    },
+    "replacesEntryId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "For a replacement CHARGE, references the earlier charge being superseded; required by correction workflow but optional for an original charge."
     }
   },
   "allOf": [
@@ -223,7 +228,12 @@
       "then": {
         "required": [
           "reversesEntryId"
-        ]
+        ],
+        "not": {
+          "required": [
+            "replacesEntryId"
+          ]
+        }
       }
     },
     {
@@ -658,6 +668,101 @@
           }
         }
       ]
+    },
+    {
+      "if": {
+        "properties": {
+          "currencyMinorUnit": {
+            "const": 0
+          }
+        },
+        "required": [
+          "currencyMinorUnit"
+        ]
+      },
+      "then": {
+        "properties": {
+          "amount": {
+            "pattern": "^[1-9][0-9]*$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "currencyMinorUnit": {
+            "const": 1
+          }
+        },
+        "required": [
+          "currencyMinorUnit"
+        ]
+      },
+      "then": {
+        "properties": {
+          "amount": {
+            "pattern": "^(?=.*[1-9])(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,1})?$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "currencyMinorUnit": {
+            "const": 2
+          }
+        },
+        "required": [
+          "currencyMinorUnit"
+        ]
+      },
+      "then": {
+        "properties": {
+          "amount": {
+            "pattern": "^(?=.*[1-9])(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,2})?$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "currencyMinorUnit": {
+            "const": 3
+          }
+        },
+        "required": [
+          "currencyMinorUnit"
+        ]
+      },
+      "then": {
+        "properties": {
+          "amount": {
+            "pattern": "^(?=.*[1-9])(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,3})?$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "currencyMinorUnit": {
+            "const": 4
+          }
+        },
+        "required": [
+          "currencyMinorUnit"
+        ]
+      },
+      "then": {
+        "properties": {
+          "amount": {
+            "pattern": "^(?=.*[1-9])(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,4})?$"
+          }
+        }
+      }
     }
   ],
   "description": "Append-only direct cost posting for one usage interval segment and one effective-dated rate. Reversals are new entries; amounts are unsigned magnitudes and entryType determines accounting direction."
