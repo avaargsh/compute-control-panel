@@ -72,7 +72,7 @@ The platform's durable binding between one ComputeWorkload generation and a sele
 
 An Allocation may refer to multiple provider-native objects (for example, a Job plus associated reservations or devices). The primary provider resource is exposed as provider_resource_id; additional objects are represented as typed provider_resource_refs. Every provider-native ID is interpreted in the context of provider_id, resource kind and provider scope.
 
-Allocation means that the resource binding is verified and usable. It does not mean that an Agent Run has started or completed.
+An Allocation exists in PENDING immediately after durable Workload acceptance; this proves only the stable binding intent and selected provider/pool, not resource existence or readiness. Only a BOUND Allocation means that the provider resource binding has been verified and is usable. Neither phase proves that an Agent Run has started or completed.
 
 ### ComputeOperation
 
