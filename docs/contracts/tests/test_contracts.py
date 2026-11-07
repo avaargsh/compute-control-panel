@@ -112,6 +112,19 @@ class ContractSchemasTest(unittest.TestCase):
         with self.assertRaises(Exception):
             validate.validate(payload)
 
+    def test_workload_pool_selector_requires_nonblank_keys_and_values(self) -> None:
+        validate = self.validator("compute-workload-create-v1.schema.json")
+        base = {
+            "api_version": "compute.platform/v1",
+            "project_id": "project-001",
+            "owner_ref": {"service": "agent-runtime", "resource_type": "run", "resource_id": "run-001"},
+            "resources": {"cpu": "8", "memory": "32Gi"},
+        }
+        validate.validate({**base, "constraints": {"pool_selector": {"gpu": "nvidia"}}})
+        for selector in ({"": "gpu"}, {"   ": "gpu"}, {"gpu": ""}, {"gpu": "   "}):
+            with self.subTest(selector=selector), self.assertRaises(ValidationError):
+                validate.validate({**base, "constraints": {"pool_selector": selector}})
+
     def test_acceptance_response_distinguishes_workload_from_allocation_phase(self) -> None:
         self.validator("compute-workload-accepted-v1.schema.json").validate({
             "workload_id": "workload-001",
@@ -209,6 +222,37 @@ class ContractSchemasTest(unittest.TestCase):
         }
         with self.assertRaises(ValidationError):
             validate.validate(invalid_delete_success)
+
+    def test_superseded_operation_requires_clean_identity_and_no_error_codes(self) -> None:
+        validate = self.validator("compute-operation-v1.schema.json")
+        base = {
+            "compute_operation_id": "operation-001",
+            "tenant_id": "tenant-001",
+            "workload_id": "workload-001",
+            "allocation_id": "allocation-001",
+            "provider_id": "provider-001",
+            "operation_kind": "CREATE",
+            "desired_generation": 1,
+            "provider_request_digest": SHA256,
+            "idempotency_key": "compute-operation-key-001",
+            "version": 2,
+            "fence_token": 1,
+            "status": "SUPERSEDED",
+            "reconcile_required": True,
+            "cleanup_required": False,
+        }
+        validate.validate(base)
+        validate.validate({**base, "provider_resource_id": "job-001", "provider_resource_uid": "uid-001"})
+        for bad in (
+            {"error_code": "AMBIGUOUS"},
+            {"manual_review_code": "REVIEW"},
+            {"provider_resource_id": "job-001"},
+            {"provider_resource_uid": "uid-001"},
+            {"reconcile_required": False},
+            {"cleanup_required": True},
+        ):
+            with self.subTest(bad=bad), self.assertRaises(ValidationError):
+                validate.validate({**base, **bad})
 
     def test_resource_observation_is_timestamped_evidence(self) -> None:
         self.validator("compute-resource-observation-v1.schema.json").validate({
@@ -357,6 +401,17 @@ class ContractSchemasTest(unittest.TestCase):
         self.assertTrue(idempotency["required"])
         self.assertIn("202", create["responses"])
         self.assertIn("ServiceMTLS", create["security"][0])
+
+        delete = paths["/api/v1/workloads/{workload_id}"]["delete"]
+        delete_key = next(p for p in delete["parameters"] if p["name"] == "Idempotency-Key")
+        self.assertEqual(delete_key["in"], "header")
+        self.assertTrue(delete_key["required"])
+        self.assertEqual(delete_key["schema"]["minLength"], 1)
+        for operation in (create, delete):
+            self.assertEqual(operation["responses"]["400"]["$ref"], "#/components/responses/BadRequest")
+        self.assertEqual(delete["responses"]["409"]["$ref"], "#/components/responses/Conflict")
+        self.assertIn("shape", document["components"]["responses"]["BadRequest"]["description"].lower())
+        self.assertNotIn("schema", document["components"]["responses"]["UnprocessableEntity"]["description"].lower())
 
         def walk(value: Any) -> None:
             if isinstance(value, dict):
