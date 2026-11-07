@@ -79,7 +79,7 @@ Compute CP computes its own provider_request_digest from the normalized provider
 | Layer | Retry responsibility |
 |---|---|
 | Agent Control Plane | Retry StartRun dispatch with the same run_intent_id and request digest; reconcile only through Runtime's authoritative registry |
-| Agent Runtime | Retry Guard submission with the same action_operation_id; retry Compute API only with the same per-request Idempotency-Key; query status |
+| Agent Runtime | Retry Guard submission with the original caller-generated guard_submission_key (HTTP Idempotency-Key) and unchanged RequestHash; use the server-generated Guard operation_id only for status lookup. Retry Compute API only with the same per-request Idempotency-Key; query status |
 | EngageGuard | Own Action Operation, Permit, executor attempt and action-level UNKNOWN; query downstream Compute status when delegated |
 | Compute CP | Own compute_operation_id, provider dispatch, provider inspection and provider UNKNOWN |
 | Provider adapter | Apply provider-specific idempotency/conditional writes and normalize receipts |
