@@ -87,7 +87,7 @@ Require evidence that the exact whole GPU devices have been assigned to the expe
 
 A non-DRA device path is admissible only through a separately versioned, capability-certified Provider/device adapter contract that returns equivalent immutable assignment evidence. A Pod spec resource request, extended-resource limit, NodeName, node label or GPU telemetry sample alone does not prove device assignment.
 
-The assigned device count must equal the costable GPU count. MIG slices, fractional devices and ambiguous device-to-Pod relationships remain out of v1.
+The assigned device count must equal the costable GPU count. The adapter must also provide an **authoritative, capability-specific device-to-Provider-resource join**: each assigned immutable driver/pool/device identity maps to the exact Provider resource ID and immutable UID established in §3.1, with the mapping's source identity, version/revision, observation timestamp and evidence reference retained. Mere matching Provider/Pool/Profile, admitted GPU count, Pod UID or NodeName is not proof of this ownership join. A missing, stale, ambiguous or conflicting device-to-resource mapping makes the evidence set INCOMPLETE; no FINAL usage or cost posting is allowed. MIG slices, fractional devices and ambiguous device-to-Pod relationships remain out of v1.
 
 ## 4. Cost attribution window
 
@@ -128,8 +128,10 @@ The metering policy must define timestamp trust and maximum observation freshnes
 | Kueue admitted, device allocation absent/ambiguous | Attribution remains INCOMPLETE; no final WorkloadCostEntry |
 | Provider + Kueue + device evidence match; Allocation `BOUND` | Start the derived Workload attribution interval |
 | Allocation `RELEASING` | Continue only to the authoritative attribution/provider-liability end boundary; never infer release from DELETE ACK alone |
-| Provider cost liability ended and Kueue/device ownership released | Close the attribution interval and finalize complete usage evidence |
+| Workload attribution or Provider liability authoritatively ends first, and both sources prove coverage through that earlier boundary | Close and finalize the intersecting Workload attribution interval; an open Provider lease does not prevent that finalization, and later lease liability is accounted for separately |
 | Stale generation, changed UID, conflicting device count or missing source | INCOMPLETE with a reason code; no partial FINAL posting |
+
+For a continuing Provider lease, its end remains **open** for procurement accounting; it is not substituted with the Workload end. Finalize only the closed intersection through `min(providerCostEnd, workloadAttributionEnd)` when both sources provide complete, non-conflicting evidence through that cutoff. A closed Workload attribution interval does not assert Provider teardown or end of the Provider's cost obligation.
 
 The Allocation projection should expose the evidence-set reference and version that justified `BOUND`. Release should retain a separate immutable release evidence set. The platform may remain `RELEASING` while cleanup is ambiguous even when one cost-liability interval has ended; lifecycle completion and cost timing are related but distinct facts.
 
@@ -138,7 +140,7 @@ The Allocation projection should expose the evidence-set reference and version t
 A FINAL UsageInterval may be emitted only when:
 - the evidence set is complete for the deployment's required capability profile;
 - tenant, Workload, Allocation, generation, Provider, Pool and Profile identities match across every source;
-- provider capacity, admitted queue resources and device count reconcile to the same whole-GPU quantity;
+- provider capacity, admitted queue resources and device count reconcile to the same whole-GPU quantity, with an independently evidenced immutable device-to-Provider-resource ID/UID join as required by §3.3;
 - start/end windows are positive, offset-aware and covered by the evidence;
 - event IDs and observation references are unique and immutable;
 - no conflicting newer generation or unresolved operation can recreate/rebind the resource inside the window;
@@ -154,12 +156,12 @@ Possible non-final reason codes include `PROVIDER_BINDING_MISSING`, `PROVIDER_ID
 2. Lost Provider create ACK followed by successful inspect binds one existing resource; no duplicate Provider resource or usage interval is created.
 3. Provider resource exists while Kueue is pending: no Workload-attributed final interval.
 4. Kueue admitted without exact Job/Allocation UID or generation match: fail closed.
-5. DRA claim/device identity absent, stale, duplicated or mismatched in count: fail closed.
+5. DRA claim/device identity absent, stale, duplicated, mismatched in count, or missing/conflicting in its authoritative mapping to the exact Provider resource ID/UID: fail closed.
 6. Two Providers expose the same resource name but different Provider IDs/UIDs: evidence remains isolated.
 7. Duplicate/out-of-order Provider/Kueue/DRA observations do not double-count or move a boundary backwards.
 8. A stale worker/observation from a superseded generation cannot change current Allocation attribution.
 9. Pod activity falls to zero while the Allocation still owns the GPU: allocated time continues to accrue.
-10. Workload attribution ends while Provider lease remains: subsequent capacity cost moves to reserved/unallocated accounting, not the old Workload.
+10. Workload attribution ends while Provider lease remains: the complete Workload intersection may be FINAL through the earlier attribution-end boundary, while the Provider lease end remains open and subsequent capacity cost moves to reserved/unallocated accounting, not the old Workload.
 11. Provider release ACK is lost: cost end is not inferred until authoritative Provider lease/absence evidence is reconciled.
 12. Release evidence is incomplete: no FINAL interval and no partial WorkloadCostEntry.
 13. Recalculation after corrected evidence creates a superseding interval and linked reversal/replacement, preserving original evidence.
