@@ -47,6 +47,12 @@ func testEvidenceWriterDB(t *testing.T, admin *sql.DB) *sql.DB {
 			t.Fatal(err)
 		}
 	}
+	// A SECURITY DEFINER trigger reads the issuer ledger. The E1 writer
+	// must not inherit global SELECT from the ordinary evidence/read fixture.
+	if _, err := admin.ExecContext(ctx, fmt.Sprintf(
+		"REVOKE SELECT ON public.compute_e1_final_authorizations FROM %s", role)); err != nil {
+		t.Fatalf("remove issuer ledger visibility from writer fixture: %v", err)
+	}
 	parsed, err := url.Parse(os.Getenv("DATABASE_URL"))
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		t.Fatalf("PostgreSQL integration DSN must be an URL: %v", err)
@@ -220,5 +226,54 @@ func TestE1WriterRejectsInheritedIssuerGrantWithoutSetRole(t *testing.T) {
 	}
 	if err := verifyEvidenceWriterPrivileges(ctx, writer); !errors.Is(err, ErrEvidencePolicyUntrusted) {
 		t.Fatalf("E1 writer accepted inherited issuer privilege: %v", err)
+	}
+}
+
+func TestE1WriterRejectsDirectOrColumnIssuerReadGrants(t *testing.T) {
+	admin := openIntegrationDB(t)
+	writer := testEvidenceWriterDB(t, admin)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	var login string
+	if err := writer.QueryRowContext(ctx, "SELECT current_user").Scan(&login); err != nil {
+		t.Fatal(err)
+	}
+	var readable bool
+	if err := writer.QueryRowContext(ctx, `
+		SELECT has_column_privilege(current_user,
+			'public.compute_e1_final_authorizations', 'expected_final', 'SELECT')
+	`).Scan(&readable); err != nil {
+		t.Fatal(err)
+	}
+	if readable {
+		t.Fatal("E1 test writer has direct cross-tenant issuer authorization visibility")
+	}
+	if err := verifyEvidenceWriterPrivileges(ctx, writer); err != nil {
+		t.Fatalf("isolated E1 writer unexpectedly rejected: %v", err)
+	}
+	for _, tc := range []struct {
+		name, privilege string
+	}{
+		{"table-level issuer SELECT", "SELECT"},
+		{"column-level issuer expected_final SELECT", "SELECT(expected_final)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			statement := fmt.Sprintf(
+				"GRANT %s ON public.compute_e1_final_authorizations TO %s",
+				tc.privilege, login)
+			if _, err := admin.ExecContext(ctx, statement); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if _, err := admin.ExecContext(context.Background(), fmt.Sprintf(
+					"REVOKE %s ON public.compute_e1_final_authorizations FROM %s",
+					tc.privilege, login)); err != nil {
+					t.Errorf("restore issuer ACL: %v", err)
+				}
+			})
+			if err := verifyEvidenceWriterPrivileges(ctx, writer); !errors.Is(err, ErrEvidencePolicyUntrusted) {
+				t.Fatalf("E1 writer accepted issuer readable grant %s: %v", tc.privilege, err)
+			}
+		})
 	}
 }
