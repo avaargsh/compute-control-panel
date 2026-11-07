@@ -64,14 +64,13 @@ func TestProviderAuditHardenedFunctionCandidateRestrictedWriter(t *testing.T) {
 
 	var securityDefiner bool
 	var functionOwner string
-	var settings []string
-	if err := tx.QueryRowContext(ctx, `SELECT p.prosecdef, pg_get_userbyid(p.proowner), p.proconfig
+	var settings string
+	if err := tx.QueryRowContext(ctx, `SELECT p.prosecdef, pg_get_userbyid(p.proowner), COALESCE(array_to_string(p.proconfig, ';'), '')
 		FROM pg_proc p WHERE p.oid='public.compute_provider_lifecycle_audit_append()'::regprocedure`).
 		Scan(&securityDefiner, &functionOwner, &settings); err != nil {
 		t.Fatal(err)
 	}
-	if !securityDefiner || functionOwner != owner || len(settings) != 1 ||
-		settings[0] != "search_path=pg_catalog, pg_temp" {
+	if !securityDefiner || functionOwner != owner || settings != "search_path=pg_catalog, pg_temp" {
 		t.Fatalf("unsafe candidate function catalog: definer=%t owner=%s config=%v", securityDefiner, functionOwner, settings)
 	}
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf("SET LOCAL ROLE %s", writer)); err != nil {
