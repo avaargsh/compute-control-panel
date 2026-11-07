@@ -91,6 +91,8 @@ A cost posting is identified by a stable calculation identity derived from:
 
 Replaying identical inputs must return the same posting identity and must not create a second charge. If any source fact or rate is corrected, append an explicit reversal of the superseded posting and a replacement posting linked to it. Never mutate or delete historical financial evidence.
 
+The original CHARGE is immutable. A REVERSAL records the original charge's costEntryId as reversesEntryId; a replacement CHARGE records the original charge's costEntryId as replacesEntryId and carries a newly computed calculationInputDigest. Both links are separate: reversesEntryId is forbidden on CHARGE, and replacesEntryId is forbidden on REVERSAL. The schema validates positive unsigned magnitudes, and the entryType controls the ledger sign. The [correction fixture](../../../schemas/compute-economics/examples/workload-cost-correction-v1.json) validates the original CHARGE, its reversal, and the linked replacement with new rate evidence. A ledger must enforce existence/uniqueness and append-only references independently; JSON Schema alone cannot prove referenced entries exist.
+
 ## 7. Allocation boundary and inactive GPUs
 
 The initial direct-cost basis is **allocated capacity time**, not active time. If a Workload holds two GPUs for three hours, it accrues six allocated GPU-hours even when the measured compute activity is low. That idleness is an efficiency signal; it does not erase a Provider procurement cost incurred for the Allocation.
