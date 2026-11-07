@@ -24,7 +24,7 @@ Workload is a desired compute request, not a Pod or a Run.
 Fields include: workload_id, tenant_id, project_id, owner_ref (opaque source service/resource), compute_profile_ref, canonical request digest, desired_generation, desired_state, observed_generation, observed_phase, allocation_id, provider reference, timestamps and version.
 
 - Desired state: ACTIVE or DELETE_REQUESTED.
-- Observed phase is a projection: PENDING, ADMISSION_PENDING, ADMITTED, RUNNING, SUCCEEDED, FAILED, TERMINATING, RELEASED or UNKNOWN.
+- Observed Workload phase is a platform projection: REQUESTED, ACCEPTED, PROVISIONING, ALLOCATED, RELEASING, RELEASED, REJECTED or FAILED_CONFIRMED (see STATE-MACHINES.md). Provider/Kueue statuses and UNKNOWN observations belong to ResourceObservation/ComputeOperation, not the Workload phase enum.
 - An observation never changes desired state.
 - A stale-generation observation may be retained as evidence but cannot overwrite the current projection.
 - Workload references Runtime Run via owner_ref=agent-runtime/run/<run_id>, or a SandboxProvider claim via owner_ref=sandbox-provider/sandbox-claim/<claim_id>; it does not own Run or Sandbox lifecycle state. RunIntent is not a Workload owner reference.
