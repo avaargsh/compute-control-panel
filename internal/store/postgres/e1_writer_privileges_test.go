@@ -322,3 +322,36 @@ func TestE1WriterRejectsSessionReplicationRoleSetPrivilege(t *testing.T) {
 		t.Fatalf("E1 writer accepted trigger-bypass SET privilege: %v", err)
 	}
 }
+
+func TestE1WriterRejectsSessionReplicationRoleAlterSystemPrivilege(t *testing.T) {
+	admin := openIntegrationDB(t)
+	writer := testEvidenceWriterDB(t, admin)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	var login string
+	if err := writer.QueryRowContext(ctx, "SELECT current_user").Scan(&login); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.ExecContext(ctx, fmt.Sprintf(
+		"GRANT ALTER SYSTEM ON PARAMETER session_replication_role TO %s", login)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := admin.ExecContext(context.Background(), fmt.Sprintf(
+			"REVOKE ALTER SYSTEM ON PARAMETER session_replication_role FROM %s", login)); err != nil {
+			t.Errorf("restore E1 writer ALTER SYSTEM privilege: %v", err)
+		}
+	})
+	var canChangeServerDefault bool
+	if err := writer.QueryRowContext(ctx,
+		"SELECT has_parameter_privilege(current_user, 'session_replication_role', 'ALTER SYSTEM')").
+		Scan(&canChangeServerDefault); err != nil {
+		t.Fatal(err)
+	}
+	if !canChangeServerDefault {
+		t.Fatal("fixture failed to grant dangerous ALTER SYSTEM privilege")
+	}
+	if err := verifyEvidenceWriterPrivileges(ctx, writer); !errors.Is(err, ErrEvidencePolicyUntrusted) {
+		t.Fatalf("E1 writer accepted instance-wide trigger-bypass config privilege: %v", err)
+	}
+}
