@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 )
@@ -73,7 +72,7 @@ func TestProviderAuditProbeGrantingAuditInsertMustNotPermitForgery(t *testing.T)
 			(provider_id, cluster_scope, adapter_source, adapter_version, capability_digest)
 		VALUES($1,$2,$3,$4,$5)`,
 		registration.ProviderID, registration.ClusterScope, registration.AdapterSource,
-		registration.AdapterVersion, "sha256:"+strings.Repeat("a",64))
+		registration.AdapterVersion, registration.CapabilityDigest)
 	if err != nil {
 		t.Fatalf("audit-INSERT workaround could not create Provider: %v", err)
 	}
