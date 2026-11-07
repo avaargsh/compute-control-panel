@@ -84,7 +84,7 @@ func (r *Repository) RegisterProvider(ctx context.Context, p ProviderRegistratio
 	if err := p.validate(); err != nil {
 		return ProviderRecord{}, false, err
 	}
-	const insert = `INSERT INTO compute_providers
+	const insert = `INSERT INTO public.compute_providers
 		(provider_id, cluster_scope, adapter_source, adapter_version, capability_digest)
 		VALUES($1,$2,$3,$4,$5)
 		ON CONFLICT (provider_id) DO NOTHING
@@ -115,7 +115,7 @@ func (r *Repository) GetProvider(ctx context.Context, providerID string) (Provid
 		return ProviderRecord{}, ErrProviderInvalid
 	}
 	got, err := scanProvider(r.db.QueryRowContext(ctx,
-		"SELECT "+providerRecordColumns+" FROM compute_providers WHERE provider_id=$1",
+		"SELECT "+providerRecordColumns+" FROM public.compute_providers WHERE provider_id=$1",
 		providerID))
 	if err != nil {
 		return ProviderRecord{}, err
@@ -135,8 +135,8 @@ func (r *Repository) BeginProviderDrain(
 		reasonCode == "REGISTERED" {
 		return ProviderRecord{}, ErrProviderInvalid
 	}
-	const update = `UPDATE compute_providers SET state='DRAINING',
-		version=version+1, last_reason_code=$3, updated_at=clock_timestamp()
+	const update = `UPDATE public.compute_providers SET state='DRAINING',
+		version=version+1, last_reason_code=$3, updated_at=pg_catalog.clock_timestamp()
 		WHERE provider_id=$1 AND version=$2 AND state='REGISTERED'
 		RETURNING ` + providerRecordColumns
 	got, err := scanProvider(r.db.QueryRowContext(ctx, update,
