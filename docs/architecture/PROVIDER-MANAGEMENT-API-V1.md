@@ -137,6 +137,34 @@ at test-only commit `1e6668a52ac5c7cd02a723b3d841a4793732572b`.
 The deliberately failing probe was removed from the final PR; this is
 an **unresolved deployment security gate**, not a patched vulnerability.
 
+### Candidate least-privilege audit function — test-only GREEN
+
+`TestProviderAuditHardenedFunctionCandidateRestrictedWriter` uses a
+rollback-only PostgreSQL 16 transaction to replace the audit trigger
+function *for that transaction*, grant audit INSERT only to a dedicated
+NOLOGIN function owner, and grant Provider SELECT/INSERT/UPDATE only to
+a separate NOLOGIN writer. The candidate function is
+`SECURITY DEFINER`, schema-qualifies the audit table, and pins
+`search_path = pg_catalog, pg_temp`; PUBLIC EXECUTE is revoked.
+
+This disposable-role test confirms Provider registration and CAS-like
+Drain (REGISTERED/v1 to DRAINING/v2), two authoritative audit rows, and
+SQLSTATE 42501 for direct audit forgery, TRUNCATE and disabling the
+Provider audit trigger. A `pg_temp` table shadowing the audit name
+does not intercept writes. [Go/PG16 CI #42339904778](https://github.com/avaargsh/compute-control-panel/actions/runs/42339904778)
+passed on the actual PR merge tree `f3489bb4586ba5faa2cadee2b8fbe5b0f41f3f15`
+(merge of `884014f1ef56f31d40fabd9f7a1cabb3efd6eb50`
+into `main` `d38ff508c74be389f9eb1fdc0dc296d51802d8da`).
+
+**This is only a tested migration candidate**, not an applied,
+checksummed, deployed or independently audited Provider database
+hardening change. The experiment bootstraps roles as a superuser
+then runs DML with `SET LOCAL ROLE`; a real separate database login,
+production role provisioning, function/catalog provenance, privilege
+revocation, permissions of related tables/functions, and the ordered
+forward-only migration remain pending. No readiness or production
+manage ingress follows from this CI.
+
 Minimum viable remediation is a forward-only migration containing a
 catalog-attested, schema-qualified, locked-down owner-executed audit
 insertion path, with a separate unprivileged role test proving both
