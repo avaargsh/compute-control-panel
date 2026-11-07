@@ -507,6 +507,13 @@ class ComputeEconomicsContractTests(unittest.TestCase):
         self.assertEqual("0.04", result[0]["amount"])
         self.assertEqual("0.001944444444444444", result[0]["priced_quantity_gpu_hours"])
         self.assertLessEqual(len(result[0]["priced_quantity_gpu_hours"].split(".")[1]), 18)
+        posted = dict(read_json(EXAMPLE_DIR / "workload-cost-correction-v1.json")["entries"][0])
+        posted["pricedQuantity"] = result[0]["priced_quantity_gpu_hours"]
+        posted["pricedWindow"] = usage["window"]
+        posted["rateAmount"] = rate["rateAmount"]
+        posted["amount"] = result[0]["amount"]
+        posted["calculationInputDigest"] = result[0]["calculation_input_digest"]
+        self.assert_valid("workload_cost_entry", posted)
 
     def test_oracle_preserves_nanosecond_boundary_which_rounds_down(self) -> None:
         usage = json.loads(json.dumps(self.cost_fixture["usageInterval"]))
