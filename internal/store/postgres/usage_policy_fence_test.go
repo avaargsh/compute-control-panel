@@ -221,7 +221,8 @@ func TestPersistUsageEvidenceSetRejectsUnprovisionedRevokedAndStalePolicyRevisio
 		EffectiveUntil: time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
 		Revision:       1,
 	}
-	repo, err := NewRepositoryWithEvidencePolicyAuthority(db, staticEvidencePolicyAuthority{policy: approved})
+	writerDB := testEvidenceWriterDB(t, db)
+	repo, err := NewRepositoryWithEvidencePolicyAuthority(writerDB, staticEvidencePolicyAuthority{policy: approved})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,10 +266,12 @@ func TestPersistUsageEvidenceSetRejectsUnprovisionedRevokedAndStalePolicyRevisio
 	}
 	checkDenied("stale revision")
 	approved.Revision = 2
-	updatedRepo, err := NewRepositoryWithEvidencePolicyAuthority(db, staticEvidencePolicyAuthority{policy: approved})
+	updatedRepo, err := NewRepositoryWithEvidencePolicyAuthority(writerDB, staticEvidencePolicyAuthority{policy: approved})
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Rev2 needs a new independent approval; a Rev1 ticket cannot roll forward.
+	seedTestE1FinalAuthorization(t, db, a, 2)
 	if _, persisted, err := updatedRepo.PersistUsageEvidenceSet(ctx, params); err != nil || !persisted {
 		t.Fatalf("newly approved E1 revision should commit: persisted=%t err=%v", persisted, err)
 	}
