@@ -119,7 +119,7 @@ func TestProviderManageRequiresAuthenticatedService(t *testing.T) {
 	policy := &providerManagementAuthorizerStub{}
 	h, err := NewProviderManagementHandler(ProviderManagementDependencies{
 		Authenticator: testPrincipalAuthenticator{err: errors.New("no verified identity")},
-		Authorizer: policy, Repository: repo,
+		Authorizer:    policy, Repository: repo,
 	})
 	if err != nil {
 		t.Fatal(err)
