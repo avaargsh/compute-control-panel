@@ -257,3 +257,26 @@ func TestProviderManageRejectsImplicitHeadRead(t *testing.T) {
 		t.Fatalf("implicit HEAD reached privileged read: repository=%d authorizer=%d", repo.readCalls, policy.calls)
 	}
 }
+
+func TestProviderManageRejectsCaseFoldedJSONFieldAliases(t *testing.T) {
+	h, repo, policy := providerManagementFixture(t)
+	// encoding/json accepts case-insensitive struct-field matches.
+	// Reject aliases rather than allowing a second spelling to overwrite
+	// authority-bearing Provider identity or expected CAS version.
+	registration := strings.Replace(
+		providerRegistrationJSON(),
+		`"provider_id":"provider-001",`,
+		`"provider_id":"provider-001","Provider_ID":"provider-002",`,
+		1,
+	)
+	if response := providerManagementRequest(h, http.MethodPost, "/api/v1/manage/providers", registration); response.Code != http.StatusBadRequest {
+		t.Fatalf("ambiguous Provider ID returned status %d: %s", response.Code, response.Body.String())
+	}
+	drain := `{"expected_version":1,"Expected_Version":2,"reason_code":"MAINTENANCE"}`
+	if response := providerManagementRequest(h, http.MethodPost, "/api/v1/manage/providers/provider-001/drain", drain); response.Code != http.StatusBadRequest {
+		t.Fatalf("ambiguous expected version returned status %d: %s", response.Code, response.Body.String())
+	}
+	if repo.registerCalls != 0 || repo.drainCalls != 0 || policy.calls != 0 {
+		t.Fatalf("case-folded field aliases reached privileged calls: reg=%d drain=%d auth=%d", repo.registerCalls, repo.drainCalls, policy.calls)
+	}
+}
