@@ -26,7 +26,7 @@ A passing FakeProvider test is not evidence of real provider behavior. A success
 | C05 | Idempotency | Same key with different canonical request digest | 409 IDEMPOTENCY_KEY_REUSED; no second side effect |
 | C06 | Inbox/outbox | Duplicate event delivery and consumer restart | Event is applied once logically; stale generations are ignored |
 | C07 | Create recovery | Provider creates resource but ACK is lost | Operation becomes UNKNOWN; Inspect finds and binds the existing resource; no duplicate create |
-| C08 | Create recovery | Provider proves request did not take effect | Operation becomes FAILED_CONFIRMED or safely redispatches the same immutable operation |
+| C08 | Create recovery | Provider proves request did not take effect | Operation RECONCILING → PENDING before safely redispatching the same immutable intent; definitive failure resolves operation FAILED, and only after verified cleanup/absence may Workload/Allocation project FAILED_CONFIRMED |
 | C09 | Ambiguity | Provider unavailable after dispatch | UNKNOWN remains non-terminal; no blind retry and no false failure |
 | C10 | Delete recovery | Provider deletes resource but ACK is lost | Operation becomes UNKNOWN; Inspect verifies absence before RELEASED |
 | C11 | Release finality | Delete ACK/HTTP 202/Kubernetes deletionTimestamp only | Allocation remains RELEASING until authoritative absence and applicable quota release |
