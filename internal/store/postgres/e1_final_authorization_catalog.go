@@ -6,10 +6,14 @@ import (
 	"strings"
 )
 
-// Security contract is pinned to the original, forward-only v0009 function
+// Security contract is pinned to the forward-only v0012 function
 // source. A checksummed migration ledger cannot prove the live function body.
 const expectedE1FinalAuth = `DECLARE
     db_now TIMESTAMPTZ;
+    locked_policy_revision BIGINT;
+    policy_effective_from TIMESTAMPTZ;
+    policy_effective_until TIMESTAMPTZ;
+    approval_expires_at TIMESTAMPTZ;
     authorized BOOLEAN := false;
 BEGIN
     -- An immutable row already bound by a unique key can only cause an
@@ -27,48 +31,49 @@ BEGIN
         RETURN NEW;
     END IF;
 
-    -- A current approved policy is necessary even for a direct SQL writer.
-    -- Distinguish a revoked/expired policy from a missing per-evidence ticket
-    -- so the Go caller preserves ErrEvidencePolicyUntrusted on lock delays.
-    IF NOT EXISTS (
-        SELECT 1 FROM public.compute_evidence_policy_fences policy
-        WHERE policy.tenant_id = NEW.tenant_id
-          AND policy.provider_id = NEW.provider_id
-          AND policy.policy_version = NEW.evidence_policy_version
-          AND policy.revoked = false
-          AND policy.effective_from <= clock_timestamp()
-          AND policy.effective_until > clock_timestamp()
-        FOR SHARE
-    ) THEN
+    -- Preserve policy-before-approval lock ordering. Read deadlines from the
+    -- locked row; time predicates evaluated before a lock wait can go stale.
+    SELECT policy.revision, policy.effective_from, policy.effective_until
+    INTO locked_policy_revision, policy_effective_from, policy_effective_until
+    FROM public.compute_evidence_policy_fences policy
+    WHERE policy.tenant_id = NEW.tenant_id
+      AND policy.provider_id = NEW.provider_id
+      AND policy.policy_version = NEW.evidence_policy_version
+      AND policy.revoked = false
+    FOR SHARE;
+
+    IF NOT FOUND THEN
         RAISE EXCEPTION 'E1 FINAL policy is absent, revoked or expired'
             USING ERRCODE = 'E1P01';
     END IF;
-    -- The clock is read AFTER waiting for the authority row-share lock.
     db_now := clock_timestamp();
+    IF policy_effective_from > db_now OR policy_effective_until <= db_now THEN
+        RAISE EXCEPTION 'E1 FINAL policy is absent, revoked or expired'
+            USING ERRCODE = 'E1P01';
+    END IF;
 
-    SELECT true INTO authorized
+    SELECT true, approval.expires_at INTO authorized, approval_expires_at
     FROM public.compute_e1_final_authorizations approval
-    JOIN public.compute_evidence_policy_fences policy
-      ON policy.tenant_id = approval.tenant_id
-     AND policy.provider_id = approval.provider_id
-     AND policy.policy_version = approval.policy_version
     WHERE approval.tenant_id = NEW.tenant_id
       AND approval.evidence_set_id = NEW.evidence_set_id
       AND approval.provider_id = NEW.provider_id
       AND approval.policy_version = NEW.evidence_policy_version
-      AND approval.policy_revision = policy.revision
+      AND approval.policy_revision = locked_policy_revision
       AND approval.revoked = false
-      AND policy.revoked = false
-      AND approval.expires_at > db_now
-      AND policy.effective_from <= db_now
-      AND policy.effective_until > db_now
       -- This binds *every* persisted FINAL field except server recorded_at,
       -- including billing quantities, interval, GPU model, provenance JSON,
       -- source IDs, Operation, Tenant, Project, and policy version.
       AND approval.expected_final = (to_jsonb(NEW) - 'recorded_at')
-    FOR SHARE OF approval, policy;
+    FOR SHARE;
 
-    IF COALESCE(authorized, false) IS NOT true THEN
+    -- A share lock fences revocation, but cannot stop either deadline from
+    -- passing. Recheck BOTH windows using a fresh clock after the approval lock.
+    db_now := clock_timestamp();
+    IF policy_effective_from > db_now OR policy_effective_until <= db_now THEN
+        RAISE EXCEPTION 'E1 FINAL policy is absent, revoked or expired'
+            USING ERRCODE = 'E1P01';
+    END IF;
+    IF COALESCE(authorized, false) IS NOT true OR approval_expires_at <= db_now THEN
         RAISE EXCEPTION 'E1 FINAL requires independently authorized exact evidence'
             USING ERRCODE = 'E1A01';
     END IF;

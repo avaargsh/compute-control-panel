@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -86,6 +88,11 @@ func TestE1WriterRejectsFinalAuthorizationCatalogDrift(t *testing.T) {
 			restore: "restore-original-function",
 		},
 		{
+			name:    "historical v0009 approval function restored",
+			ddl:     "restore-v0009-function",
+			restore: "restore-original-function",
+		},
+		{
 			name:    "final approval function search_path weakened",
 			ddl:     "ALTER FUNCTION public.compute_require_e1_final_authorization() SET search_path=pg_temp,public",
 			restore: "ALTER FUNCTION public.compute_require_e1_final_authorization() SET search_path = pg_catalog, public, pg_temp",
@@ -121,7 +128,28 @@ func TestE1WriterRejectsFinalAuthorizationCatalogDrift(t *testing.T) {
 					t.Errorf("restore original E1 approval catalog after %s: %v", tc.name, err)
 				}
 			})
-			if _, err := admin.ExecContext(ctx, tc.ddl); err != nil {
+			ddl := tc.ddl
+			if ddl == "restore-v0009-function" {
+				// A restore can reintroduce the old lock-wait expiry bypass
+				// without changing any checksummed migration ledger entries.
+				migration, err := os.ReadFile("../../../migrations/0009_e1_independent_final_authorization.sql")
+				if err != nil {
+					t.Fatalf("read immutable v0009 migration: %v", err)
+				}
+				const signature = "FUNCTION public.compute_require_e1_final_authorization()"
+				_, definition, found := strings.Cut(string(migration), "CREATE "+signature)
+				if !found {
+					t.Fatal("v0009 authorization function signature missing")
+				}
+				definition, _, found = strings.Cut(definition, "$e1_final_auth$;")
+				if !found {
+					t.Fatal("v0009 authorization function terminator missing")
+				}
+				// Execute only the historical function definition, never the
+				// migration's approval-table or trigger creation statements.
+				ddl = "CREATE OR REPLACE " + signature + definition + "$e1_final_auth$;"
+			}
+			if _, err := admin.ExecContext(ctx, ddl); err != nil {
 				t.Fatalf("inject privileged catalog drift: %v", err)
 			}
 			if err := verifyEvidenceWriterPrivileges(ctx, writer); !errors.Is(err, ErrEvidencePolicyUntrusted) {

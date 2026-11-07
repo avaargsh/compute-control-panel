@@ -17,6 +17,16 @@ A policy revocation UPDATE that commits **before** the E1 writer takes the share
 
 The domain-separated `sha256` policy digest covers tenant/Provider identity, version, policy content (including timestamp/certified-adapter allowlists, AsOf and skew) and effective interval. A revision number protects against stale snapshots after revocation and reapproval, even when the policy body has not changed. A digest is **not a signature**; the database policy row must originate from an independently trusted provisioning authority.
 
+## Independent approval deadlines after lock waits
+
+The v0009 FINAL authorization trigger captured its comparison time before waiting for an independently issued approval row. An issuer transaction could hold that row until after `expires_at`, then commit unchanged or roll back a revocation. Both direct SQL and Repository writes could consequently create FINAL evidence with an expired approval. Direct SQL could also miss policy expiry during the same wait.
+
+Forward migration `0012_e1_authorization_lock_deadlines.sql` preserves policy-before-approval lock ordering and reads `clock_timestamp()` after each lock acquisition. After acquiring the exact approval, it rechecks both the locked policy window and the approval deadline. Expired policy returns `E1P01`; missing, revoked, mismatched or expired approval returns `E1A01`. Existing immutable FINAL replay remains unchanged. Migrations `0001` through `0011` retain their original bytes. The writer's catalog attestation now pins the v0012 function body and rejects restoration of the historical v0009 body.
+
+`TestE1FinalRejectsApprovalExpiryDuringApprovalLock` uses a separate restricted writer LOGIN for direct SQL and Repository paths. It observes a real conflicting approval-row lock through `pg_blocking_pids`, waits past the deadline using PostgreSQL time, and checks that no FINAL row commits. The issuer cases include unchanged commit and rolled-back revocation, with additional policy-expiry coverage. These tests establish fresh validation after authority locks. They do not guarantee that a deadline remains valid at the exact durable COMMIT instant or certify production evidence sources.
+
+The application and database function body must advance together. Drain old E1 writers, apply v0012 with the separate migration identity, then start the updated writers and recheck the catalog. An old writer rejects the new body, and an updated writer rejects the old body; mixed versions fail closed. This migration does not authorize production enrollment.
+
 ## Privileges and operational constraints
 
 - The v0007 migration does **not** expose a public API to register or edit trusted policies. Deployers must implement a separately authenticated administrator policy lifecycle and restrict INSERT/UPDATE/DELETE/TRUNCATE privileges on `compute_evidence_policy_fences` to that identity. `REVOKE ... FROM PUBLIC` in the migration is a baseline, **not** a full role grant audit. An owner or superuser can bypass it.
