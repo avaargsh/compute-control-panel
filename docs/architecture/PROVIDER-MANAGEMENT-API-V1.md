@@ -116,6 +116,39 @@ prove DRA ResourceClaim absence, close Provider cost liability or finalize
 the Provider as RETIRED. `READY`, `RETIRED`, `DELETE` and raw
 reconciliation mutation are intentionally absent from this API.
 
+## PostgreSQL minimum-writer-role blocker — verified RED
+
+A disposable PostgreSQL 16 role probe on 2026-11-07 validated the
+unresolved audit writer problem, independently of the HTTP handler:
+
+- When granted `USAGE(public)` and `SELECT/INSERT/UPDATE` on
+  `compute_providers` but **no audit INSERT**, Provider registration
+  fails inside `compute_provider_lifecycle_audit_append()` with
+  SQLSTATE **42501** (audit table permission denied).
+- Granting that role direct `INSERT` on
+  `compute_provider_lifecycle_audit` makes registration possible,
+  but also lets it forge an audit-only DRAINING/version-2 row while
+  the actual Provider remains REGISTERED. The row-level mutation
+  protection does not cover INSERT, so this grant is **not acceptable**.
+
+The role was disposable and all probes were rolled back. The behavioral
+RED evidence is [GitHub Actions #42338996338](https://github.com/avaargsh/compute-control-panel/actions/runs/42338996338)
+at test-only commit `1e6668a52ac5c7cd02a723b3d841a4793732572b`.
+The deliberately failing probe was removed from the final PR; this is
+an **unresolved deployment security gate**, not a patched vulnerability.
+
+Minimum viable remediation is a forward-only migration containing a
+catalog-attested, schema-qualified, locked-down owner-executed audit
+insertion path, with a separate unprivileged role test proving both
+successful Provider register/drain and denial of direct audit writes,
+trigger alteration, truncation, and `pg_temp` shadowing. Review
+function owner, EXECUTE privileges and fixed `search_path`. Retain
+the checksum-pinned `0005` migration unchanged. Draft economics
+PR #41 already uses `0007`–`0011`; coordinate a contiguous
+migration sequence rather than allocating `0007` again in this
+Draft PR. No production Manage listener is authorized until this
+gate is green.
+
 ## Further gates (not claimed)
 
 1. Wire only after verified mTLS SPIFFE admin identities, explicit Provider
