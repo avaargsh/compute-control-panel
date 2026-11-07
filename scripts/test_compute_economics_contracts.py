@@ -671,6 +671,32 @@ class ComputeEconomicsContractTests(unittest.TestCase):
         entry["pricedQuantity"] = "0." + "0" * 18 + "1"
         self.assertFalse(self.validators["workload_cost_entry"].is_valid(entry))
 
+    def test_append_only_correction_fixture_original_reversal_replacement(self) -> None:
+        fixture = read_json(EXAMPLE_DIR / "workload-cost-correction-v1.json")
+        entries = fixture["entries"]
+        self.assertEqual(["CHARGE", "REVERSAL", "CHARGE"], [e["entryType"] for e in entries])
+        for entry in entries:
+            with self.subTest(id=entry["costEntryId"]):
+                self.assert_valid("workload_cost_entry", entry)
+        original, reversal, replacement = entries
+        self.assertEqual(original["costEntryId"], reversal["reversesEntryId"])
+        self.assertEqual(original["costEntryId"], replacement["replacesEntryId"])
+        self.assertNotIn("replacesEntryId", original)
+        self.assertNotIn("reversesEntryId", replacement)
+        signed_total = (Decimal(original["amount"]) - Decimal(reversal["amount"])
+                        + Decimal(replacement["amount"]))
+        self.assertEqual(Decimal(fixture["expected"]["totalAfterCorrection"]), signed_total)
+        corrected = dict(self.cost_fixture["rateCards"][0])
+        corrected.update(rateCardId=replacement["rateCardId"],
+                         version=replacement["rateCardVersion"],
+                         rateAmount=replacement["rateAmount"],
+                         sourceRef="contract-demo#rate-1-corrected")
+        priced = calculate_direct_cost(
+            self.cost_fixture["usageInterval"], [corrected, self.cost_fixture["rateCards"][1]]
+        )
+        self.assertEqual(replacement["amount"], priced[0]["amount"])
+        self.assertEqual(replacement["calculationInputDigest"], priced[0]["calculation_input_digest"])
+
     def test_cost_reversal_requires_link_and_charge_cannot_be_reversal(self) -> None:
         segment = self.cost_fixture["expected"]["segments"][0]
         entry = {
