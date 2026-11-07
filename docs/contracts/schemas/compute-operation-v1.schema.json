@@ -525,7 +525,29 @@
               ]
             }
           }
-        ]
+        ],
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "error_code"
+              ]
+            },
+            {
+              "required": [
+                "manual_review_code"
+              ]
+            }
+          ]
+        },
+        "dependentRequired": {
+          "provider_resource_id": [
+            "provider_resource_uid"
+          ],
+          "provider_resource_uid": [
+            "provider_resource_id"
+          ]
+        }
       }
     }
   ],
