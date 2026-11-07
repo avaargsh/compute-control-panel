@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -81,7 +82,9 @@ type providerManagementResponse struct {
 // exposes it until verified mTLS, explicit admin policy and least-privilege
 // infrastructure are installed and independently tested.
 func NewProviderManagementHandler(deps ProviderManagementDependencies) (http.Handler, error) {
-	if deps.Authenticator == nil || deps.Authorizer == nil || deps.Repository == nil {
+	if missingProviderManagementDependency(deps.Authenticator) ||
+		missingProviderManagementDependency(deps.Authorizer) ||
+		missingProviderManagementDependency(deps.Repository) {
 		return nil, errors.New("Provider management requires authentication, administrator authorization and repository")
 	}
 	h := &providerManagementHandler{deps: deps}
@@ -93,6 +96,20 @@ func NewProviderManagementHandler(deps ProviderManagementDependencies) (http.Han
 		w.Header().Set("Cache-Control", "no-store")
 		mux.ServeHTTP(w, r)
 	}), nil
+}
+
+// An interface holding a typed nil pointer is not == nil; reject such
+// miswired dependencies before privileged management traffic is accepted.
+func missingProviderManagementDependency(dependency any) bool {
+	if dependency == nil {
+		return true
+	}
+	value := reflect.ValueOf(dependency)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	}
+	return false
 }
 
 func (h *providerManagementHandler) authenticate(w http.ResponseWriter, r *http.Request) (WorkloadPrincipal, bool) {
