@@ -18,6 +18,10 @@ const (
 
 var ErrAcceptanceIncomplete = errors.New("workload acceptance is missing allocation, operation, or outbox evidence")
 
+// ErrProviderDraining rejects new Workload/Allocation/Operation creation on a
+// Provider already marked DRAINING. This guard is not a READY certification.
+var ErrProviderDraining = errors.New("Provider is draining or ineligible for new Workload acceptance")
+
 type AcceptWorkloadParams struct {
 	Workload         CreateWorkloadParams
 	AllocationID     string
@@ -164,6 +168,14 @@ func (r *Repository) AcceptWorkload(ctx context.Context, p AcceptWorkloadParams)
 		return WorkloadAcceptance{}, false, fmt.Errorf("insert accepted Workload: %w", err)
 	}
 
+	// Serialize first acceptance with a concurrent Provider Drain using a
+	// shared row lock held until the whole acceptance transaction commits.
+	// A previously committed idempotency replay returns above without
+	// needing a new Provider admission decision.
+	if err := checkRegisteredProviderNotDraining(ctx, tx, p.ProviderID); err != nil {
+		return WorkloadAcceptance{}, false, err
+	}
+
 	insertAllocation := "INSERT INTO compute_allocations (" +
 		"allocation_id, tenant_id, workload_id, provider_id, pool_id, " +
 		"desired_generation, phase, version" +
@@ -261,6 +273,29 @@ func (r *Repository) AcceptWorkload(ctx context.Context, p AcceptWorkloadParams)
 		WorkloadEventID:  p.Workload.EventID,
 		OperationEventID: p.OperationEventID,
 	}, true, nil
+}
+
+// checkRegisteredProviderNotDraining only fences already-registered Provider
+// lifecycle transitions. REGISTERED is not an authenticated READY state;
+// legacy internal Workload acceptance for unregistered test Providers remains
+// possible until a separate, strict selector/READY admission gate is deployed.
+// Never use this function as production capacity or GPU availability evidence.
+func checkRegisteredProviderNotDraining(ctx context.Context, tx *sql.Tx, providerID string) error {
+	var state ProviderState
+	err := tx.QueryRowContext(ctx,
+		"SELECT state FROM compute_providers WHERE provider_id=$1 FOR SHARE",
+		providerID,
+	).Scan(&state)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil // Legacy internal/test behavior; not production eligibility.
+	}
+	if err != nil {
+		return fmt.Errorf("read Provider state for Workload admission: %w", err)
+	}
+	if state != ProviderRegistered {
+		return ErrProviderDraining
+	}
+	return nil
 }
 
 // GetAcceptanceByIdempotency returns a durable acceptance before Provider

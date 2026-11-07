@@ -115,3 +115,232 @@ func TestFakeProviderObservationDrivesExistingDomainReconciliation(t *testing.T)
 		t.Fatalf("recovered provider result: %+v %v", verified, err)
 	}
 }
+
+func TestFakeProviderTargetBoundUpdateDeleteAndLostReleaseACK(t *testing.T) {
+	ctx := context.Background()
+	fake := NewFakeProvider()
+	create := fakeRequest()
+	if _, err := fake.Apply(ctx, create); err != nil {
+		t.Fatal(err)
+	}
+	created, err := fake.Inspect(ctx, create)
+	if err != nil || created.Result != operation.ResourcePresent {
+		t.Fatalf("CREATE inspection: %+v %v", created, err)
+	}
+
+	update := create
+	update.OperationID = "op-fake-update"
+	update.IdempotencyKey = "idempotency-update"
+	update.DesiredGeneration = 2
+	update.Kind = operation.Update
+	update.TargetResourceID = created.ResourceID
+	update.TargetResourceUID = created.ResourceUID
+	if _, err := fake.Apply(ctx, update); err != nil {
+		t.Fatalf("target-bound UPDATE: %v", err)
+	}
+	updated, err := fake.Inspect(ctx, update)
+	if err != nil || updated.Result != operation.ResourcePresent ||
+		updated.ResourceID != created.ResourceID || updated.ResourceUID != created.ResourceUID ||
+		updated.ResourceOperationID != update.OperationID ||
+		updated.ResourceGeneration != update.DesiredGeneration {
+		t.Fatalf("UPDATE lost exact target identity: %+v %v", updated, err)
+	}
+
+	remove := update
+	remove.OperationID = "op-fake-delete"
+	remove.IdempotencyKey = "idempotency-delete"
+	remove.DesiredGeneration = 3
+	remove.Kind = operation.Delete
+	fake.LoseNextAcknowledgement()
+	if _, err := fake.Apply(ctx, remove); !errors.Is(err, ErrAcknowledgementLost) {
+		t.Fatalf("DELETE lost ACK must be ambiguous: %v", err)
+	}
+	released, err := fake.Inspect(ctx, remove)
+	if err != nil || released.Result != operation.TargetAbsent ||
+		released.TargetResourceID != created.ResourceID ||
+		released.TargetResourceUID != created.ResourceUID ||
+		released.ResourceID != "" || released.ResourceUID != "" {
+		t.Fatalf("exact deleted UID must be inspectable: %+v %v", released, err)
+	}
+	if receipt, err := fake.Apply(ctx, remove); err != nil || receipt.OperationID != remove.OperationID {
+		t.Fatalf("same operation DELETE replay is not idempotent: %+v %v", receipt, err)
+	}
+	// Historical CREATE must not falsely present a released resource as live.
+	old, err := fake.Inspect(ctx, create)
+	if err != nil || old.Result == operation.ResourcePresent ||
+		old.Result == operation.OperationNotAppliedFinal {
+		t.Fatalf("stale CREATE inspection reported false live resource: %+v %v", old, err)
+	}
+}
+
+func TestFakeProviderCannotDeleteForeignStaleOrAlreadyReclaimedUID(t *testing.T) {
+	ctx := context.Background()
+	fake := NewFakeProvider()
+	create := fakeRequest()
+	if _, err := fake.Apply(ctx, create); err != nil {
+		t.Fatal(err)
+	}
+	created, err := fake.Inspect(ctx, create)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remove := create
+	remove.Kind = operation.Delete
+	remove.OperationID = "op-delete"
+	remove.IdempotencyKey = "delete-key"
+	remove.TargetResourceID = created.ResourceID
+	remove.TargetResourceUID = created.ResourceUID
+
+	for name, mutate := range map[string]func(*Request){
+		"stale uid":        func(r *Request) { r.TargetResourceUID = "uid-replaced" },
+		"foreign tenant":   func(r *Request) { r.TenantID = "tenant-other" },
+		"foreign workload": func(r *Request) { r.WorkloadID = "workload-other" },
+		"foreign provider": func(r *Request) { r.ProviderID = "provider-other" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			bad := remove
+			mutate(&bad)
+			if _, err := fake.Apply(ctx, bad); !errors.Is(err, ErrOperationConflict) {
+				t.Fatalf("unauthorized target mutation accepted: %v", err)
+			}
+		})
+	}
+	if _, err := fake.Apply(ctx, remove); err != nil {
+		t.Fatalf("valid delete: %v", err)
+	}
+	second := remove
+	second.OperationID = "op-other-delete"
+	second.IdempotencyKey = "another-delete-key"
+	if _, err := fake.Apply(ctx, second); !errors.Is(err, ErrOperationConflict) {
+		t.Fatalf("new DELETE operation cannot infer release from missing target: %v", err)
+	}
+	if obs, err := fake.Inspect(ctx, second); err != nil ||
+		obs.Result == operation.TargetAbsent || obs.Result == operation.OperationNotAppliedFinal {
+		t.Fatalf("unrecorded delete inferred finality: %+v %v", obs, err)
+	}
+}
+
+func TestFakeProviderRejectsStaleGenerationMutation(t *testing.T) {
+	ctx := context.Background()
+	fake := NewFakeProvider()
+	create := fakeRequest()
+	if _, err := fake.Apply(ctx, create); err != nil {
+		t.Fatal(err)
+	}
+	created, err := fake.Inspect(ctx, create)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	current := create
+	current.OperationID = "op-update-generation-3"
+	current.IdempotencyKey = "update-gen-3"
+	current.DesiredGeneration = 3
+	current.Kind = operation.Update
+	current.TargetResourceID = created.ResourceID
+	current.TargetResourceUID = created.ResourceUID
+	if _, err := fake.Apply(ctx, current); err != nil {
+		t.Fatalf("new generation UPDATE rejected: %v", err)
+	}
+
+	// A stale CREATE receipt is historical, not proof that the current
+	// generation still owns a live resource. Otherwise stale-generation
+	// compensation could delete the newer generation's target.
+	historical, err := fake.Inspect(ctx, create)
+	if err != nil || historical.Result != operation.ObservationConflict ||
+		historical.ReasonCode != "RESOURCE_GENERATION_SUPERSEDED" {
+		t.Fatalf("historical CREATE falsely reported current resource: %+v %v", historical, err)
+	}
+
+	for _, kind := range []operation.Kind{operation.Update, operation.Delete} {
+		t.Run(string(kind), func(t *testing.T) {
+			stale := current
+			stale.OperationID = "op-stale-" + string(kind)
+			stale.IdempotencyKey = "stale-" + string(kind)
+			stale.DesiredGeneration = 2
+			stale.Kind = kind
+			if _, err := fake.Apply(ctx, stale); !errors.Is(err, ErrOperationConflict) {
+				t.Fatalf("stale %s mutated newer generation: %v", kind, err)
+			}
+		})
+	}
+	stillLive, err := fake.Inspect(ctx, current)
+	if err != nil || stillLive.Result != operation.ResourcePresent ||
+		stillLive.ResourceUID != created.ResourceUID {
+		t.Fatalf("stale mutation removed or obscured live resource: %+v %v", stillLive, err)
+	}
+
+	release := current
+	release.OperationID = "op-delete-generation-4"
+	release.IdempotencyKey = "delete-gen-4"
+	release.DesiredGeneration = 4
+	release.Kind = operation.Delete
+	if _, err := fake.Apply(ctx, release); err != nil {
+		t.Fatalf("current generation release failed: %v", err)
+	}
+	obs, err := fake.Inspect(ctx, release)
+	if err != nil || obs.Result != operation.TargetAbsent ||
+		obs.TargetResourceUID != created.ResourceUID {
+		t.Fatalf("current generation release not inspectable: %+v %v", obs, err)
+	}
+}
+
+func TestFakeProviderRejectsReusedTenantIdempotencyKey(t *testing.T) {
+	ctx := context.Background()
+	fake := NewFakeProvider()
+	first := fakeRequest()
+	if _, err := fake.Apply(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	// The durable ComputeOperation table has UNIQUE(tenant_id, idempotency_key).
+	// A fake must not silently materialize a second resource under that key.
+	second := first
+	second.OperationID = "op-distinct-same-tenant-key"
+	second.RequestDigest = "sha256:" + strings.Repeat("b", 64)
+	if _, err := fake.Apply(ctx, second); !errors.Is(err, ErrOperationConflict) {
+		t.Fatalf("reused tenant/idempotency key created a second operation: %v", err)
+	}
+	if obs, err := fake.Inspect(ctx, second); err != nil ||
+		obs.Result == operation.ResourcePresent ||
+		obs.Result == operation.OperationNotAppliedFinal {
+		t.Fatalf("conflicting second operation reported provider finality: %+v %v", obs, err)
+	}
+	original, err := fake.Inspect(ctx, first)
+	if err != nil || original.Result != operation.ResourcePresent {
+		t.Fatalf("duplicate call changed original operation: %+v %v", original, err)
+	}
+
+	// The idempotency namespace is tenant-scoped. Other tenants can use
+	// the same key, provided their operation identity is distinct.
+	other := first
+	other.TenantID = "tenant-2"
+	other.WorkloadID = "workload-2"
+	other.OperationID = "op-other-tenant"
+	if _, err := fake.Apply(ctx, other); err != nil {
+		t.Fatalf("cross-tenant reuse of independent key was blocked: %v", err)
+	}
+}
+
+func TestFakeProviderNotAppliedFinalReservesTenantIdempotencyKey(t *testing.T) {
+	ctx := context.Background()
+	fake := NewFakeProvider()
+	first := fakeRequest()
+	if err := fake.DeclareNotAppliedFinal(first); err != nil {
+		t.Fatal(err)
+	}
+	second := first
+	second.OperationID = "op-conflicting-after-noeffect"
+	if err := fake.DeclareNotAppliedFinal(second); !errors.Is(err, ErrOperationConflict) {
+		t.Fatalf("new operation reserved same no-effect-final key: %v", err)
+	}
+	if _, err := fake.Apply(ctx, second); !errors.Is(err, ErrOperationConflict) {
+		t.Fatalf("second operation executed under reserved tenant key: %v", err)
+	}
+	if _, err := fake.Apply(ctx, first); err != nil {
+		t.Fatalf("same-key retry of no-effect-final operation must remain allowed: %v", err)
+	}
+	obs, err := fake.Inspect(ctx, first)
+	if err != nil || obs.Result != operation.ResourcePresent {
+		t.Fatalf("same operation did not become attributable after retry: %+v %v", obs, err)
+	}
+}

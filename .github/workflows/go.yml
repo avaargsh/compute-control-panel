@@ -41,9 +41,24 @@ jobs:
           fi
       - name: Show Go formatting diff on failure
         if: failure()
-        run: gofmt -d internal/httpapi/workload_create.go internal/httpapi/workload_create_test.go internal/httpapi/spiffe_auth.go internal/httpapi/spiffe_auth_test.go internal/httpapi/workload_read.go internal/httpapi/workload_read_test.go internal/store/postgres/acceptance.go internal/store/postgres/acceptance_test.go internal/store/postgres/read.go internal/store/postgres/identity.go internal/store/postgres/identity_test.go internal/identity/principal.go
+        shell: bash
+        run: |
+          while IFS= read -r file; do
+            [[ -n "$file" ]] || continue
+            printf 'Go formatting diff for %s:\n' "$file"
+            gofmt -d "$file"
+          done < <(gofmt -l .)
+      - name: Test cross-branch migration compatibility policy
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
       - name: Verify module checksums
         run: go mod verify
+      - name: Provision dedicated audit owner in disposable CI database
+        env:
+          PGPASSWORD: compute-ci
+        run: >-
+          psql --host=127.0.0.1 --username=postgres --dbname=postgres
+          --set=ON_ERROR_STOP=1
+          --command="CREATE ROLE ccp_provider_audit_owner NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
       - name: Apply PostgreSQL migrations (checksummed runner, run twice for idempotency)
         env:
           DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable

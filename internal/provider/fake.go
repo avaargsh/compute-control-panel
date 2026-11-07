@@ -66,9 +66,29 @@ type Adapter interface {
 // FakeProvider is a concurrency-safe, process-local conformance double.
 // It must never be used as a source of production authoritative evidence.
 type FakeProvider struct {
-	mu         sync.Mutex
-	journal    map[string]*fakeRecord
-	nextLost   bool
+	mu              sync.Mutex
+	journal         map[string]*fakeRecord
+	idempotencyKeys map[fakeIdempotencyKey]string
+	resources       map[string]fakeResource
+	nextLost        bool
+	generation      uint64
+}
+
+// The durable operation store scopes idempotency keys by tenant, not by
+// provider or workload. The fake must model the same uniqueness boundary.
+type fakeIdempotencyKey struct {
+	tenantID string
+	key      string
+}
+
+// fakeResource tracks *live* target ownership separately from historical
+// operation receipts. A completed DELETE must not make old CREATE inspections
+// report a still-present resource.
+type fakeResource struct {
+	uid        string
+	tenantID   string
+	workloadID string
+	providerID string
 	generation uint64
 }
 
@@ -82,7 +102,11 @@ type fakeRecord struct {
 }
 
 func NewFakeProvider() *FakeProvider {
-	return &FakeProvider{journal: make(map[string]*fakeRecord)}
+	return &FakeProvider{
+		journal:         make(map[string]*fakeRecord),
+		idempotencyKeys: make(map[fakeIdempotencyKey]string),
+		resources:       make(map[string]fakeResource),
+	}
 }
 
 func (f *FakeProvider) LoseNextAcknowledgement() {
@@ -99,6 +123,10 @@ func (f *FakeProvider) DeclareNotAppliedFinal(req Request) error {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	key := fakeIdempotencyKey{tenantID: req.TenantID, key: req.IdempotencyKey}
+	if owner, exists := f.idempotencyKeys[key]; exists && owner != req.OperationID {
+		return ErrOperationConflict
+	}
 	prior, ok := f.journal[req.OperationID]
 	if ok {
 		if !sameRequest(prior.request, req) || prior.applied {
@@ -109,6 +137,7 @@ func (f *FakeProvider) DeclareNotAppliedFinal(req Request) error {
 		f.journal[req.OperationID] = prior
 	}
 	prior.noEffectFinal = true
+	f.idempotencyKeys[key] = req.OperationID
 	f.generation++
 	prior.version = f.generation
 	return nil
@@ -129,28 +158,70 @@ func (f *FakeProvider) Apply(ctx context.Context, req Request) (Acknowledgement,
 	if err := req.Validate(); err != nil {
 		return Acknowledgement{}, err
 	}
-	if req.Kind != operation.Create {
-		return Acknowledgement{}, ErrInvalidRequest
-	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	existing, found := f.journal[req.OperationID]
-	if found && !sameRequest(existing.request, req) {
+	key := fakeIdempotencyKey{tenantID: req.TenantID, key: req.IdempotencyKey}
+	if owner, exists := f.idempotencyKeys[key]; exists && owner != req.OperationID {
+		return Acknowledgement{}, ErrOperationConflict
+	}
+	rec, found := f.journal[req.OperationID]
+	if found && !sameRequest(rec.request, req) {
 		return Acknowledgement{}, ErrOperationConflict
 	}
 	if !found {
-		existing = &fakeRecord{request: req}
-		f.journal[req.OperationID] = existing
+		rec = &fakeRecord{request: req}
 	}
-	if !existing.applied {
-		// A fake CREATE is materialized once per exact operation identity.
-		// UPDATE/DELETE need target-aware provider-specific implementations.
+	if !rec.applied {
+		switch req.Kind {
+		case operation.Create:
+			// Fake IDs are deterministic per operation, never reused after
+			// release. This is NOT proof of real Provider resource creation.
+			rec.resourceID = "fake-resource/" + req.OperationID
+			rec.resourceUID = "fake-uid/" + req.OperationID
+			if _, exists := f.resources[rec.resourceID]; exists {
+				return Acknowledgement{}, ErrOperationConflict
+			}
+			f.resources[rec.resourceID] = fakeResource{
+				uid:        rec.resourceUID,
+				tenantID:   req.TenantID,
+				workloadID: req.WorkloadID,
+				providerID: req.ProviderID,
+				generation: req.DesiredGeneration,
+			}
+		case operation.Update, operation.Delete:
+			// Never act on a name alone: the exact live UID and all
+			// ownership dimensions must match. Missing targets are NOT
+			// authoritative NOT_APPLIED_FINAL or release receipts.
+			live, exists := f.resources[req.TargetResourceID]
+			if !exists || live.uid != req.TargetResourceUID ||
+				live.tenantID != req.TenantID ||
+				live.workloadID != req.WorkloadID ||
+				live.providerID != req.ProviderID ||
+				req.DesiredGeneration < live.generation {
+				// The resource may have the same UID after a newer Workload
+				// generation was applied. An old controller must not roll
+				// it back or delete it even with the original target UID.
+				return Acknowledgement{}, ErrOperationConflict
+			}
+			rec.resourceID = req.TargetResourceID
+			rec.resourceUID = req.TargetResourceUID
+			if req.Kind == operation.Delete {
+				delete(f.resources, req.TargetResourceID)
+			} else {
+				live.generation = req.DesiredGeneration
+				f.resources[req.TargetResourceID] = live
+			}
+			// Fake UPDATE proves identity and idempotence only; it does not
+			// model a provider-specific change to a Job or Pod specification.
+		default:
+			return Acknowledgement{}, ErrInvalidRequest
+		}
 		f.generation++
-		existing.applied = true
-		existing.noEffectFinal = false
-		existing.resourceID = "fake-resource/" + req.OperationID
-		existing.resourceUID = "fake-uid/" + req.OperationID
-		existing.version = f.generation
+		rec.applied = true
+		rec.noEffectFinal = false
+		rec.version = f.generation
+		f.journal[req.OperationID] = rec
+		f.idempotencyKeys[key] = req.OperationID
 	}
 	ack := Acknowledgement{OperationID: req.OperationID, RequestDigest: req.RequestDigest}
 	if f.nextLost {
@@ -190,7 +261,33 @@ func (f *FakeProvider) Inspect(ctx context.Context, req Request) (operation.Obse
 	}
 	obs.ResourceVersion = fmt.Sprintf("fake-journal/%d", rec.version)
 	switch {
+	case rec.applied && req.Kind == operation.Delete:
+		if _, stillPresent := f.resources[req.TargetResourceID]; stillPresent {
+			obs.Result = operation.ObservationConflict
+			obs.ReasonCode = "DELETE_TARGET_STILL_PRESENT"
+			break
+		}
+		obs.Result = operation.TargetAbsent
+		obs.TargetResourceID = req.TargetResourceID
+		obs.TargetResourceUID = req.TargetResourceUID
 	case rec.applied:
+		live, exists := f.resources[rec.resourceID]
+		if !exists || live.uid != rec.resourceUID ||
+			live.tenantID != req.TenantID ||
+			live.workloadID != req.WorkloadID ||
+			live.providerID != req.ProviderID {
+			obs.Result = operation.ObservationConflict
+			obs.ReasonCode = "RESOURCE_NO_LONGER_PRESENT"
+			break
+		}
+		if live.generation != req.DesiredGeneration {
+			// A prior operation receipt cannot establish that its resource
+			// generation is still current. Stale CREATE observations must
+			// not authorize cleanup of a newer generation sharing the UID.
+			obs.Result = operation.ObservationConflict
+			obs.ReasonCode = "RESOURCE_GENERATION_SUPERSEDED"
+			break
+		}
 		obs.Result = operation.ResourcePresent
 		obs.ResourceID = rec.resourceID
 		obs.ResourceUID = rec.resourceUID
