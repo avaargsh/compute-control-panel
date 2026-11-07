@@ -115,12 +115,18 @@ func TestE1DirectFinalInsertRequiresIndependentEvidenceApproval(t *testing.T) {
 			// origin-only triggers. Use a rollback-only admin transaction solely
 			// for this controlled PG16 fault injection; production writers must
 			// NEVER receive permission to set session_replication_role.
-			var insertExecutor interface { ExecContext(context.Context, string, ...any) (sql.Result, error) } = writer
+			var insertExecutor interface {
+				ExecContext(context.Context, string, ...any) (sql.Result, error)
+			} = writer
 			if tc.replicaMode {
 				faultTx, txErr := admin.BeginTx(ctx, nil)
-				if txErr != nil { t.Fatal(txErr) }
+				if txErr != nil {
+					t.Fatal(txErr)
+				}
 				defer faultTx.Rollback()
-				if _, txErr = faultTx.ExecContext(ctx, "SET LOCAL session_replication_role = replica"); txErr != nil { t.Fatal(txErr) }
+				if _, txErr = faultTx.ExecContext(ctx, "SET LOCAL session_replication_role = replica"); txErr != nil {
+					t.Fatal(txErr)
+				}
 				insertExecutor = faultTx
 			}
 			_, insertErr := insertExecutor.ExecContext(ctx, `
