@@ -36,8 +36,9 @@ BEGIN
         WHERE r.oid NOT IN (audit_owner_oid, audit_table_owner,
                            (SELECT oid FROM pg_catalog.pg_roles WHERE rolname=current_user))
           AND NOT r.rolsuper
-          AND (pg_catalog.pg_has_role(r.oid, audit_owner_oid, 'USAGE')
-               OR pg_catalog.pg_has_role(r.oid, audit_owner_oid, 'SET'))
+          -- MEMBER includes an ADMIN-only grant (SET=FALSE, INHERIT=FALSE).
+          -- Such a role could delegate SET privileges and bypass the audit owner boundary.
+          AND pg_catalog.pg_has_role(r.oid, audit_owner_oid, 'MEMBER')
     ) THEN
         RAISE EXCEPTION 'Provider audit owner is reachable by an untrusted role';
     END IF;
