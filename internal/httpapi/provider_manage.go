@@ -120,11 +120,32 @@ func validProviderManageLabel(value string) bool {
 	return value != "" && value == strings.TrimSpace(value) && len(value) <= 256 && !strings.ContainsRune(value, 0)
 }
 
-func readProviderManagementJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+func readProviderManagementJSON(w http.ResponseWriter, r *http.Request, dst any, allowedFields ...string) bool {
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxProviderManagementBody))
 	if err != nil || len(body) == 0 || validateWorkloadJSONTokens(body) != nil {
 		writeWorkloadAPIError(w, http.StatusBadRequest, "INVALID_PROVIDER_REQUEST", "Invalid, ambiguous or oversized Provider JSON")
 		return false
+	}
+	// encoding/json's struct decoder accepts case-folded field aliases. A
+	// second spelling must not overwrite Provider identity or the CAS version.
+	// Check exact top-level names before decoding the flat management payload.
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil || fields == nil {
+		writeWorkloadAPIError(w, http.StatusBadRequest, "INVALID_PROVIDER_REQUEST", "The request must be a Provider JSON object")
+		return false
+	}
+	for key := range fields {
+		allowed := false
+		for _, name := range allowedFields {
+			if key == name {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			writeWorkloadAPIError(w, http.StatusBadRequest, "INVALID_PROVIDER_REQUEST", "The request contains an unsupported Provider field")
+			return false
+		}
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
@@ -141,7 +162,8 @@ func (h *providerManagementHandler) register(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var request providerRegistrationRequest
-	if !readProviderManagementJSON(w, r, &request) {
+	if !readProviderManagementJSON(w, r, &request,
+		"provider_id", "cluster_scope", "adapter_source", "adapter_version", "capability_digest") {
 		return
 	}
 	if !validProviderManageID(request.ProviderID) || !validProviderManageLabel(request.ClusterScope) ||
@@ -176,6 +198,13 @@ func (h *providerManagementHandler) register(w http.ResponseWriter, r *http.Requ
 }
 
 func (h *providerManagementHandler) read(w http.ResponseWriter, r *http.Request) {
+	// ServeMux GET patterns also match HEAD. This management contract is GET
+	// only; do not perform an implicit privileged repository read for HEAD.
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeWorkloadAPIError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Only GET is supported")
+		return
+	}
 	principal, ok := h.authenticate(w, r)
 	if !ok {
 		return
@@ -210,7 +239,7 @@ func (h *providerManagementHandler) drain(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var request providerDrainRequest
-	if !readProviderManagementJSON(w, r, &request) {
+	if !readProviderManagementJSON(w, r, &request, "expected_version", "reason_code") {
 		return
 	}
 	if request.ExpectedVersion <= 0 || !providerManageReasonPattern.MatchString(request.ReasonCode) ||
