@@ -40,11 +40,13 @@ Desired state is controlled by this service:
 ACTIVE → DELETE_REQUESTED
 ```
 
-Observed phase is a projection from Kubernetes/Kueue/provider:
+Observed Workload phase is the platform lifecycle projection, not a direct Kubernetes/Kueue/provider status:
 ```text
-PENDING | ADMISSION_PENDING | ADMITTED | RUNNING
-SUCCEEDED | FAILED | TERMINATING | RELEASED | UNKNOWN
+REQUESTED | ACCEPTED | PROVISIONING | ALLOCATED
+RELEASING | RELEASED | REJECTED | FAILED_CONFIRMED
 ```
+
+Provider/Kueue observations and ambiguous ComputeOperation outcomes remain separate facts. See `STATE-MACHINES.md`; only a BOUND Allocation provides usable-capacity evidence.
 
 An observation does not mutate desired state. Provider watch events are wake-up hints; the reconciler performs a fresh inspect before updating the projection. An older desired_generation cannot overwrite a newer Workload generation.
 
