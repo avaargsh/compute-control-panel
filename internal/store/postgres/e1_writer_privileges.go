@@ -49,6 +49,8 @@ func verifyEvidenceWriterPrivileges(ctx context.Context, q evidenceWriterQueryRo
 		   OR pg_catalog.has_parameter_privilege(current_user, 'session_replication_role', 'SET')
 		   OR pg_catalog.has_parameter_privilege(current_user, 'session_replication_role', 'ALTER SYSTEM')
 		   OR EXISTS (
+		     -- v0009 promotes E1 authority/integrity triggers to ALWAYS; reverting
+		     -- any one to origin-only permits replication-mode direct SQL bypass.
 		     -- Applied migration checksums are not proof that required
 		     -- triggers are still enabled or still target their handlers.
 		     -- Check the actual catalog on the very same write transaction.
@@ -77,7 +79,7 @@ func verifyEvidenceWriterPrivileges(ctx context.Context, q evidenceWriterQueryRo
 		     LEFT JOIN pg_catalog.pg_proc p ON p.oid=t.tgfoid
 		     LEFT JOIN pg_catalog.pg_language l ON l.oid=p.prolang
 		     WHERE t.oid IS NULL
-		        OR t.tgenabled NOT IN ('O', 'A')
+		        OR t.tgenabled <> 'A'
 		        OR t.tgfoid<>required.handler_oid
 		        OR t.tgtype<>required.event_bits
 		        OR t.tgqual IS NOT NULL

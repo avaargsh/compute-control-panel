@@ -63,7 +63,12 @@ func TestE1WriterRejectsFinalAuthorizationCatalogDrift(t *testing.T) {
 		{
 			name:    "final approval trigger disabled",
 			ddl:     "ALTER TABLE public.compute_allocation_usage_evidence_sets DISABLE TRIGGER compute_usage_evidence_z_authorization_guard",
-			restore: "ALTER TABLE public.compute_allocation_usage_evidence_sets ENABLE TRIGGER compute_usage_evidence_z_authorization_guard",
+			restore: "ALTER TABLE public.compute_allocation_usage_evidence_sets ENABLE ALWAYS TRIGGER compute_usage_evidence_z_authorization_guard",
+		},
+		{
+			name:    "final approval trigger downgraded to origin only",
+			ddl:     "ALTER TABLE public.compute_allocation_usage_evidence_sets ENABLE TRIGGER compute_usage_evidence_z_authorization_guard",
+			restore: "ALTER TABLE public.compute_allocation_usage_evidence_sets ENABLE ALWAYS TRIGGER compute_usage_evidence_z_authorization_guard",
 		},
 		{
 			name:    "final approval function replaced",
@@ -78,7 +83,7 @@ func TestE1WriterRejectsFinalAuthorizationCatalogDrift(t *testing.T) {
 		{
 			name:    "immutable issuer ledger row trigger disabled",
 			ddl:     "ALTER TABLE public.compute_e1_final_authorizations DISABLE TRIGGER compute_e1_final_auth_immutable",
-			restore: "ALTER TABLE public.compute_e1_final_authorizations ENABLE TRIGGER compute_e1_final_auth_immutable",
+			restore: "ALTER TABLE public.compute_e1_final_authorizations ENABLE ALWAYS TRIGGER compute_e1_final_auth_immutable",
 		},
 	}
 	for _, tc := range tests {

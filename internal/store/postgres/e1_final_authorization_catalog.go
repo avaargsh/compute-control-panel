@@ -186,7 +186,7 @@ func verifyE1FinalAuthorizationCatalog(ctx context.Context, q evidenceWriterQuer
 			SELECT EXISTS (
 				SELECT 1 FROM pg_catalog.pg_trigger g
 				WHERE g.tgrelid=to_regclass($1) AND g.tgname=$2
-				  AND NOT g.tgisinternal AND g.tgenabled='O'
+				  AND NOT g.tgisinternal AND g.tgenabled='A'
 				  AND g.tgtype=$4 AND g.tgqual IS NULL
 				  AND g.tgattr::text='' AND g.tgnargs=0
 				  AND NOT g.tgdeferrable AND NOT g.tginitdeferred
