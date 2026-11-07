@@ -7,11 +7,15 @@ production management ingress nor proof of allocatable GPU capacity.
 
 - Historical `gpu-compute-platform` (retired): management intent, immutable
   Provider identity, generation and lease fencing, create-or-adopt recovery,
-  UID-bound cleanup, resource absence and late-ACK handling. See its
-  `docs/PROVIDER_RECOVERY_CONTRACT.md`,
-  `docs/WORKLOAD_LIFECYCLE.md` and
-  `docs/RELEASE_ACCEPTANCE_V0_1.md`. The 2026-10-23 Stage B audit explicitly
-  did **not** qualify physical GPU or a second production Provider.
+  UID-bound cleanup, resource absence and late-ACK handling. The
+  2026-10-23 Stage B audit references the historical
+  `docs/PROVIDER_ADAPTER_SPI.md`,
+  `docs/VOLCANO_PROVIDER_RECOVERY_CONTRACT.md` and
+  `docs/CAPABILITY_RELEASE_MATRIX.md` at archived master
+  `bcb0631ed56b2bfeae9abeaefd8f91629c4e7987`. The legacy repository
+  has moved; those archival paths have not been re-fetched in this review.
+  The audit explicitly did **not** qualify physical GPU or a second
+  production Provider.
 - Historical `temp-runner`, now `openarc-labs/temp-runner`: preserve its
   pinned source-SHA, ephemeral kind/Temporal test environment, negative-control
   tests, source lock and artifacts model. It is an **experiment harness**, not
@@ -22,8 +26,8 @@ production management ingress nor proof of allocatable GPU capacity.
   conformance, but only in the test-double boundary.
 
 Keep **one** authoritative PostgreSQL Provider/Workload/Allocation state
-machine in CCP. Do not reintroduce the historical Python/FastAPI management
-database, Celery scheduler or a second ResourceClaim manager.
+machine in CCP. Do not introduce an alternative management database,
+scheduler or second ResourceClaim manager.
 
 ## Standalone HTTP contract
 
@@ -38,7 +42,9 @@ durable Provider repository. No route is mounted by the default service.
 | POST | `/api/v1/manage/providers/{provider_id}/drain` | `expected_version`/reason-bound one-way CAS to DRAINING: `200` or `409` |
 
 All request bodies are bounded to 64 KiB and reject duplicate JSON keys,
-explicit nulls, unknown fields, malformed bodies and unsupported fields.
+explicit nulls, unknown fields (including case-folded aliases), malformed
+bodies and unsupported fields. The GET read route explicitly rejects HEAD
+rather than allowing Go ServeMux to invoke a privileged read.
 The API restricts path Provider IDs to portable ASCII segments. All responses
 are no-store. The `provider_id` is a global bootstrap registry key and
 **must not be authorized merely because an authenticated service has Tenant
