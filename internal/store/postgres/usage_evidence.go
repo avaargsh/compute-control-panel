@@ -494,7 +494,9 @@ func sameStringSlice(a, b []string) bool {
 	return true
 }
 
-// GetUsageEvidenceSet returns evidence only within the requested tenant scope.
+// GetUsageEvidenceSet returns a historical receipt only within the requested
+// tenant scope. It does not check current policy or FINAL authorization and
+// must not be used as evidence of current authorization or billing readiness.
 // Project/service authorization remains the HTTP/API caller's responsibility.
 func (r *Repository) GetUsageEvidenceSet(ctx context.Context, tenantID, evidenceSetID string) (UsageEvidenceSet, error) {
 	if strings.TrimSpace(tenantID) == "" || strings.TrimSpace(evidenceSetID) == "" {
