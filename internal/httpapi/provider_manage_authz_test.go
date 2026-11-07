@@ -18,11 +18,11 @@ import (
 
 func providerAdminGrant() ProviderManagementGrant {
 	return ProviderManagementGrant{
-		Subject: "spiffe://example.org/ns/admin/sa/manager",
-		TenantID: "tenant-001",
-		Service: "compute-admin",
+		Subject:    "spiffe://example.org/ns/admin/sa/manager",
+		TenantID:   "tenant-001",
+		Service:    "compute-admin",
 		ProviderID: "provider-001",
-		Action: "read",
+		Action:     "read",
 	}
 }
 
@@ -71,9 +71,9 @@ func TestExactProviderManagementAuthorizerBindsSubjectTenantServiceProviderAndAc
 		t.Fatalf("exact grant denied: %v", err)
 	}
 	cases := []struct {
-		name string
-		p WorkloadPrincipal
-		action string
+		name       string
+		p          WorkloadPrincipal
+		action     string
 		providerID string
 	}{
 		{"different subject", WorkloadPrincipal{Subject: "spiffe://example.org/ns/admin/sa/other", TenantID: grant.TenantID, Service: grant.Service}, "read", grant.ProviderID},
@@ -128,9 +128,9 @@ func newProviderManagementTLSTestClient(t *testing.T, handler http.Handler, spif
 	}
 	leafTmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(2), NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour),
-		KeyUsage: x509.KeyUsageDigitalSignature,
+		KeyUsage:    x509.KeyUsageDigitalSignature,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
-		URIs: []*url.URL{uri},
+		URIs:        []*url.URL{uri},
 	}
 	leafDER, err := x509.CreateCertificate(rand.Reader, leafTmpl, ca, leafKey.Public(), caKey)
 	if err != nil {
@@ -153,7 +153,12 @@ func newProviderManagementTLSTestClient(t *testing.T, handler http.Handler, spif
 
 func TestProviderManageSPIFFEVerifiedTLSAndExactAdminGrant(t *testing.T) {
 	grant := providerAdminGrant()
-	for _, tc := range []struct { name string; grant ProviderManagementGrant; status int; repoCalls int }{
+	for _, tc := range []struct {
+		name      string
+		grant     ProviderManagementGrant
+		status    int
+		repoCalls int
+	}{
 		{"matching grant", grant, http.StatusOK, 1},
 		{"nonmatching provider", func() ProviderManagementGrant { g := grant; g.ProviderID = "provider-other"; return g }(), http.StatusForbidden, 0},
 	} {
