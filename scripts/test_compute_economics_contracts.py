@@ -345,6 +345,46 @@ class ComputeEconomicsContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "rate_overlap"):
             calculate_direct_cost(self.cost_fixture["usageInterval"], rates)
 
+    def test_oracle_refuses_incomplete_usage_evidence(self) -> None:
+        for mutation in ({"sourceCoverage": 0.5}, {"quality": "INCOMPLETE"}):
+            usage = json.loads(json.dumps(self.cost_fixture["usageInterval"]))
+            usage.update(mutation)
+            with self.subTest(mutation=mutation), self.assertRaisesRegex(ValueError, "incomplete_usage_evidence"):
+                calculate_direct_cost(usage, self.cost_fixture["rateCards"])
+
+    def test_oracle_exact_seven_second_half_up_and_quantity_scale(self) -> None:
+        usage = json.loads(json.dumps(self.cost_fixture["usageInterval"]))
+        usage["quantity"]["gpuCount"] = "1"
+        usage["window"] = {"start": "2026-11-01T00:00:00Z", "end": "2026-11-01T00:00:07Z"}
+        rate = dict(self.cost_fixture["rateCards"][0])
+        rate["effectiveTo"] = None
+        rate["rateAmount"] = "18.00"
+        result = calculate_direct_cost(usage, [rate])
+        self.assertEqual("0.04", result[0]["amount"])
+        self.assertEqual("0.001944444444444444", result[0]["priced_quantity_gpu_hours"])
+        self.assertLessEqual(len(result[0]["priced_quantity_gpu_hours"].split(".")[1]), 18)
+
+    def test_oracle_preserves_nanosecond_boundary_which_rounds_down(self) -> None:
+        usage = json.loads(json.dumps(self.cost_fixture["usageInterval"]))
+        usage["quantity"]["gpuCount"] = "1"
+        usage["window"] = {"start": "2026-11-01T00:00:00.000000001Z", "end": "2026-11-01T00:00:01Z"}
+        rate = dict(self.cost_fixture["rateCards"][0])
+        rate["effectiveTo"] = None
+        rate["rateAmount"] = "18.00"
+        result = calculate_direct_cost(usage, [rate])
+        self.assertEqual("0.00", result[0]["amount"])
+        self.assertEqual("2026-11-01T00:00:00.000000001Z", result[0]["start"])
+
+    def test_oracle_large_exact_rate_has_no_decimal_context_rounding(self) -> None:
+        usage = json.loads(json.dumps(self.cost_fixture["usageInterval"]))
+        usage["quantity"]["gpuCount"] = "1"
+        usage["window"] = {"start": "2026-11-01T00:00:00Z", "end": "2026-11-01T01:00:00Z"}
+        rate = dict(self.cost_fixture["rateCards"][0])
+        rate["effectiveTo"] = None
+        rate["rateAmount"] = "9" * 60 + ".999"
+        result = calculate_direct_cost(usage, [rate])
+        self.assertEqual("1" + "0" * 60 + ".00", result[0]["amount"])
+
     def test_currency_metadata_registry_is_pinned_and_has_expected_minor_units(self) -> None:
         self.assertEqual("six-list-one-2026-09-17-subset-v1", CURRENCY_METADATA_VERSION)
         self.assertEqual(2, CURRENCY_MINOR_UNITS["CNY"])
@@ -477,6 +517,13 @@ class ComputeEconomicsContractTests(unittest.TestCase):
             "recordedAt": "2026-11-01T12:00:08Z",
         }
         self.assert_valid("workload_cost_entry", entry)
+        for bad_amount in ("0.001", "1.001", "0.00"):
+            with self.subTest(amount=bad_amount):
+                entry["amount"] = bad_amount
+                self.assertFalse(self.validators["workload_cost_entry"].is_valid(entry))
+        entry["amount"] = "0.01"
+        entry["rateAmount"] = "0.000001"
+        self.assert_valid("workload_cost_entry", entry)
         entry["pricedQuantity"] = "0." + "0" * 18 + "1"
         self.assertFalse(self.validators["workload_cost_entry"].is_valid(entry))
 
@@ -515,6 +562,11 @@ class ComputeEconomicsContractTests(unittest.TestCase):
         entry["reversesEntryId"] = "cost-original"
         self.assert_valid("workload_cost_entry", entry)
         entry["entryType"] = "CHARGE"
+        self.assertFalse(self.validators["workload_cost_entry"].is_valid(entry))
+        entry.pop("reversesEntryId")
+        entry["replacesEntryId"] = "cost-original"
+        self.assert_valid("workload_cost_entry", entry)
+        entry["entryType"] = "REVERSAL"
         self.assertFalse(self.validators["workload_cost_entry"].is_valid(entry))
 
 
