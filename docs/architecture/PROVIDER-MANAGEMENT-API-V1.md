@@ -75,11 +75,16 @@ grant requires trusted configuration replacement and handler rotation;
 revoking the underlying SPIFFE identity in the authoritative directory
 is enforced on subsequent authentication. Real deployment provisioning,
 secret/config trust, revocation latency, policy auditing, least-privilege
-database roles and independently verified TLS admission remain
+database roles and independently verified production TLS admission remain
 separate gates. Unit tests cover exact grant matching and a real
 `httptest` TLS client-certificate handshake with an in-memory identity
-resolver; they do **not** prove the deployed PostgreSQL identity directory
-is on that end-to-end TLS path.
+resolver. An additional `DATABASE_URL`-gated integration test connects the
+same verified TLS client to the **real PostgreSQL identity directory and
+Provider registry**, exercising register/read/drain/replay, identity
+revocation, and append-only audit counts against a disposable PG16 CI service.
+That proves a reproducible integration scenario only: no deployed CA,
+production listener, administrator provisioning workflow, lease/device
+release, or real GPU has been tested.
 
 ### Registration request
 
