@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -116,7 +115,12 @@ func TestProviderAuditHardenedFunctionCandidateRestrictedWriter(t *testing.T) {
 		if _, err := tx.ExecContext(ctx, "SAVEPOINT denied_writer_operation"); err != nil {
 			t.Fatal(err)
 		}
-		_, err := tx.ExecContext(ctx, forbidden, registration.ProviderID)
+		var err error
+		if strings.Contains(forbidden, "$1") {
+			_, err = tx.ExecContext(ctx, forbidden, registration.ProviderID)
+		} else {
+			_, err = tx.ExecContext(ctx, forbidden)
+		}
 		if err == nil {
 			t.Fatalf("restricted Provider writer could run forbidden operation: %s", forbidden)
 		}
@@ -150,5 +154,4 @@ func TestProviderAuditHardenedFunctionCandidateRestrictedWriter(t *testing.T) {
 	if state != "DRAINING" || version != 2 || count != 2 {
 		t.Fatalf("candidate persisted wrong lifecycle evidence state=%s version=%d auditRows=%d", state, version, count)
 	}
-	_ = strings.TrimSpace // keep test imports minimal; no production behavior changed
 }
