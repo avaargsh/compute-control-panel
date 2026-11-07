@@ -277,3 +277,48 @@ func TestE1WriterRejectsDirectOrColumnIssuerReadGrants(t *testing.T) {
 		})
 	}
 }
+
+func TestE1WriterRejectsSessionReplicationRoleSetPrivilege(t *testing.T) {
+	admin := openIntegrationDB(t)
+	writer := testEvidenceWriterDB(t, admin)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	var login, replicationRole string
+	if err := writer.QueryRowContext(ctx,
+		"SELECT current_user, current_setting('session_replication_role')").Scan(
+		&login, &replicationRole); err != nil {
+		t.Fatal(err)
+	}
+	if replicationRole != "origin" {
+		t.Fatalf("test writer did not start with ordinary triggers: %s", replicationRole)
+	}
+	if err := verifyEvidenceWriterPrivileges(ctx, writer); err != nil {
+		t.Fatalf("ordinary restricted writer rejected: %v", err)
+	}
+	// A GRANT on this superuser-only GUC does not change the current value.
+	// A credentialed direct SQL writer could subsequently set 'replica'
+	// and bypass ordinary FINAL INSERT triggers. The role must be rejected
+	// before accepting it for any E1 evidence-writing connection.
+	if _, err := admin.ExecContext(ctx, fmt.Sprintf(
+		"GRANT SET ON PARAMETER session_replication_role TO %s", login)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := admin.ExecContext(context.Background(), fmt.Sprintf(
+			"REVOKE SET ON PARAMETER session_replication_role FROM %s", login)); err != nil {
+			t.Errorf("restore E1 writer replication parameter privileges: %v", err)
+		}
+	})
+	var canDisableTriggers bool
+	if err := writer.QueryRowContext(ctx,
+		"SELECT has_parameter_privilege(current_user, 'session_replication_role', 'SET')").
+		Scan(&canDisableTriggers); err != nil {
+		t.Fatal(err)
+	}
+	if !canDisableTriggers {
+		t.Fatal("fixture failed to grant trigger-bypass parameter privilege")
+	}
+	if err := verifyEvidenceWriterPrivileges(ctx, writer); !errors.Is(err, ErrEvidencePolicyUntrusted) {
+		t.Fatalf("E1 writer accepted trigger-bypass SET privilege: %v", err)
+	}
+}
