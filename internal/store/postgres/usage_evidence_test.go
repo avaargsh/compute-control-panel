@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -277,6 +278,67 @@ func TestPersistUsageEvidenceSetIsImmutableIdempotentAndTenantScoped(t *testing.
 	}
 	if _, err := db.ExecContext(ctx, "TRUNCATE compute_allocation_usage_evidence_sets"); err == nil {
 		t.Fatal("immutable evidence accepted TRUNCATE")
+	}
+}
+
+func TestHistoricalUsageEvidenceReceiptSurvivesPolicyRevocation(t *testing.T) {
+	db := openIntegrationDB(t)
+	repo := newTestEvidenceRepo(t, db)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	p := acceptanceFixture(t, "tenant-receipt-"+randomSuffix(t),
+		"workload-key-"+randomSuffix(t), "operation-key-"+randomSuffix(t), "operation-event-"+randomSuffix(t))
+	a, created, err := acceptTestEvidenceWorkload(t, db, ctx, p)
+	if err != nil || !created {
+		t.Fatalf("AcceptWorkload: created=%t err=%v", created, err)
+	}
+	markUsageEvidenceProviderOperationSucceeded(t, db, a)
+	params := typedUsageEvidence(a)
+	first, persisted, err := repo.PersistUsageEvidenceSet(ctx, params)
+	if err != nil || !persisted {
+		t.Fatalf("first persist: persisted=%t err=%v", persisted, err)
+	}
+	before, err := repo.GetUsageEvidenceSet(ctx, first.TenantID, first.EvidenceSetID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := db.ExecContext(ctx, `UPDATE public.compute_evidence_policy_fences
+		SET revoked=true, revision=revision+1
+		WHERE tenant_id=$1 AND provider_id=$2 AND policy_version=$3`,
+		first.TenantID, first.ProviderID, first.EvidencePolicyVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := result.RowsAffected(); err != nil || n != 1 {
+		t.Fatalf("revoke policy: rows=%d err=%v", n, err)
+	}
+	if _, persisted, err := repo.PersistUsageEvidenceSet(ctx, params); !errors.Is(err, ErrEvidencePolicyUntrusted) || persisted {
+		t.Fatalf("revoked policy replay: persisted=%t err=%v", persisted, err)
+	}
+
+	reader, err := NewRepository(repo.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := reader.GetUsageEvidenceSet(ctx, first.TenantID, first.EvidenceSetID)
+	if err != nil {
+		t.Fatalf("historical receipt after revocation: %v", err)
+	}
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("revocation changed historical receipt: before=%+v after=%+v", before, after)
+	}
+	if _, err := reader.GetUsageEvidenceSet(ctx, "another-tenant", first.EvidenceSetID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("cross-tenant receipt read = %v, want sql.ErrNoRows", err)
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM public.compute_allocation_usage_evidence_sets
+		WHERE tenant_id=$1 AND allocation_id=$2`, first.TenantID, first.AllocationID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("revocation or replay changed evidence row count: %d", count)
 	}
 }
 
