@@ -96,7 +96,12 @@
           "type": "object",
           "additionalProperties": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "propertyNames": {
+            "type": "string",
+            "pattern": "\\S"
           }
         },
         "max_duration_seconds": {
