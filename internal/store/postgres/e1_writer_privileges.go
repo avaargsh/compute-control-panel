@@ -23,6 +23,8 @@ type evidenceWriterQueryRow interface {
 // Privilege grants can change at runtime; only a separate admin role may
 // provision or revoke policy, and production must restrict role membership,
 // connection pooling and DDL access independently.
+// Catalog relations are schema-qualified because an ordinary TEMP-capable
+// writer can create same-name relations in pg_temp.
 func verifyEvidenceWriterPrivileges(ctx context.Context, q evidenceWriterQueryRow) error {
 	if q == nil {
 		return ErrEvidencePolicyUntrusted
@@ -34,7 +36,7 @@ func verifyEvidenceWriterPrivileges(ctx context.Context, q evidenceWriterQueryRo
 		   OR session_user <> current_user
 		   OR has_database_privilege(current_user, current_database(), 'CREATE')
 		   OR EXISTS (
-		     SELECT 1 FROM pg_roles other
+		     SELECT 1 FROM pg_catalog.pg_roles other
 		     WHERE other.rolname <> current_user
 		       AND pg_has_role(current_user, other.oid, 'SET')
 		   )
@@ -129,7 +131,7 @@ func verifyEvidenceWriterPrivileges(ctx context.Context, q evidenceWriterQueryRo
 		        OR (NOT protected.allow_insert AND
 		            has_table_privilege(current_user, protected.relation_oid, 'INSERT'))
 		        OR EXISTS (
-		          SELECT 1 FROM pg_attribute a
+		          SELECT 1 FROM pg_catalog.pg_attribute a
 		          WHERE a.attrelid=protected.relation_oid
 		            AND a.attnum>0 AND NOT a.attisdropped
 		            AND (
@@ -161,14 +163,14 @@ func verifyEvidenceWriterPrivileges(ctx context.Context, q evidenceWriterQueryRo
 		     SELECT bool_or(has_column_privilege(current_user,
 		                      'public.compute_evidence_policy_fences',
 		                      a.attname, 'UPDATE'))
-		     FROM pg_attribute a
+		     FROM pg_catalog.pg_attribute a
 		     WHERE a.attrelid='public.compute_evidence_policy_fences'::regclass
 		       AND a.attnum>0 AND NOT a.attisdropped AND a.attname<>'updated_at'
 		   ), TRUE)),
 		  has_table_privilege(current_user, 'public.compute_evidence_policy_fences', 'SELECT'),
 		  has_column_privilege(current_user, 'public.compute_evidence_policy_fences', 'updated_at', 'UPDATE'),
 		  has_table_privilege(current_user, 'public.compute_allocation_usage_evidence_sets', 'INSERT')
-		FROM pg_roles r WHERE r.rolname=current_user
+		FROM pg_catalog.pg_roles r WHERE r.rolname=current_user
 	`).Scan(&privileged, &hasRead, &hasLockColumn, &canInsertEvidence)
 	if err != nil {
 		return fmt.Errorf("%w: cannot attest E1 writer database role: %v", ErrEvidencePolicyUntrusted, err)
