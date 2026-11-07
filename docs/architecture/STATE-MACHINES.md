@@ -153,7 +153,7 @@ NOT_FOUND is a point-in-time observation, not automatically a release decision. 
 3. If the response is lost, set operation UNKNOWN and keep workload PROVISIONING / allocation PENDING.
 4. Inspect by the provider token or deterministic external reference.
 5. If the resource exists and matches the immutable provider_request_digest, bind its provider_resource_id and resolve SUCCEEDED.
-6. If the provider proves no resource was created, resolve FAILED_CONFIRMED or safely re-dispatch the same operation.
+6. If the provider proves no resource was created and a retry is appropriate, resolve the operation RECONCILING → PENDING and safely re-dispatch the same immutable operation. If authoritative evidence proves definitive terminal failure, mark the operation FAILED; project Workload/Allocation FAILED_CONFIRMED only after verified cleanup/absence of any objects or reservations.
 7. If the provider cannot prove either outcome, keep UNKNOWN or move to MANUAL_REVIEW. Never create a new operation merely to escape uncertainty.
 
 ### Delete
