@@ -164,6 +164,7 @@ def calculate_direct_cost(
                 "amount": format(amount, f".{currency_minor_unit}f"),
                 "currency": currency,
                 "currency_minor_unit": currency_minor_unit,
+                "currency_metadata_version": currency_metadata_version,
             }
         )
     return segments
@@ -188,6 +189,40 @@ class ComputeEconomicsContractTests(unittest.TestCase):
         cls.cost_fixture = read_json(
             EXAMPLE_DIR / "workload-cost-allocation-rate-boundary-v1.json"
         )
+        cls.currency_metadata = read_json(
+            SCHEMA_DIR / "currency-metadata-snapshot-v1.json"
+        )
+
+    def test_currency_registry_snapshot_matches_runtime_and_contracts(self) -> None:
+        snapshot = self.currency_metadata
+        self.assertEqual(CURRENCY_METADATA_VERSION, snapshot["snapshotVersion"])
+        self.assertEqual(CURRENCY_MINOR_UNITS, snapshot["currencies"])
+
+        for schema_name in ("provider_rate_card", "workload_cost_entry"):
+            with self.subTest(schema=schema_name):
+                schema = self.schemas[schema_name]
+                self.assertEqual(
+                    CURRENCY_METADATA_VERSION,
+                    schema["properties"]["currencyMetadataVersion"]["const"],
+                )
+                self.assertEqual(
+                    set(CURRENCY_MINOR_UNITS),
+                    set(schema["properties"]["currency"]["enum"]),
+                )
+                mapping_rules = [
+                    rule["oneOf"] for rule in schema.get("allOf", [])
+                    if isinstance(rule, dict) and "oneOf" in rule
+                ]
+                self.assertEqual(1, len(mapping_rules), "schema must contain exactly one currency precision mapping")
+                schema_pairs = {
+                    item["properties"]["currency"]["const"]:
+                    item["properties"]["currencyMinorUnit"]["const"]
+                    for item in mapping_rules[0]
+                }
+                self.assertEqual(CURRENCY_MINOR_UNITS, schema_pairs)
+
+        self.assertNotIn("ZZZ", snapshot["currencies"])
+        self.assertNotIn("XXX", snapshot["currencies"])
 
     def assert_valid(self, schema_name: str, instance: dict[str, Any]) -> None:
         errors = sorted(
@@ -243,7 +278,7 @@ class ComputeEconomicsContractTests(unittest.TestCase):
                 "rateCardVersion": segment["rateCardVersion"],
                 "rateAmount": segment["rateAmountPerGpuHour"],
                 "currency": "CNY",
-                "currencyMetadataVersion": CURRENCY_METADATA_VERSION,
+                "currencyMetadataVersion": segment["currencyMetadataVersion"],
                 "currencyMinorUnit": segment["currencyMinorUnit"],
                 "amount": segment["amount"],
                 "calculationInputDigest": "sha256:" + "a" * 64,
@@ -271,6 +306,7 @@ class ComputeEconomicsContractTests(unittest.TestCase):
                     "amount": "30.00",
                     "currency": "CNY",
                     "currency_minor_unit": 2,
+                    "currency_metadata_version": CURRENCY_METADATA_VERSION,
                 },
                 {
                     "start": "2026-11-01T10:30:00Z",
@@ -281,10 +317,15 @@ class ComputeEconomicsContractTests(unittest.TestCase):
                     "amount": "36.00",
                     "currency": "CNY",
                     "currency_minor_unit": 2,
+                    "currency_metadata_version": CURRENCY_METADATA_VERSION,
                 },
             ],
             segments,
         )
+        for produced, expected in zip(segments, self.cost_fixture["expected"]["segments"], strict=True):
+            self.assertEqual(expected["currencyMetadataVersion"], produced["currency_metadata_version"])
+            self.assertEqual(expected["currencyMinorUnit"], produced["currency_minor_unit"])
+
         self.assertEqual(
             Decimal("66.00"),
             sum(Decimal(segment["amount"]) for segment in segments),

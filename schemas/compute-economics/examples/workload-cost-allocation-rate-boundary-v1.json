@@ -82,7 +82,8 @@
         "amount": "30.00",
         "rateCardId": "rate-h100-v1",
         "rateCardVersion": 1,
-        "currencyMinorUnit": 2
+        "currencyMinorUnit": 2,
+        "currencyMetadataVersion": "six-list-one-2026-09-17-subset-v1"
       },
       {
         "start": "2026-11-01T10:30:00Z",
@@ -94,7 +95,8 @@
         "amount": "36.00",
         "rateCardId": "rate-h100-v2",
         "rateCardVersion": 2,
-        "currencyMinorUnit": 2
+        "currencyMinorUnit": 2,
+        "currencyMetadataVersion": "six-list-one-2026-09-17-subset-v1"
       }
     ],
     "totalAllocatedGpuHours": "6.0",
