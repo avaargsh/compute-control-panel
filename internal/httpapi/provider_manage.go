@@ -89,7 +89,10 @@ func NewProviderManagementHandler(deps ProviderManagementDependencies) (http.Han
 	mux.HandleFunc("POST "+providerManagementCollection, h.register)
 	mux.HandleFunc("GET "+providerManagementCollection+"/{provider_id}", h.read)
 	mux.HandleFunc("POST "+providerManagementCollection+"/{provider_id}/drain", h.drain)
-	return mux, nil
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		mux.ServeHTTP(w, r)
+	}), nil
 }
 
 func (h *providerManagementHandler) authenticate(w http.ResponseWriter, r *http.Request) (WorkloadPrincipal, bool) {
