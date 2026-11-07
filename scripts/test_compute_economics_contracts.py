@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import unittest
@@ -101,6 +102,79 @@ def format_priced_quantity(quantity: Fraction) -> str:
     scaled = round_positive_half_up(quantity * 10**18)
     whole, fraction = divmod(scaled, 10**18)
     return f"{whole}.{str(fraction).zfill(18).rstrip('0') or '0'}"
+
+
+def canonical_decimal(value: str) -> str:
+    """Normalize an exact decimal without exposing context-dependent exponents."""
+    normalized = format(Decimal(value), "f")
+    if "." in normalized:
+        normalized = normalized.rstrip("0").rstrip(".")
+    return normalized if normalized not in ("", "-0") else "0"
+
+
+def calculation_input_digest(
+    usage: dict[str, Any],
+    rate: dict[str, Any],
+    segment_start: int,
+    segment_end: int,
+) -> str:
+    """Hash one typed, deterministic v1 JSON preimage, never a Python repr."""
+    event_ids = usage["sourceEventIds"]
+    if not event_ids or len(set(event_ids)) != len(event_ids):
+        raise ValueError("duplicate_or_missing_source_event")
+    preimage = {
+        "schemaVersion": "compute.economics.calculation-input.v1",
+        "calculationVersion": "cost-v1",
+        "usage": {
+            "usageIntervalId": usage["usageIntervalId"],
+            "tenantId": usage["tenantId"],
+            "projectId": usage["projectId"],
+            "workloadId": usage["workloadId"],
+            "allocationId": usage["allocationId"],
+            "allocationGeneration": usage.get("allocationGeneration"),
+            "providerId": usage["providerId"],
+            "poolId": usage["poolId"],
+            "profileId": usage["profileId"],
+            "gpuCount": canonical_decimal(usage["quantity"]["gpuCount"]),
+            "unit": usage["unit"],
+            "resourceClass": usage["resourceClass"],
+            "gpuModel": usage["gpuModel"],
+            "meteringPolicyVersion": usage["meteringPolicyVersion"],
+            "quality": usage["quality"],
+            "attributionMethod": usage["attributionMethod"],
+            "sourceCoverage": "1",
+            "sourceEventIds": sorted(event_ids),
+            "windowStart": format_instant(parse_instant(usage["window"]["start"]), canonical=True),
+            "windowEnd": format_instant(parse_instant(usage["window"]["end"]), canonical=True),
+        },
+        "segment": {
+            "start": format_instant(segment_start, canonical=True),
+            "end": format_instant(segment_end, canonical=True),
+        },
+        "rate": {
+            "rateCardId": rate["rateCardId"],
+            "version": rate["version"],
+            "providerId": rate["providerId"],
+            "poolId": rate.get("poolId"),
+            "profileId": rate["profileId"],
+            "rateBasis": rate["rateBasis"],
+            "unit": rate["unit"],
+            "rateAmount": canonical_decimal(rate["rateAmount"]),
+            "currency": rate["currency"],
+            "currencyMinorUnit": rate["currencyMinorUnit"],
+            "currencyMetadataVersion": rate["currencyMetadataVersion"],
+            "sourceRef": rate["sourceRef"],
+            "effectiveFrom": format_instant(parse_instant(rate["effectiveFrom"]), canonical=True),
+            "effectiveTo": (
+                format_instant(parse_instant(rate["effectiveTo"]), canonical=True)
+                if rate.get("effectiveTo") is not None else None
+            ),
+        },
+    }
+    encoded = json.dumps(
+        preimage, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
 
 
 def rate_matches_dimensions(rate: dict[str, Any], usage: dict[str, Any]) -> bool:
@@ -217,6 +291,7 @@ def calculate_direct_cost(
                 "currency": currency,
                 "currency_minor_unit": currency_minor_unit,
                 "currency_metadata_version": currency_metadata_version,
+                "calculation_input_digest": calculation_input_digest(usage, rate, segment_start, segment_end),
             }
         )
     return segments
