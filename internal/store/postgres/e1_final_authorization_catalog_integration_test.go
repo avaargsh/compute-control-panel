@@ -66,6 +66,16 @@ func TestE1WriterRejectsFinalAuthorizationCatalogDrift(t *testing.T) {
 			restore: "ALTER TABLE public.compute_allocation_usage_evidence_sets ENABLE ALWAYS TRIGGER compute_usage_evidence_z_authorization_guard",
 		},
 		{
+			name:    "server recorded_at stamp trigger disabled",
+			ddl:     "ALTER TABLE public.compute_allocation_usage_evidence_sets DISABLE TRIGGER compute_usage_evidence_y_recorded_at_guard",
+			restore: "ALTER TABLE public.compute_allocation_usage_evidence_sets ENABLE ALWAYS TRIGGER compute_usage_evidence_y_recorded_at_guard",
+		},
+		{
+			name:    "server recorded_at stamp trigger downgraded",
+			ddl:     "ALTER TABLE public.compute_allocation_usage_evidence_sets ENABLE TRIGGER compute_usage_evidence_y_recorded_at_guard",
+			restore: "ALTER TABLE public.compute_allocation_usage_evidence_sets ENABLE ALWAYS TRIGGER compute_usage_evidence_y_recorded_at_guard",
+		},
+		{
 			name:    "final approval trigger downgraded to origin only",
 			ddl:     "ALTER TABLE public.compute_allocation_usage_evidence_sets ENABLE TRIGGER compute_usage_evidence_z_authorization_guard",
 			restore: "ALTER TABLE public.compute_allocation_usage_evidence_sets ENABLE ALWAYS TRIGGER compute_usage_evidence_z_authorization_guard",

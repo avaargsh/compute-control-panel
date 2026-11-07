@@ -74,6 +74,11 @@ BEGIN
     END IF;
     RETURN NEW;
 END;`
+const expectedE1FinalStamp = `BEGIN
+    NEW.recorded_at := clock_timestamp();
+    RETURN NEW;
+END;`
+
 const expectedE1FinalMutation = `BEGIN
     IF TG_OP = 'UPDATE'
        AND OLD.revoked = false AND NEW.revoked = true
@@ -155,6 +160,7 @@ func verifyE1FinalAuthorizationCatalog(ctx context.Context, q evidenceWriterQuer
 	}{
 		{"public.compute_require_e1_final_authorization()", expectedE1FinalAuth, true},
 		{"public.compute_protect_e1_final_authorizations()", expectedE1FinalMutation, false},
+		{"public.compute_stamp_e1_recorded_at()", expectedE1FinalStamp, false},
 	} {
 		var body string
 		var valid bool
@@ -179,6 +185,7 @@ func verifyE1FinalAuthorizationCatalog(ctx context.Context, q evidenceWriterQuer
 		event                       int
 	}{
 		{"public.compute_allocation_usage_evidence_sets", "compute_usage_evidence_z_authorization_guard", "public.compute_require_e1_final_authorization()", 7},
+		{"public.compute_allocation_usage_evidence_sets", "compute_usage_evidence_y_recorded_at_guard", "public.compute_stamp_e1_recorded_at()", 7},
 		{"public.compute_e1_final_authorizations", "compute_e1_final_auth_immutable", "public.compute_protect_e1_final_authorizations()", 27},
 		{"public.compute_e1_final_authorizations", "compute_e1_final_auth_no_truncate", "public.compute_protect_e1_final_authorizations()", 34},
 	} {
