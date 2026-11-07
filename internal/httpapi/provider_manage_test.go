@@ -241,3 +241,19 @@ func TestProviderManageUnsupportedRoutesRemainNoStore(t *testing.T) {
 		}
 	}
 }
+
+// A Go 1.22+ ServeMux GET route also matches HEAD, unless the handler
+// explicitly rejects it. Management reads must not grow an implicit method.
+func TestProviderManageRejectsImplicitHeadRead(t *testing.T) {
+	h, repo, policy := providerManagementFixture(t)
+	response := providerManagementRequest(h, http.MethodHead, "/api/v1/manage/providers/provider-001", "")
+	if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != "GET" {
+		t.Fatalf("HEAD status=%d allow=%q, want 405 and Allow GET", response.Code, response.Header().Get("Allow"))
+	}
+	if response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("HEAD response must disable caching")
+	}
+	if repo.readCalls != 0 || policy.calls != 0 {
+		t.Fatalf("implicit HEAD reached privileged read: repository=%d authorizer=%d", repo.readCalls, policy.calls)
+	}
+}
