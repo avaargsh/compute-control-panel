@@ -434,6 +434,7 @@ class ComputeEconomicsContractTests(unittest.TestCase):
                     "currency": "CNY",
                     "currency_minor_unit": 2,
                     "currency_metadata_version": CURRENCY_METADATA_VERSION,
+                    "calculation_input_digest": "sha256:da3127529e53452faa4f62a7db17e7f9e5f5602c9beb342d3cc4479e30363b88",
                 },
                 {
                     "start": "2026-11-01T10:30:00Z",
@@ -445,6 +446,7 @@ class ComputeEconomicsContractTests(unittest.TestCase):
                     "currency": "CNY",
                     "currency_minor_unit": 2,
                     "currency_metadata_version": CURRENCY_METADATA_VERSION,
+                    "calculation_input_digest": "sha256:d33c805db6165cd0a8e78fff390486b44b5e1d3b7d0157889a0e0b722eb70cb0",
                 },
             ],
             segments,
@@ -452,6 +454,7 @@ class ComputeEconomicsContractTests(unittest.TestCase):
         for produced, expected in zip(segments, self.cost_fixture["expected"]["segments"], strict=True):
             self.assertEqual(expected["currencyMetadataVersion"], produced["currency_metadata_version"])
             self.assertEqual(expected["currencyMinorUnit"], produced["currency_minor_unit"])
+            self.assertEqual(expected["calculationInputDigest"], produced["calculation_input_digest"])
 
         self.assertEqual(
             Decimal("66.00"),
@@ -471,6 +474,20 @@ class ComputeEconomicsContractTests(unittest.TestCase):
         rates.append(duplicate)
         with self.assertRaisesRegex(ValueError, "rate_overlap"):
             calculate_direct_cost(self.cost_fixture["usageInterval"], rates)
+
+    def test_calculation_digest_replays_identical_canonical_inputs(self) -> None:
+        usage = json.loads(json.dumps(self.cost_fixture["usageInterval"]))
+        rate = dict(self.cost_fixture["rateCards"][0])
+        rate["effectiveTo"] = None
+        original = calculate_direct_cost(usage, [rate])[0]["calculation_input_digest"]
+        usage["sourceEventIds"].reverse()
+        rate["rateAmount"] = "10"
+        self.assertEqual(original, calculate_direct_cost(usage, [rate])[0]["calculation_input_digest"])
+        usage["sourceEventIds"][0] = "corrected-source-event"
+        self.assertNotEqual(original, calculate_direct_cost(usage, [rate])[0]["calculation_input_digest"])
+        usage["sourceEventIds"][0] = usage["sourceEventIds"][1]
+        with self.assertRaisesRegex(ValueError, "duplicate_or_missing_source_event"):
+            calculate_direct_cost(usage, [rate])
 
     def test_oracle_refuses_incomplete_usage_evidence(self) -> None:
         for mutation in ({"sourceCoverage": 0.5}, {"quality": "INCOMPLETE"}):
