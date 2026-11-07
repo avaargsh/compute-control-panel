@@ -177,17 +177,48 @@ func TestOperationLeaseExpiryAdvancesFence(t *testing.T) {
 	if _, _, err := repo.CreateOperation(ctx, op, "event-"+randomSuffix(t), "corr-expire"); err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := repo.ClaimOperation(ctx, tenant, op.ID, 1, "worker-old", 30*time.Millisecond)
+	// Keep the lease beyond the test deadline so a slow CI runner cannot
+	// expire it between ClaimOperation and the active-lease assertion.
+	claimed, err := repo.ClaimOperation(ctx, tenant, op.ID, 1, "worker-old", time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.ExpireOperationLease(ctx, tenant, op.ID, claimed.Version); !errors.Is(err, operation.ErrLeaseActive) {
 		t.Fatalf("lease expired too early: %v", err)
 	}
-	time.Sleep(80 * time.Millisecond)
+	active, err := repo.GetOperation(ctx, tenant, op.ID)
+	if err != nil || active.Status != operation.Leased || active.Version != claimed.Version ||
+		active.FenceToken != claimed.FenceToken || active.LeaseOwner != claimed.LeaseOwner ||
+		!active.LeaseExpiresAt.Equal(claimed.LeaseExpiresAt) {
+		t.Fatalf("rejected expiry changed the active lease: %+v %v", active, err)
+	}
+
+	// Move only this fixture's deadline into the past using PostgreSQL's
+	// clock. Exercise the real expiry transaction without scheduler sleeps.
+	result, err := db.ExecContext(ctx, `UPDATE compute_operations
+        SET lease_expires_at=clock_timestamp()-interval '1 second'
+        WHERE tenant_id=$1 AND compute_operation_id=$2 AND version=$3 AND fence_token=$4`,
+		tenant, op.ID, int64(claimed.Version), int64(claimed.FenceToken))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count, err := result.RowsAffected(); err != nil || count != 1 {
+		t.Fatalf("set fixture lease deadline: rows=%d err=%v", count, err)
+	}
 	expired, err := repo.ExpireOperationLease(ctx, tenant, op.ID, claimed.Version)
-	if err != nil || expired.Status != operation.Unknown || expired.FenceToken != claimed.FenceToken+1 {
+	if err != nil || expired.Status != operation.Unknown || expired.Version != claimed.Version+1 ||
+		expired.FenceToken != claimed.FenceToken+1 || expired.LeaseOwner != "" || !expired.LeaseExpiresAt.IsZero() {
 		t.Fatalf("lease expiry failed to fence: %+v %v", expired, err)
+	}
+	if _, err := repo.StartOperation(ctx, tenant, op.ID, claimed.Version, claimed.LeaseOwner, claimed.FenceToken); !errors.Is(err, operation.ErrStale) {
+		t.Fatalf("expired worker could still start the operation: %v", err)
+	}
+	// Reopen the repository to verify the fence survives beyond the caller.
+	restarted, _ := NewRepository(db)
+	stored, err := restarted.GetOperation(ctx, tenant, op.ID)
+	if err != nil || stored.Status != operation.Unknown || stored.Version != expired.Version ||
+		stored.FenceToken != expired.FenceToken || stored.LeaseOwner != "" || !stored.LeaseExpiresAt.IsZero() {
+		t.Fatalf("expiry fence was not durable: %+v %v", stored, err)
 	}
 }
 
