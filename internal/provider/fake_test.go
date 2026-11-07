@@ -284,3 +284,63 @@ func TestFakeProviderRejectsStaleGenerationMutation(t *testing.T) {
 		t.Fatalf("current generation release not inspectable: %+v %v", obs, err)
 	}
 }
+
+func TestFakeProviderRejectsReusedTenantIdempotencyKey(t *testing.T) {
+	ctx := context.Background()
+	fake := NewFakeProvider()
+	first := fakeRequest()
+	if _, err := fake.Apply(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	// The durable ComputeOperation table has UNIQUE(tenant_id, idempotency_key).
+	// A fake must not silently materialize a second resource under that key.
+	second := first
+	second.OperationID = "op-distinct-same-tenant-key"
+	second.RequestDigest = "sha256:" + strings.Repeat("b", 64)
+	if _, err := fake.Apply(ctx, second); !errors.Is(err, ErrOperationConflict) {
+		t.Fatalf("reused tenant/idempotency key created a second operation: %v", err)
+	}
+	if obs, err := fake.Inspect(ctx, second); err != nil ||
+		obs.Result == operation.ResourcePresent ||
+		obs.Result == operation.OperationNotAppliedFinal {
+		t.Fatalf("conflicting second operation reported provider finality: %+v %v", obs, err)
+	}
+	original, err := fake.Inspect(ctx, first)
+	if err != nil || original.Result != operation.ResourcePresent {
+		t.Fatalf("duplicate call changed original operation: %+v %v", original, err)
+	}
+
+	// The idempotency namespace is tenant-scoped. Other tenants can use
+	// the same key, provided their operation identity is distinct.
+	other := first
+	other.TenantID = "tenant-2"
+	other.WorkloadID = "workload-2"
+	other.OperationID = "op-other-tenant"
+	if _, err := fake.Apply(ctx, other); err != nil {
+		t.Fatalf("cross-tenant reuse of independent key was blocked: %v", err)
+	}
+}
+
+func TestFakeProviderNotAppliedFinalReservesTenantIdempotencyKey(t *testing.T) {
+	ctx := context.Background()
+	fake := NewFakeProvider()
+	first := fakeRequest()
+	if err := fake.DeclareNotAppliedFinal(first); err != nil {
+		t.Fatal(err)
+	}
+	second := first
+	second.OperationID = "op-conflicting-after-noeffect"
+	if err := fake.DeclareNotAppliedFinal(second); !errors.Is(err, ErrOperationConflict) {
+		t.Fatalf("new operation reserved same no-effect-final key: %v", err)
+	}
+	if _, err := fake.Apply(ctx, second); !errors.Is(err, ErrOperationConflict) {
+		t.Fatalf("second operation executed under reserved tenant key: %v", err)
+	}
+	if _, err := fake.Apply(ctx, first); err != nil {
+		t.Fatalf("same-key retry of no-effect-final operation must remain allowed: %v", err)
+	}
+	obs, err := fake.Inspect(ctx, first)
+	if err != nil || obs.Result != operation.ResourcePresent {
+		t.Fatalf("same operation did not become attributable after retry: %+v %v", obs, err)
+	}
+}
