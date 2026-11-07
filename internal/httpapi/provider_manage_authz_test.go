@@ -100,7 +100,9 @@ func TestExactProviderManagementAuthorizerBindsSubjectTenantServiceProviderAndAc
 func newProviderManagementTLSTestClient(t *testing.T, handler http.Handler, spiffeID string) (*httptest.Server, *http.Client) {
 	t.Helper()
 	_, caKey, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now()
 	caTmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "CCP test client CA"},
@@ -109,13 +111,21 @@ func newProviderManagementTLSTestClient(t *testing.T, handler http.Handler, spif
 		KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
 	}
 	caDER, err := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, caKey.Public(), caKey)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	ca, err := x509.ParseCertificate(caDER)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	_, leafKey, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	uri, err := url.Parse(spiffeID)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	leafTmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(2), NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour),
 		KeyUsage: x509.KeyUsageDigitalSignature,
@@ -123,7 +133,9 @@ func newProviderManagementTLSTestClient(t *testing.T, handler http.Handler, spif
 		URIs: []*url.URL{uri},
 	}
 	leafDER, err := x509.CreateCertificate(rand.Reader, leafTmpl, ca, leafKey.Public(), caKey)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	clientCert := tls.Certificate{Certificate: [][]byte{leafDER}, PrivateKey: leafKey}
 	pool := x509.NewCertPool()
 	pool.AddCert(ca)
@@ -146,9 +158,11 @@ func TestProviderManageSPIFFEVerifiedTLSAndExactAdminGrant(t *testing.T) {
 		{"nonmatching provider", func() ProviderManagementGrant { g := grant; g.ProviderID = "provider-other"; return g }(), http.StatusForbidden, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			repo := &providerManagementRepositoryStub{record: providerManagementRepositoryStubRecord()}
+			repo := &providerManagementRepositoryStub{}
 			authz, err := NewExactProviderManagementAuthorizer([]ProviderManagementGrant{tc.grant})
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			resolver := &testWorkloadIdentityResolver{
 				expected: grant.Subject,
 				principal: WorkloadPrincipal{
@@ -156,14 +170,20 @@ func TestProviderManageSPIFFEVerifiedTLSAndExactAdminGrant(t *testing.T) {
 				},
 			}
 			auth, err := NewSPIFFEWorkloadAuthenticator("example.org", resolver)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			h, err := NewProviderManagementHandler(ProviderManagementDependencies{
 				Authenticator: auth, Authorizer: authz, Repository: repo,
 			})
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			server, client := newProviderManagementTLSTestClient(t, h, grant.Subject)
 			response, err := client.Get(server.URL + "/api/v1/manage/providers/provider-001")
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			defer response.Body.Close()
 			if response.StatusCode != tc.status || repo.readCalls != tc.repoCalls || resolver.calls != 1 {
 				t.Fatalf("status=%d repo=%d resolver=%d", response.StatusCode, repo.readCalls, resolver.calls)
