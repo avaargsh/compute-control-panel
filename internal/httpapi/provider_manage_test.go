@@ -280,3 +280,42 @@ func TestProviderManageRejectsCaseFoldedJSONFieldAliases(t *testing.T) {
 		t.Fatalf("case-folded field aliases reached privileged calls: reg=%d drain=%d auth=%d", repo.registerCalls, repo.drainCalls, policy.calls)
 	}
 }
+
+func TestProviderManageConstructorRejectsTypedNilDependencies(t *testing.T) {
+	tests := []struct {
+		name string
+		deps ProviderManagementDependencies
+	}{
+		{
+			name: "nil authenticator",
+			deps: ProviderManagementDependencies{
+				Authenticator: (*SPIFFEWorkloadAuthenticator)(nil),
+				Authorizer: &providerManagementAuthorizerStub{},
+				Repository: &providerManagementRepositoryStub{},
+			},
+		},
+		{
+			name: "nil authorizer",
+			deps: ProviderManagementDependencies{
+				Authenticator: testPrincipalAuthenticator{},
+				Authorizer: (*ExactProviderManagementAuthorizer)(nil),
+				Repository: &providerManagementRepositoryStub{},
+			},
+		},
+		{
+			name: "nil repository",
+			deps: ProviderManagementDependencies{
+				Authenticator: testPrincipalAuthenticator{},
+				Authorizer: &providerManagementAuthorizerStub{},
+				Repository: (*postgres.Repository)(nil),
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if handler, err := NewProviderManagementHandler(tc.deps); err == nil || handler != nil {
+				t.Fatalf("typed-nil dependency accepted: handler=%v err=%v", handler, err)
+			}
+		})
+	}
+}
