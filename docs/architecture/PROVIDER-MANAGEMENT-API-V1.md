@@ -172,7 +172,7 @@ successful Provider register/drain and denial of direct audit writes,
 trigger alteration, truncation, and `pg_temp` shadowing. Review
 function owner, EXECUTE privileges and fixed `search_path`. Retain
 the checksum-pinned `0005` migration unchanged. Draft economics
-PR #41 already uses `0007`–`0011`; coordinate a contiguous
+PR #41 has merged `0007`–`0012`; coordinate a contiguous
 migration sequence rather than allocating `0007` again in this
 Draft PR. No production Manage listener is authorized until this
 gate is green.

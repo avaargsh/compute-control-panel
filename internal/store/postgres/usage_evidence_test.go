@@ -89,18 +89,71 @@ func typedUsageEvidence(a WorkloadAcceptance) PersistUsageEvidenceParams {
 	deviceRelease := usageRecord(a, "device-release", "dra", claimUID, "2026-11-04T11:55:00Z")
 	e.Device.Release = &deviceRelease
 
-	return PersistUsageEvidenceParams{
-		Evidence: e,
-		Policy: economics.EvidencePolicy{
-			Version:          "allocation-evidence-v1",
-			AsOf:             time.Date(2026, 11, 4, 12, 10, 0, 0, time.UTC),
-			MaximumClockSkew: 2 * time.Minute,
-			TrustedSourceTimestampAdapters: map[string]bool{
-				"provider@v1": true, "kueue@v1": true, "kubernetes@v1": true, "dra@v1": true,
-			},
-			CertifiedDeviceAdapters: map[string]bool{},
+	return PersistUsageEvidenceParams{Evidence: e, Policy: fixtureEvidencePolicy()}
+}
+
+// fixtureEvidencePolicy is approved ONLY by the explicitly injected test
+// authority. Production callers must never copy this local fake registry.
+func fixtureEvidencePolicy() economics.EvidencePolicy {
+	return economics.EvidencePolicy{
+		Version:          "allocation-evidence-v1",
+		AsOf:             time.Date(2026, 11, 4, 12, 10, 0, 0, time.UTC),
+		MaximumClockSkew: 2 * time.Minute,
+		TrustedSourceTimestampAdapters: map[string]bool{
+			"provider@v1": true, "kueue@v1": true, "kubernetes@v1": true, "dra@v1": true,
 		},
+		CertifiedDeviceAdapters: map[string]bool{},
 	}
+}
+
+func newTestEvidenceRepo(t *testing.T, db *sql.DB) *Repository {
+	t.Helper()
+	repo, err := NewRepositoryWithEvidencePolicyAuthority(testEvidenceWriterDB(t, db), EvidencePolicyAuthorityFunc(
+		func(ctx context.Context, tenantID, providerID, version string) (TrustedEvidencePolicy, error) {
+			policy := fixtureEvidencePolicy()
+			if version != policy.Version {
+				return TrustedEvidencePolicy{}, errors.New("unrecognized test policy version")
+			}
+			approved := TrustedEvidencePolicy{
+				TenantID: tenantID, ProviderID: providerID, Policy: policy,
+				EffectiveFrom:  time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC),
+				EffectiveUntil: time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
+				Revision:       1,
+			}
+			// Only the isolated PG integration test authority provisions
+			// approved policy rows. Production callers cannot administer
+			// trusted policy versions through the E1 repository.
+			digest, err := evidencePolicyFenceDigest(approved)
+			if err != nil {
+				return TrustedEvidencePolicy{}, err
+			}
+			_, err = db.ExecContext(ctx, `
+				INSERT INTO compute_evidence_policy_fences
+				  (tenant_id,provider_id,policy_version,policy_digest,effective_from,effective_until,revision,revoked)
+				VALUES ($1,$2,$3,$4,$5,$6,1,false)
+				ON CONFLICT (tenant_id,provider_id,policy_version) DO NOTHING
+			`, tenantID, providerID, version, digest, approved.EffectiveFrom, approved.EffectiveUntil)
+			if err != nil {
+				return TrustedEvidencePolicy{}, err
+			}
+			return approved, nil
+		},
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return repo
+}
+
+// Fixture Workload/Allocation acceptance is owned by the admin test
+// harness, not the separately scoped E1-only writer connection.
+func acceptTestEvidenceWorkload(t *testing.T, db *sql.DB, ctx context.Context, p AcceptWorkloadParams) (WorkloadAcceptance, bool, error) {
+	t.Helper()
+	repo, err := NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return repo.AcceptWorkload(ctx, p)
 }
 
 func markUsageEvidenceProviderOperationSucceeded(t *testing.T, db *sql.DB, a WorkloadAcceptance) {
@@ -121,20 +174,20 @@ func markUsageEvidenceProviderOperationSucceeded(t *testing.T, db *sql.DB, a Wor
 	if err != nil {
 		t.Fatalf("mark Provider operation successful: %v", err)
 	}
+	// Test-only independent issuer signs off one exact source-derived row.
+	// Production evidence issuers must authenticate observations externally.
+	seedTestE1FinalAuthorization(t, db, a, 1)
 }
 
 func TestPersistUsageEvidenceSetRequiresSuccessfulProviderOperation(t *testing.T) {
 	db := openIntegrationDB(t)
-	repo, err := NewRepository(db)
-	if err != nil {
-		t.Fatal(err)
-	}
+	repo := newTestEvidenceRepo(t, db)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
 	p := acceptanceFixture(t, "tenant-evidence-pending-"+randomSuffix(t),
 		"workload-key-"+randomSuffix(t), "operation-key-"+randomSuffix(t), "operation-event-"+randomSuffix(t))
-	a, created, err := repo.AcceptWorkload(ctx, p)
+	a, created, err := acceptTestEvidenceWorkload(t, db, ctx, p)
 	if err != nil || !created {
 		t.Fatalf("AcceptWorkload: created=%t err=%v", created, err)
 	}
@@ -154,16 +207,13 @@ func TestPersistUsageEvidenceSetRequiresSuccessfulProviderOperation(t *testing.T
 
 func TestPersistUsageEvidenceSetIsImmutableIdempotentAndTenantScoped(t *testing.T) {
 	db := openIntegrationDB(t)
-	repo, err := NewRepository(db)
-	if err != nil {
-		t.Fatal(err)
-	}
+	repo := newTestEvidenceRepo(t, db)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
 	p := acceptanceFixture(t, "tenant-evidence-"+randomSuffix(t),
 		"workload-key-"+randomSuffix(t), "operation-key-"+randomSuffix(t), "operation-event-"+randomSuffix(t))
-	a, created, err := repo.AcceptWorkload(ctx, p)
+	a, created, err := acceptTestEvidenceWorkload(t, db, ctx, p)
 	if err != nil || !created {
 		t.Fatalf("AcceptWorkload: created=%t err=%v", created, err)
 	}
@@ -177,6 +227,16 @@ func TestPersistUsageEvidenceSetIsImmutableIdempotentAndTenantScoped(t *testing.
 	replayed, persisted, err := repo.PersistUsageEvidenceSet(ctx, params)
 	if err != nil || persisted {
 		t.Fatalf("exact replay: persisted=%t err=%v", persisted, err)
+	}
+	// PostgreSQL row-share locking requires narrowly granted UPDATE on
+	// recorded_at. The append-only trigger must still prohibit any
+	// real UPDATE from that same restricted writer connection.
+	if _, err := repo.db.ExecContext(ctx, `
+		UPDATE compute_allocation_usage_evidence_sets
+		SET recorded_at=clock_timestamp()
+		WHERE tenant_id=$1 AND evidence_set_id=$2
+	`, params.Evidence.TenantID, first.EvidenceSetID); err == nil {
+		t.Fatal("restricted E1 replay writer mutated immutable evidence recorded_at")
 	}
 	if replayed.EvidenceDigest != first.EvidenceDigest || !replayed.RecordedAt.Equal(first.RecordedAt) {
 		t.Fatalf("replay changed immutable evidence: first=%+v replay=%+v", first, replayed)
@@ -222,16 +282,13 @@ func TestPersistUsageEvidenceSetIsImmutableIdempotentAndTenantScoped(t *testing.
 
 func TestPersistUsageEvidenceSetConcurrentReplayHasOneWinner(t *testing.T) {
 	db := openIntegrationDB(t)
-	repo, err := NewRepository(db)
-	if err != nil {
-		t.Fatal(err)
-	}
+	repo := newTestEvidenceRepo(t, db)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	p := acceptanceFixture(t, "tenant-evidence-race-"+randomSuffix(t),
 		"workload-key-"+randomSuffix(t), "operation-key-"+randomSuffix(t), "operation-event-"+randomSuffix(t))
-	a, created, err := repo.AcceptWorkload(ctx, p)
+	a, created, err := acceptTestEvidenceWorkload(t, db, ctx, p)
 	if err != nil || !created {
 		t.Fatalf("AcceptWorkload: created=%t err=%v", created, err)
 	}
@@ -323,16 +380,13 @@ func TestPersistUsageEvidenceSetRejectsIncompleteOrForgedSourceFacts(t *testing.
 
 func TestPersistUsageEvidenceSetRequiresExactProviderRequestDigest(t *testing.T) {
 	db := openIntegrationDB(t)
-	repo, err := NewRepository(db)
-	if err != nil {
-		t.Fatal(err)
-	}
+	repo := newTestEvidenceRepo(t, db)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
 	p := acceptanceFixture(t, "tenant-evidence-digest-"+randomSuffix(t),
 		"workload-key-"+randomSuffix(t), "operation-key-"+randomSuffix(t), "operation-event-"+randomSuffix(t))
-	a, created, err := repo.AcceptWorkload(ctx, p)
+	a, created, err := acceptTestEvidenceWorkload(t, db, ctx, p)
 	if err != nil || !created {
 		t.Fatalf("AcceptWorkload: created=%t err=%v", created, err)
 	}

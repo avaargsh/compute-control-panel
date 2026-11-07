@@ -25,14 +25,32 @@ const (
 )
 
 type Repository struct {
-	db *sql.DB
+	db                      *sql.DB
+	evidencePolicyAuthority EvidencePolicyAuthority
 }
 
 func NewRepository(db *sql.DB) (*Repository, error) {
 	if db == nil {
 		return nil, errors.New("postgres repository requires a database")
 	}
+	// The general Repository constructor cannot authorize E1 FINAL evidence:
+	// PersistUsageEvidenceSet denies by default without a trusted policy.
 	return &Repository{db: db}, nil
+}
+
+// NewRepositoryWithEvidencePolicyAuthority enables E1 persistence only when
+// a separately administered policy source has been injected. Policy source
+// authentication, provisioning and audit remain deployment requirements.
+func NewRepositoryWithEvidencePolicyAuthority(db *sql.DB, authority EvidencePolicyAuthority) (*Repository, error) {
+	repo, err := NewRepository(db)
+	if err != nil {
+		return nil, err
+	}
+	if authority == nil {
+		return nil, ErrEvidencePolicyUntrusted
+	}
+	repo.evidencePolicyAuthority = authority
+	return repo, nil
 }
 
 type CreateWorkloadParams struct {
