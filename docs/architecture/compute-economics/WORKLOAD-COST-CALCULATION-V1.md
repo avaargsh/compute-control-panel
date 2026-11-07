@@ -60,6 +60,25 @@ A final cost entry requires complete time and identity coverage. Incomplete tele
 - The calculation input digest binds the exact source interval boundaries, source event IDs, Allocation/Provider/Profile identity, rate-card ID/version/source reference, unit rate, **currency code**, currency metadata snapshot version and currency precision. Every WorkloadCostEntry persists the same currency metadata version and minor-unit scale as the ProviderRateCard that priced its segment. The exact source remains reproducible even when the serialized quantity is rounded.
 - Preserve the calculation version and source facts so a result can be reproduced.
 
+### 5.1 Canonical calculation input digest v1
+
+The calculationInputDigest is SHA-256 of a single typed JSON preimage for each priced segment. It is not a hash of floating-point arithmetic, language-specific object representation or the rounded displayed GPU-hour quantity. The executable contract oracle is calculation_input_digest in scripts/test_compute_economics_contracts.py.
+
+- The top-level object has exactly five members: schemaVersion = "compute.economics.calculation-input.v1", calculationVersion = "cost-v1", usage, segment and rate.
+- The usage object contains exactly: usageIntervalId, tenantId, projectId, workloadId, allocationId, allocationGeneration, providerId, poolId, profileId, gpuCount, unit, resourceClass, gpuModel, meteringPolicyVersion, quality, attributionMethod, sourceCoverage, sourceEventIds, windowStart and windowEnd. Optional allocationGeneration is JSON null when absent, never omitted. sourceCoverage is the JSON string "1"; only fully covered OBSERVED or DERIVED evidence is costable.
+- The segment object contains exactly start and end (the exact priced subinterval boundaries).
+- The rate object contains exactly: rateCardId, version, providerId, poolId, profileId, rateBasis, unit, rateAmount, currency, currencyMinorUnit, currencyMetadataVersion, sourceRef, effectiveFrom and effectiveTo. Missing optional poolId and effectiveTo are represented by JSON null, not omitted. Version and currencyMinorUnit are JSON integers.
+- Timestamps normalize to UTC RFC3339 with **exactly nine fractional digits** (YYYY-MM-DDTHH:MM:SS.nnnnnnnnnZ). Offset spelling and locale are not identity. Positive numeric strings (gpuCount and rateAmount) use positional base-10 notation with no exponent, redundant trailing fractional zeros or decimal point. Exact nanosecond boundaries are included even if the displayed quantity has at most 18 decimals.
+- sourceEventIds is a lexicographically sorted JSON array of unique source identity strings; duplicates and empty lists are rejected rather than deduplicated. Local collector timestamps do not enter the hash.
+- Serialize the object to UTF-8 JSON with lexicographically sorted object keys, comma/colon separators, no insignificant whitespace, ensure_ascii=False and allow_nan=False. Hash these exact bytes and prefix the lowercase 64-digit SHA-256 hex with "sha256:". Do not add salts or platform-dependent formatting.
+
+**Golden SHA-256 digests** in increasing priced segment time for the rate-boundary fixture:
+
+1. sha256:da3127529e53452faa4f62a7db17e7f9e5f5602c9beb342d3cc4479e30363b88 (09:00-10:30, CNY rate v1).
+2. sha256:d33c805db6165cd0a8e78fff390486b44b5e1d3b7d0157889a0e0b722eb70cb0 (10:30-12:00, CNY rate v2).
+
+The executable golden tests compare both exact hashes, and verify source event ordering and equivalent rateAmount decimal spelling yield the same digest. A change to source identity, exact window, currency metadata or rate fact changes it. This contract does not enable financial posting.
+
 ## 6. Idempotency, correction and replay
 
 A cost posting is identified by a stable calculation identity derived from:
