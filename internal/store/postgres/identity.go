@@ -33,7 +33,7 @@ func (r *Repository) ResolveWorkloadPrincipal(ctx context.Context, spiffeID stri
 	var principal identity.WorkloadPrincipal
 	principal.Subject = spiffeID
 	err = tx.QueryRowContext(ctx, `SELECT tenant_id, service_name
-		FROM compute_service_identities
+		FROM public.compute_service_identities
 		WHERE spiffe_id=$1
 		  AND status='ACTIVE'
 		  AND not_before <= transaction_timestamp()
@@ -49,7 +49,7 @@ func (r *Repository) ResolveWorkloadPrincipal(ctx context.Context, spiffeID stri
 
 	principal.ProjectIDs = make([]string, 0)
 	rows, err := tx.QueryContext(ctx, `SELECT project_id
-		FROM compute_service_project_grants
+		FROM public.compute_service_project_grants
 		WHERE spiffe_id=$1
 		  AND tenant_id=$2
 		  AND status='ACTIVE'
