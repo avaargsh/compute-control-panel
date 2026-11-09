@@ -112,7 +112,7 @@ func TestSIGKILLRecoveryLeaseIsFencedBeforeInspection(t *testing.T) {
 		t.Fatalf("active recovery lease was stolen: %v", err)
 	}
 	time.Sleep(550 * time.Millisecond)
-	worker, err := recovery.NewWorker(repo, adapterFor(inspectOnly{Adapter: fake}))
+	worker, err := recovery.NewWorker(repo, adapterFor(unknown.ProviderID, inspectOnly{Adapter: fake}))
 	if err != nil {
 		t.Fatal(err)
 	}
