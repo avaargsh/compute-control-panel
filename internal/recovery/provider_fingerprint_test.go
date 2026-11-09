@@ -31,32 +31,32 @@ func TestRecoverUnknownRejectsMismatchedDurableProviderFingerprintBeforeLease(t 
 		digest  string
 	}{
 		{
-			name: "source mismatch",
-			source: "another-provider-source",
+			name:    "source mismatch",
+			source:  "another-provider-source",
 			version: "v0-test",
-			digest: "sha256:" + strings.Repeat("a", 64),
+			digest:  "sha256:" + strings.Repeat("a", 64),
 		},
 		{
-			name: "adapter version mismatch",
-			source: "fake-integration",
+			name:    "adapter version mismatch",
+			source:  "fake-integration",
 			version: "v99-unknown",
-			digest: "sha256:" + strings.Repeat("a", 64),
+			digest:  "sha256:" + strings.Repeat("a", 64),
 		},
 		{
-			name: "capability digest mismatch",
-			source: "fake-integration",
+			name:    "capability digest mismatch",
+			source:  "fake-integration",
 			version: "v0-test",
-			digest: "sha256:" + strings.Repeat("b", 64),
+			digest:  "sha256:" + strings.Repeat("b", 64),
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, repo, original := setupUnknown(t)
 			ctx := context.Background()
 			if _, created, err := repo.RegisterProvider(ctx, postgres.ProviderRegistration{
-				ProviderID: original.ProviderID,
-				ClusterScope: "cluster-test-recovery",
-				AdapterSource: tc.source,
-				AdapterVersion: tc.version,
+				ProviderID:       original.ProviderID,
+				ClusterScope:     "cluster-test-recovery",
+				AdapterSource:    tc.source,
+				AdapterVersion:   tc.version,
 				CapabilityDigest: tc.digest,
 			}); err != nil || !created {
 				t.Fatalf("register authoritative Provider: created=%v, err=%v", created, err)
