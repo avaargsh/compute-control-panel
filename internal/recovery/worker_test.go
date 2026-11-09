@@ -29,6 +29,10 @@ func uniqueID(t *testing.T) string {
 }
 
 func setupUnknown(t *testing.T) (*sql.DB, *postgres.Repository, operation.Operation) {
+	return setupUnknownWithProvider(t, true)
+}
+
+func setupUnknownWithProvider(t *testing.T, register bool) (*sql.DB, *postgres.Repository, operation.Operation) {
 	t.Helper()
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
@@ -54,6 +58,7 @@ func setupUnknown(t *testing.T) (*sql.DB, *postgres.Repository, operation.Operat
 	digest := "sha256:" + hex.EncodeToString(hash[:])
 	tenant := "tenant-recovery-" + uniqueID(t)
 	wID := "workload-" + uniqueID(t)
+	providerID := "provider-fake-" + uniqueID(t)
 	_, created, err := repo.CreateWorkload(ctx, postgres.CreateWorkloadParams{
 		WorkloadID: wID, TenantID: tenant, ProjectID: "project-1",
 		OwnerService: "agent-runtime", OwnerResourceType: "run",
@@ -67,7 +72,7 @@ func setupUnknown(t *testing.T) (*sql.DB, *postgres.Repository, operation.Operat
 	}
 	op := operation.Operation{
 		ID: "operation-" + uniqueID(t), TenantID: tenant,
-		WorkloadID: wID, ProviderID: "provider-fake-1",
+		WorkloadID: wID, ProviderID: providerID,
 		Kind: operation.Create, Status: operation.Pending,
 		Generation: 1, Version: 1, RequestDigest: "sha256:" + strings.Repeat("a", 64),
 		IdempotencyKey: "provider-idem-" + uniqueID(t),
@@ -87,12 +92,30 @@ func setupUnknown(t *testing.T) (*sql.DB, *postgres.Repository, operation.Operat
 	if err != nil {
 		t.Fatal(err)
 	}
+	if register {
+		_, created, err := repo.RegisterProvider(ctx, postgres.ProviderRegistration{
+			ProviderID:       providerID,
+			ClusterScope:     "cluster-test-recovery",
+			AdapterSource:    "fake-integration",
+			AdapterVersion:   "v0-test",
+			CapabilityDigest: "sha256:" + strings.Repeat("a", 64),
+		})
+		if err != nil || !created {
+			t.Fatalf("register recovery fixture Provider: created=%t err=%v", created, err)
+		}
+	}
 	return db, repo, unknown
 }
 
-func adapterFor(fake provider.Adapter) map[string]recovery.RegisteredProvider {
+func adapterFor(providerID string, fake provider.Adapter) map[string]recovery.RegisteredProvider {
 	return map[string]recovery.RegisteredProvider{
-		"provider-fake-1": {Adapter: fake, Source: "fake-integration", AdapterVersion: "v0-test"},
+		providerID: {
+			Adapter:          fake,
+			ClusterScope:     "cluster-test-recovery",
+			Source:           "fake-integration",
+			AdapterVersion:   "v0-test",
+			CapabilityDigest: "sha256:" + strings.Repeat("a", 64),
+		},
 	}
 }
 
@@ -122,7 +145,7 @@ func TestRecoverUnknownInspectsWithoutDispatchAndCommitsEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker, err := recovery.NewWorker(restarted, adapterFor(inspectOnly{Adapter: fake}))
+	worker, err := recovery.NewWorker(restarted, adapterFor(op.ProviderID, inspectOnly{Adapter: fake}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +197,7 @@ func (brokenInspector) Inspect(context.Context, provider.Request) (operation.Obs
 
 func TestInspectFailureRetainsFencedReconciliationAndDoesNotDispatch(t *testing.T) {
 	_, repo, op := setupUnknown(t)
-	worker, err := recovery.NewWorker(repo, adapterFor(brokenInspector{}))
+	worker, err := recovery.NewWorker(repo, adapterFor(op.ProviderID, brokenInspector{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +213,7 @@ func TestInspectFailureRetainsFencedReconciliationAndDoesNotDispatch(t *testing.
 func TestExpiredInspectionLeaseCanReconcileWithNewFence(t *testing.T) {
 	_, repo, op := setupUnknown(t)
 	ctx := context.Background()
-	failing, err := recovery.NewWorker(repo, adapterFor(brokenInspector{}))
+	failing, err := recovery.NewWorker(repo, adapterFor(op.ProviderID, brokenInspector{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +235,7 @@ func TestExpiredInspectionLeaseCanReconcileWithNewFence(t *testing.T) {
 		t.Fatalf("provider did not simulate lost ACK: %v", err)
 	}
 	time.Sleep(85 * time.Millisecond)
-	second, err := recovery.NewWorker(repo, adapterFor(inspectOnly{Adapter: fake}))
+	second, err := recovery.NewWorker(repo, adapterFor(op.ProviderID, inspectOnly{Adapter: fake}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +250,7 @@ func TestExpiredInspectionLeaseCanReconcileWithNewFence(t *testing.T) {
 // timestamp precision boundary before Inspect can persist its result.
 func TestRecoverUnknownRejectsUnsafeLeaseDurationWithoutClaim(t *testing.T) {
 	_, repo, original := setupUnknown(t)
-	worker, err := recovery.NewWorker(repo, adapterFor(provider.NewFakeProvider()))
+	worker, err := recovery.NewWorker(repo, adapterFor(original.ProviderID, provider.NewFakeProvider()))
 	if err != nil {
 		t.Fatal(err)
 	}
