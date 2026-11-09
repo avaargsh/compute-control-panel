@@ -283,7 +283,7 @@ func (r *Repository) AcceptWorkload(ctx context.Context, p AcceptWorkloadParams)
 func checkRegisteredProviderNotDraining(ctx context.Context, tx *sql.Tx, providerID string) error {
 	var state ProviderState
 	err := tx.QueryRowContext(ctx,
-		"SELECT state FROM compute_providers WHERE provider_id=$1 FOR SHARE",
+		"SELECT state FROM public.compute_providers WHERE provider_id=$1 FOR SHARE",
 		providerID,
 	).Scan(&state)
 	if errors.Is(err, sql.ErrNoRows) {
