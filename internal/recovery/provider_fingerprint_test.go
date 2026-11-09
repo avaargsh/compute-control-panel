@@ -82,7 +82,6 @@ func TestRecoverUnknownRejectsMismatchedDurableProviderFingerprintBeforeLease(t 
 	}
 }
 
-
 func TestRecoverUnknownRejectsMissingDurableProviderBeforeLease(t *testing.T) {
 	_, repo, original := setupUnknown(t)
 	ctx := context.Background()
