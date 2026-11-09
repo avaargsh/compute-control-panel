@@ -50,7 +50,7 @@ func TestRecoverUnknownRejectsMismatchedDurableProviderFingerprintBeforeLease(t 
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, repo, original := setupUnknown(t)
+			_, repo, original := setupUnknownWithProvider(t, false)
 			ctx := context.Background()
 			if _, created, err := repo.RegisterProvider(ctx, postgres.ProviderRegistration{
 				ProviderID:       original.ProviderID,
@@ -62,7 +62,7 @@ func TestRecoverUnknownRejectsMismatchedDurableProviderFingerprintBeforeLease(t 
 				t.Fatalf("register authoritative Provider: created=%v, err=%v", created, err)
 			}
 			inspector := &unexpectedProviderInspect{}
-			worker, err := recovery.NewWorker(repo, adapterFor(inspector))
+			worker, err := recovery.NewWorker(repo, adapterFor(original.ProviderID, inspector))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -83,10 +83,10 @@ func TestRecoverUnknownRejectsMismatchedDurableProviderFingerprintBeforeLease(t 
 }
 
 func TestRecoverUnknownRejectsMissingDurableProviderBeforeLease(t *testing.T) {
-	_, repo, original := setupUnknown(t)
+	_, repo, original := setupUnknownWithProvider(t, false)
 	ctx := context.Background()
 	inspector := &unexpectedProviderInspect{}
-	worker, err := recovery.NewWorker(repo, adapterFor(inspector))
+	worker, err := recovery.NewWorker(repo, adapterFor(original.ProviderID, inspector))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,5 +101,36 @@ func TestRecoverUnknownRejectsMissingDurableProviderBeforeLease(t *testing.T) {
 	if err != nil || persisted.Status != operation.Unknown ||
 		persisted.Version != original.Version || persisted.FenceToken != original.FenceToken {
 		t.Fatalf("missing Provider registration consumed recovery lease: operation=%+v err=%v", persisted, err)
+	}
+}
+
+func TestRecoverUnknownCanInspectDrainingRegisteredProvider(t *testing.T) {
+	_, repo, original := setupUnknown(t)
+	ctx := context.Background()
+	fake := provider.NewFakeProvider()
+	req := provider.Request{
+		OperationID:       original.ID,
+		TenantID:          original.TenantID,
+		WorkloadID:        original.WorkloadID,
+		ProviderID:        original.ProviderID,
+		IdempotencyKey:    original.IdempotencyKey,
+		RequestDigest:     original.RequestDigest,
+		DesiredGeneration: original.Generation,
+		Kind:              original.Kind,
+	}
+	fake.LoseNextAcknowledgement()
+	if _, err := fake.Apply(ctx, req); !errors.Is(err, provider.ErrAcknowledgementLost) {
+		t.Fatalf("fake did not simulate lost ACK: %v", err)
+	}
+	if _, err := repo.BeginProviderDrain(ctx, original.ProviderID, 1, "PLANNED_MAINTENANCE"); err != nil {
+		t.Fatal(err)
+	}
+	worker, err := recovery.NewWorker(repo, adapterFor(original.ProviderID, inspectOnly{Adapter: fake}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := worker.RecoverUnknown(ctx, original.TenantID, original.ID, "reconciler", time.Minute)
+	if err != nil || next.Status != operation.Succeeded || next.ProviderResourceUID == "" {
+		t.Fatalf("Draining Provider could not reconcile existing resource: next=%+v err=%v", next, err)
 	}
 }
