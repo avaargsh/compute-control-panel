@@ -67,7 +67,7 @@ func (r *Repository) GetOperation(ctx context.Context, tenantID, operationID str
 		return operation.Operation{}, operation.ErrInvalid
 	}
 	return scanOperation(r.db.QueryRowContext(ctx,
-		"SELECT "+operationColumns+" FROM compute_operations WHERE tenant_id=$1 AND compute_operation_id=$2",
+		"SELECT "+operationColumns+" FROM public.compute_operations WHERE tenant_id=$1 AND compute_operation_id=$2",
 		tenantID, operationID))
 }
 
@@ -100,7 +100,7 @@ func (r *Repository) CreateOperation(ctx context.Context, o operation.Operation,
 	// workload has since advanced to a newer desired generation. Replay
 	// creates no new side effect and does not claim dispatch authority.
 	historical, historyErr := scanOperation(tx.QueryRowContext(ctx,
-		"SELECT "+operationColumns+" FROM compute_operations WHERE tenant_id=$1 AND idempotency_key=$2",
+		"SELECT "+operationColumns+" FROM public.compute_operations WHERE tenant_id=$1 AND idempotency_key=$2",
 		o.TenantID, o.IdempotencyKey))
 	if historyErr == nil {
 		if !sameOperationIntent(historical, o) {
@@ -118,7 +118,7 @@ func (r *Repository) CreateOperation(ctx context.Context, o operation.Operation,
 	// Ensure the intent belongs to the current workload generation. The
 	// workload lock excludes concurrent generation advances until commit.
 	var currentGeneration int64
-	err = tx.QueryRowContext(ctx, `SELECT desired_generation FROM compute_workloads
+	err = tx.QueryRowContext(ctx, `SELECT desired_generation FROM public.compute_workloads
         WHERE tenant_id=$1 AND workload_id=$2 FOR SHARE`, o.TenantID, o.WorkloadID).Scan(&currentGeneration)
 	if err != nil {
 		return operation.Operation{}, false, fmt.Errorf("read operation workload: %w", err)
@@ -127,7 +127,7 @@ func (r *Repository) CreateOperation(ctx context.Context, o operation.Operation,
 		return operation.Operation{}, false, operation.ErrStale
 	}
 
-	const insert = `INSERT INTO compute_operations(
+	const insert = `INSERT INTO public.compute_operations(
         compute_operation_id,tenant_id,workload_id,allocation_id,provider_id,operation_kind,
         desired_generation,provider_request_digest,idempotency_key,version,fence_token,
         status,target_resource_id,target_resource_uid)
@@ -146,7 +146,7 @@ func (r *Repository) CreateOperation(ctx context.Context, o operation.Operation,
 		if err != nil {
 			return operation.Operation{}, false, err
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO compute_outbox_events(
+		_, err = tx.ExecContext(ctx, `INSERT INTO public.compute_outbox_events(
             event_id,producer,event_type,schema_version,tenant_id,
             aggregate_type,aggregate_id,aggregate_version,occurred_at,
             correlation_id,payload,delivery_state)
@@ -167,7 +167,7 @@ func (r *Repository) CreateOperation(ctx context.Context, o operation.Operation,
 	// A concurrent INSERT waits on the idempotency uniqueness conflict, and
 	// READ COMMITTED then observes its committed row in this new statement.
 	existing, err := scanOperation(tx.QueryRowContext(ctx,
-		"SELECT "+operationColumns+" FROM compute_operations WHERE tenant_id=$1 AND idempotency_key=$2",
+		"SELECT "+operationColumns+" FROM public.compute_operations WHERE tenant_id=$1 AND idempotency_key=$2",
 		o.TenantID, o.IdempotencyKey))
 	if err != nil {
 		return operation.Operation{}, false, fmt.Errorf("read operation replay: %w", err)
@@ -195,7 +195,7 @@ func (r *Repository) mutateOperation(ctx context.Context, tenantID, operationID 
 	}
 	defer func() { _ = tx.Rollback() }()
 	current, err := scanOperation(tx.QueryRowContext(ctx,
-		"SELECT "+operationColumns+" FROM compute_operations WHERE tenant_id=$1 AND compute_operation_id=$2 FOR UPDATE",
+		"SELECT "+operationColumns+" FROM public.compute_operations WHERE tenant_id=$1 AND compute_operation_id=$2 FOR UPDATE",
 		tenantID, operationID))
 	if err != nil {
 		return operation.Operation{}, err
@@ -222,7 +222,7 @@ func (r *Repository) mutateOperation(ctx context.Context, tenantID, operationID 
 	// advanced. FOR SHARE stabilizes the generation until this CAS commits.
 	if next.Status == operation.Leased || next.Status == operation.InFlight {
 		var generation int64
-		err := tx.QueryRowContext(ctx, `SELECT desired_generation FROM compute_workloads
+		err := tx.QueryRowContext(ctx, `SELECT desired_generation FROM public.compute_workloads
             WHERE tenant_id=$1 AND workload_id=$2 FOR SHARE`, tenantID, current.WorkloadID).Scan(&generation)
 		if err != nil {
 			return operation.Operation{}, fmt.Errorf("check workload generation: %w", err)
@@ -231,7 +231,7 @@ func (r *Repository) mutateOperation(ctx context.Context, tenantID, operationID 
 			return operation.Operation{}, operation.ErrStale
 		}
 	}
-	const update = `UPDATE compute_operations SET
+	const update = `UPDATE public.compute_operations SET
         version=$4,fence_token=$5,status=$6,lease_owner=$7,lease_expires_at=$8,
         provider_resource_id=$9,provider_resource_uid=$10,
         error_code=$11,manual_review_code=$12,cleanup_required=$13,
