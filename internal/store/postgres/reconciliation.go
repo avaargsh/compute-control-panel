@@ -60,7 +60,7 @@ func (r *Repository) ReconcileOperation(
 	defer func() { _ = tx.Rollback() }()
 
 	current, err := scanOperation(tx.QueryRowContext(ctx,
-		"SELECT "+operationColumns+" FROM compute_operations WHERE tenant_id=$1 AND compute_operation_id=$2 FOR UPDATE",
+		"SELECT "+operationColumns+" FROM public.compute_operations WHERE tenant_id=$1 AND compute_operation_id=$2 FOR UPDATE",
 		tenantID, operationID))
 	if err != nil {
 		return operation.Operation{}, fmt.Errorf("read operation for inspection: %w", err)
@@ -69,7 +69,7 @@ func (r *Repository) ReconcileOperation(
 		return operation.Operation{}, operation.ErrStale
 	}
 	var desiredGeneration int64
-	if err := tx.QueryRowContext(ctx, `SELECT desired_generation FROM compute_workloads
+	if err := tx.QueryRowContext(ctx, `SELECT desired_generation FROM public.compute_workloads
 		WHERE tenant_id=$1 AND workload_id=$2 FOR SHARE`,
 		tenantID, current.WorkloadID).Scan(&desiredGeneration); err != nil {
 		return operation.Operation{}, fmt.Errorf("lock workload generation: %w", err)
@@ -91,7 +91,7 @@ func (r *Repository) ReconcileOperation(
 		operation.OperationNotAppliedFinal, operation.OperationFailedFinal:
 		var claimedAt time.Time
 		if err := tx.QueryRowContext(ctx,
-			"SELECT updated_at FROM compute_operations WHERE tenant_id=$1 AND compute_operation_id=$2",
+			"SELECT updated_at FROM public.compute_operations WHERE tenant_id=$1 AND compute_operation_id=$2",
 			tenantID, operationID).Scan(&claimedAt); err != nil {
 			return operation.Operation{}, fmt.Errorf("read reconciliation claim time: %w", err)
 		}
@@ -123,7 +123,7 @@ func (r *Repository) ReconcileOperation(
 	}
 	hash := sha256.Sum256(observationJSON)
 	digest := "sha256:" + hex.EncodeToString(hash[:])
-	_, err = tx.ExecContext(ctx, `INSERT INTO compute_resource_observations(
+	_, err = tx.ExecContext(ctx, `INSERT INTO public.compute_resource_observations(
 		observation_id, tenant_id, workload_id, compute_operation_id,
 		provider_id, desired_generation, resource_kind,
 		provider_resource_id, provider_resource_uid, provider_resource_version,
@@ -142,7 +142,7 @@ func (r *Repository) ReconcileOperation(
 		return operation.Operation{}, fmt.Errorf("append provider inspection: %w", err)
 	}
 
-	const update = `UPDATE compute_operations SET
+	const update = `UPDATE public.compute_operations SET
 		version=$4, fence_token=$5, status=$6, lease_owner=$7,
 		lease_expires_at=$8, provider_resource_id=$9, provider_resource_uid=$10,
 		error_code=$11, manual_review_code=$12, cleanup_required=$13,
@@ -170,7 +170,7 @@ func (r *Repository) ReconcileOperation(
 	// independent of those internal transitions. The locked operation row
 	// serializes reconciliation writers for this aggregate.
 	var previousSequence sql.NullInt64
-	if err := tx.QueryRowContext(ctx, `SELECT MAX(aggregate_version) FROM compute_outbox_events
+	if err := tx.QueryRowContext(ctx, `SELECT MAX(aggregate_version) FROM public.compute_outbox_events
 		WHERE producer=$1 AND tenant_id=$2 AND aggregate_type='compute_operation'
 			AND aggregate_id=$3`, producerName, tenantID, operationID).Scan(&previousSequence); err != nil {
 		return operation.Operation{}, fmt.Errorf("read operation outbox sequence: %w", err)
@@ -198,7 +198,7 @@ func (r *Repository) ReconcileOperation(
 	if err != nil {
 		return operation.Operation{}, fmt.Errorf("marshal operation reconciliation event: %w", err)
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO compute_outbox_events(
+	_, err = tx.ExecContext(ctx, `INSERT INTO public.compute_outbox_events(
 		event_id, producer, event_type, schema_version, tenant_id,
 		aggregate_type, aggregate_id, aggregate_version, occurred_at,
 		correlation_id, causation_id, payload, delivery_state)
