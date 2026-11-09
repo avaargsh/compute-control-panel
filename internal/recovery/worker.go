@@ -6,6 +6,7 @@ package recovery
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -18,7 +19,8 @@ import (
 )
 
 var (
-	ErrUnregisteredProvider = errors.New("compute provider is not registered for recovery")
+	ErrUnregisteredProvider       = errors.New("compute provider is not registered for recovery")
+	ErrProviderFingerprintMismatch = errors.New("provider registry fingerprint mismatch")
 	ErrInvalidConfiguration = errors.New("invalid recovery worker configuration")
 )
 
@@ -27,6 +29,7 @@ var (
 // proof of the provider resource's final state.
 type Journal interface {
 	GetOperation(context.Context, string, string) (operation.Operation, error)
+	GetProvider(context.Context, string) (postgres.ProviderRecord, error)
 	ExpireOperationLease(context.Context, string, string, uint64) (operation.Operation, error)
 	BeginOperationReconciliation(context.Context, string, string, uint64, string, uint64, string, time.Duration) (operation.Operation, error)
 	ReconcileOperation(context.Context, string, string, uint64, string, uint64, postgres.InspectionEvidence) (operation.Operation, error)
@@ -36,9 +39,11 @@ type Journal interface {
 // caller. Source and adapter version are audit labels, not cryptographic
 // attestations; real provider authentication remains a production gate.
 type RegisteredProvider struct {
-	Adapter        provider.Adapter
-	Source         string
-	AdapterVersion string
+	Adapter          provider.Adapter
+	ClusterScope     string
+	Source           string
+	AdapterVersion   string
+	CapabilityDigest string
 }
 
 type Worker struct {
@@ -53,7 +58,8 @@ func NewWorker(journal Journal, providers map[string]RegisteredProvider) (*Worke
 	copyOfProviders := make(map[string]RegisteredProvider, len(providers))
 	for providerID, registered := range providers {
 		if !validLabel(providerID) || registered.Adapter == nil ||
-			!validLabel(registered.Source) || !validLabel(registered.AdapterVersion) {
+			!validLabel(registered.ClusterScope) || !validLabel(registered.Source) ||
+			!validLabel(registered.AdapterVersion) || !validCapabilityDigest(registered.CapabilityDigest) {
 			return nil, ErrInvalidConfiguration
 		}
 		copyOfProviders[providerID] = registered
@@ -63,6 +69,14 @@ func NewWorker(journal Journal, providers map[string]RegisteredProvider) (*Worke
 
 func validLabel(value string) bool {
 	return value != "" && value == strings.TrimSpace(value) && len(value) <= 256
+}
+
+func validCapabilityDigest(value string) bool {
+	if !strings.HasPrefix(value, "sha256:") || len(value) != len("sha256:")+64 || value != strings.ToLower(value) {
+		return false
+	}
+	_, err := hex.DecodeString(strings.TrimPrefix(value, "sha256:"))
+	return err == nil
 }
 
 // RecoverUnknown performs a bounded, single-shot recovery attempt. It accepts
@@ -81,6 +95,23 @@ func (w *Worker) RecoverUnknown(ctx context.Context, tenantID, operationID, owne
 	registered, ok := w.providers[current.ProviderID]
 	if !ok {
 		return operation.Operation{}, ErrUnregisteredProvider
+	}
+	// Bind trusted bootstrap labels to the immutable, durable Provider record
+	// BEFORE taking a reconciliation lease or making any external Inspect call.
+	// These are consistency checks, not authentication of the remote source.
+	binding, err := w.journal.GetProvider(ctx, current.ProviderID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return operation.Operation{}, ErrUnregisteredProvider
+	}
+	if err != nil {
+		return operation.Operation{}, fmt.Errorf("read Provider registry for recovery: %w", err)
+	}
+	if binding.ProviderID != current.ProviderID ||
+		binding.ClusterScope != registered.ClusterScope ||
+		binding.AdapterSource != registered.Source ||
+		binding.AdapterVersion != registered.AdapterVersion ||
+		binding.CapabilityDigest != registered.CapabilityDigest {
+		return operation.Operation{}, ErrProviderFingerprintMismatch
 	}
 
 	switch current.Status {
