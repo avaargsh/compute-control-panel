@@ -19,9 +19,9 @@ import (
 )
 
 var (
-	ErrUnregisteredProvider       = errors.New("compute provider is not registered for recovery")
+	ErrUnregisteredProvider        = errors.New("compute provider is not registered for recovery")
 	ErrProviderFingerprintMismatch = errors.New("provider registry fingerprint mismatch")
-	ErrInvalidConfiguration = errors.New("invalid recovery worker configuration")
+	ErrInvalidConfiguration        = errors.New("invalid recovery worker configuration")
 )
 
 // Journal is the durable ComputeOperation authority. The worker never writes
