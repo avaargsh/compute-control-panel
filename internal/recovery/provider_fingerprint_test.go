@@ -81,3 +81,26 @@ func TestRecoverUnknownRejectsMismatchedDurableProviderFingerprintBeforeLease(t 
 		})
 	}
 }
+
+
+func TestRecoverUnknownRejectsMissingDurableProviderBeforeLease(t *testing.T) {
+	_, repo, original := setupUnknown(t)
+	ctx := context.Background()
+	inspector := &unexpectedProviderInspect{}
+	worker, err := recovery.NewWorker(repo, adapterFor(inspector))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = worker.RecoverUnknown(ctx, original.TenantID, original.ID, "reconciler", time.Minute)
+	if !errors.Is(err, recovery.ErrUnregisteredProvider) {
+		t.Fatalf("missing durable Provider registration did not block recovery: %v", err)
+	}
+	if inspector.calls != 0 {
+		t.Fatalf("unregistered Provider was inspected: calls=%d", inspector.calls)
+	}
+	persisted, err := repo.GetOperation(ctx, original.TenantID, original.ID)
+	if err != nil || persisted.Status != operation.Unknown ||
+		persisted.Version != original.Version || persisted.FenceToken != original.FenceToken {
+		t.Fatalf("missing Provider registration consumed recovery lease: operation=%+v err=%v", persisted, err)
+	}
+}
