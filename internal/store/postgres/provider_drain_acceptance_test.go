@@ -100,7 +100,6 @@ func TestAcceptWorkloadExactReplayRemainsAvailableAfterProviderDrain(t *testing.
 	}
 }
 
-
 // A session-local TEMP table must never override the authoritative Provider
 // lifecycle state used to fence a new Workload acceptance transaction.
 func TestAcceptWorkloadRejectsTempProviderShadowWhenRealProviderIsDraining(t *testing.T) {
