@@ -99,3 +99,71 @@ func TestAcceptWorkloadExactReplayRemainsAvailableAfterProviderDrain(t *testing.
 		t.Fatalf("replay changed stable acceptance identity: first=%+v replay=%+v", first, replayed)
 	}
 }
+
+// A session-local TEMP table must never override the authoritative Provider
+// lifecycle state used to fence a new Workload acceptance transaction.
+func TestAcceptWorkloadRejectsTempProviderShadowWhenRealProviderIsDraining(t *testing.T) {
+	db := openIntegrationDB(t)
+	// Pin the test to one PostgreSQL session so pg_temp takes precedence over
+	// unqualified relation names in the same session as AcceptWorkload.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	repo, err := NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	p := providerRegistrationFixture(t)
+	if _, created, err := repo.RegisterProvider(ctx, p); err != nil || !created {
+		t.Fatalf("register Provider: created=%t err=%v", created, err)
+	}
+	if _, err := repo.BeginProviderDrain(ctx, p.ProviderID, 1, "PLANNED_MAINTENANCE"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`CREATE TEMP TABLE compute_providers (provider_id text PRIMARY KEY, state text NOT NULL) ON COMMIT PRESERVE ROWS`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO pg_temp.compute_providers (provider_id, state) VALUES ($1, 'REGISTERED')`, p.ProviderID); err != nil {
+		t.Fatal(err)
+	}
+	var authoritative ProviderState
+	if err := db.QueryRowContext(ctx,
+		`SELECT state FROM public.compute_providers WHERE provider_id=$1`, p.ProviderID).Scan(&authoritative); err != nil {
+		t.Fatal(err)
+	}
+	if authoritative != ProviderDraining {
+		t.Fatalf("permanent Provider state = %q, want DRAINING", authoritative)
+	}
+
+	params := acceptanceFixture(t, "tenant-shadow-"+randomSuffix(t),
+		"workload-shadow-"+randomSuffix(t), "operation-shadow-"+randomSuffix(t),
+		"operation-event-shadow-"+randomSuffix(t))
+	params.ProviderID = p.ProviderID
+	params.Operation.ProviderID = p.ProviderID
+	if _, created, err := repo.AcceptWorkload(ctx, params); !errors.Is(err, ErrProviderDraining) || created {
+		t.Fatalf("TEMP Provider forged REGISTERED admission: created=%t err=%v", created, err)
+	}
+	var workloads, operations, events int
+	if err := db.QueryRowContext(ctx,
+		`SELECT count(*) FROM public.compute_workloads WHERE tenant_id=$1 AND workload_id=$2`,
+		params.Workload.TenantID, params.Workload.WorkloadID).Scan(&workloads); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx,
+		`SELECT count(*) FROM public.compute_operations WHERE tenant_id=$1 AND compute_operation_id=$2`,
+		params.Workload.TenantID, params.Operation.ID).Scan(&operations); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx,
+		`SELECT count(*) FROM public.compute_outbox_events WHERE tenant_id=$1 AND event_id IN ($2,$3)`,
+		params.Workload.TenantID, params.Workload.EventID, params.OperationEventID).Scan(&events); err != nil {
+		t.Fatal(err)
+	}
+	if workloads != 0 || operations != 0 || events != 0 {
+		t.Fatalf("TEMP shadow bypass persisted Workload/Operation/Outbox: %d/%d/%d", workloads, operations, events)
+	}
+}
