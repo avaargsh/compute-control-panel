@@ -244,6 +244,11 @@ spec:
 YAML
 wait_for 'successor Job refused for stale UID' observer_failed stale
 stale_logs="$(kubectl -n "$ns" logs ccp-observe-stale)"
-[[ -z "$stale_logs" ]] || { echo "stale UID emitted successful JSON" >&2; exit 1; }
+[[ "$stale_logs" == *"kueue-observe: read-only observation failed:"* ]] || {
+  echo "stale UID failed without an observable refusal reason" >&2; exit 1;
+}
+if printf '%s\n' "$stale_logs" | jq -e '.Stage or .Evidence' >/dev/null 2>&1; then
+  echo "stale UID emitted successful observation JSON" >&2; exit 1
+fi
 kubectl -n "$ns" delete job "$job" --cascade=background --wait=true
 echo "PASS: real Kueue queue/admission/placement, quota cleanup and stale UID rejection. NO GPU/DRA readiness or release attestation."
