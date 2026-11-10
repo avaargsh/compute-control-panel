@@ -75,7 +75,7 @@ subjects:
   namespace: $ns
 YAML
 for verb in create update patch delete; do
-  answer="$(kubectl auth can-i "$verb" jobs.batch --as="system:serviceaccount:$ns:ccp-kueue-observer" -n "$ns")"
+  answer="$(kubectl auth can-i "$verb" jobs.batch --as="system:serviceaccount:$ns:ccp-kueue-observer" -n "$ns" || true)"
   [[ "$answer" == no ]] || { echo "observer has unauthorized $verb permission" >&2; exit 1; }
 done
 
