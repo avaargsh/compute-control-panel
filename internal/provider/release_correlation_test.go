@@ -82,6 +82,15 @@ func TestReleaseEvidenceCorrelationRejectsCrossAllocationSplicing(t *testing.T) 
 		valid  bool
 	}{
 		{name: "all exact resource identities for one Allocation correlate but do not release", valid: true},
+		{name: "historical SUPERSEDED CREATE with cleanup liability correlates", mutate: func(e *ReleaseEvidenceCandidate) {
+			e.Create.Status = operation.Superseded
+			e.Create.CleanupRequired = true
+			e.Create.ReconcileRequired = true
+		}, valid: true},
+		{name: "SUPERSEDED CREATE without cleanup-required identity", mutate: func(e *ReleaseEvidenceCandidate) {
+			e.Create.Status = operation.Superseded
+			e.Create.ReconcileRequired = true
+		}},
 		{name: "CREATE missing durable Allocation ID", mutate: func(e *ReleaseEvidenceCandidate) { e.Create.AllocationID = "" }},
 		{name: "CREATE belongs to different Allocation", mutate: func(e *ReleaseEvidenceCandidate) { e.Create.AllocationID = "allocation-b" }},
 		{name: "CREATE belongs to different Provider", mutate: func(e *ReleaseEvidenceCandidate) { e.Create.ProviderID = "provider-b" }},
