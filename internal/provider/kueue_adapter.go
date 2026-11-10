@@ -43,8 +43,9 @@ var errKueueJobAlreadyExists = errors.New("kubernetes job already exists")
 // Structural stages UNPROVEN, KUEUE_ADMITTED and POD_PLACED all mean only that
 // the pinned Job object was observed. POD_PLACED is not Allocation READY.
 // This type does not delete, finalize, admit, schedule, claim devices, or
-// mount an HTTP handler. Process-local pins are recovered from Job
-// annotations after a lost create response; they are not a second database.
+// mount an HTTP handler. A process-local UID pin is lost on restart and
+// MUST NOT be reconstructed from Job name/annotations alone. Without a
+// durable trusted UID binding, Inspect remains inconclusive.
 type KueueJobAdapter struct {
 	namespace string
 	apiURL    string
@@ -361,6 +362,10 @@ func (a *KueueJobAdapter) acknowledgeExisting(ctx context.Context, req Request, 
 	if reason, bad := a.jobConflictReason(req, name, meta); bad {
 		return Acknowledgement{}, fmt.Errorf("%w: %s", ErrOperationConflict, reason)
 	}
+	if _, pinned := a.lookupPin(req); !pinned {
+		// A 409 after a lost response is NOT proof this is the original Job.
+		return Acknowledgement{}, ErrAcknowledgementLost
+	}
 	if err := a.pin(req, name, meta.UID); err != nil {
 		return Acknowledgement{}, err
 	}
@@ -397,6 +402,10 @@ func (a *KueueJobAdapter) Apply(ctx context.Context, req Request) (Acknowledgeme
 		if reason, bad := a.jobConflictReason(req, name, meta); bad {
 			return Acknowledgement{}, fmt.Errorf("%w: %s", ErrOperationConflict, reason)
 		}
+		if _, pinned := a.lookupPin(req); !pinned {
+			// After restart, matching annotations alone cannot prove original UID.
+			return Acknowledgement{}, ErrAcknowledgementLost
+		}
 		if err := a.pin(req, name, meta.UID); err != nil {
 			return Acknowledgement{}, err
 		}
@@ -426,6 +435,17 @@ func (a *KueueJobAdapter) observationQuery(req Request, name, uid string) Kubern
 		TenantID: req.TenantID, WorkloadID: req.WorkloadID,
 		DesiredGeneration: req.DesiredGeneration,
 		Namespace:         a.namespace, JobName: name, ExpectedJobUID: uid,
+	}
+}
+
+func unboundKueueJobObservation(req Request) operation.Observation {
+	return operation.Observation{
+		OperationID: req.OperationID, TenantID: req.TenantID,
+		WorkloadID: req.WorkloadID, ProviderID: req.ProviderID,
+		DesiredGeneration: req.DesiredGeneration,
+		ObservedAt:        time.Now().UTC(),
+		ResourceVersion:   "kubernetes-job/uid-unbound",
+		Result:            operation.OperationInProgress,
 	}
 }
 
@@ -483,6 +503,11 @@ func (a *KueueJobAdapter) Inspect(ctx context.Context, req Request) (operation.O
 			return operation.Observation{}, err
 		}
 		return conflictObservation(req, reason), nil
+	}
+	if _, pinned := a.lookupPin(req); !pinned {
+		// A matching live Job is not proof of the original CREATE after restart.
+		// Keep persisted UNKNOWN; never return a successor UID as ResourcePresent.
+		return unboundKueueJobObservation(req), nil
 	}
 	collected, err := a.reader.Collect(ctx, a.observationQuery(req, name, meta.UID))
 	if err != nil {
