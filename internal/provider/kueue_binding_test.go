@@ -343,3 +343,22 @@ func TestKueueJobUnreadableBindingStoreDoesNotAdoptOrDelete(t *testing.T) {
 		t.Fatalf("unreadable store created a Job: posts=%d deletes=%d err=%v", freshAPI.postCount(), freshAPI.deleteCount(), err)
 	}
 }
+
+func TestServiceAccountJobAdapterInjectsTrustedBindingStore(t *testing.T) {
+	server, _, _ := serviceAccountTestServer(t)
+	defer server.Close()
+	ca, token := serviceAccountTestFiles(t, server)
+	bindings := NewMemoryKueueJobBindingStore()
+
+	adapter, err := NewServiceAccountKueueJobAdapterWithBindings(
+		server.URL, ca, token, "tenant-a", bindings,
+	)
+	if err != nil || adapter.bindings != bindings {
+		t.Fatalf("shared trusted binding not injected: adapter=%v err=%v", adapter != nil, err)
+	}
+	if _, err := NewServiceAccountKueueJobAdapterWithBindings(
+		server.URL, ca, token, "tenant-a", nil,
+	); !errors.Is(err, ErrInvalidKueueObservation) {
+		t.Fatalf("nil binding accepted for ServiceAccount writer: %v", err)
+	}
+}
