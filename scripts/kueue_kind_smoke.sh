@@ -708,4 +708,55 @@ jq -e '.phase == "fail-closed" and .failed_closed == true and .reason == "unreac
   exit 1
 }
 echo "durable_sigkill_uid=$pinned_uid successor_uid=$successor_uid"
-echo "PASS: disposable CPU-only Kueue quota-denial/QuotaReserved/Admitted with exact Workload UID+RV, ClusterQueue reservation counters, Job/Pod UID+RV and node binding, teardown observation, stale UID refusal, and separate-process Postgres pin/tombstone SIGKILL recovery. This is NOT GPU/DRA device release, a production quota-release attestation, Provider retirement, Allocation RELEASED or cost finality."
+
+# This additional test joins the actual PostgreSQL ComputeOperation Journal and
+# recovery.Worker to the real kind API Server and durable UID binding. The
+# first process commits UNKNOWN after CREATE, then is genuinely SIGKILLed.
+# Only a fresh-process, Inspect-only Worker may finalize that exact UID.
+durable_dsn="$binding_dsn"
+echo "journal: real Kueue Job CREATE and persisted UNKNOWN, then SIGKILL"
+sigkill_durable "$dir/journal-create.json" journal create --hold
+jq -e '.phase == "journal-create" and .status == "UNKNOWN" and
+  .pin_durable == true and .release_attested == false and
+  .uid != "" and .job_name != "" and .operation_id == "ccp-kind-journal-create"'   "$dir/journal-create.json" >/dev/null
+journal_uid="$(jq -r '.uid' "$dir/journal-create.json")"
+journal_name="$(jq -r '.job_name' "$dir/journal-create.json")"
+journal_previous_fence="$(jq -r '.fence_token' "$dir/journal-create.json")"
+journal_created="$(kubectl -n "$ns" get job "$journal_name" -o jsonpath='{.metadata.creationTimestamp}')"
+[[ -n "$journal_created" &&
+  "$(kubectl -n "$ns" get job "$journal_name" -o jsonpath='{.metadata.uid}')" == "$journal_uid" ]] || {
+  echo "journal Job UID was not present after SIGKILL" >&2
+  exit 1
+}
+[[ "$(psql_at "SELECT status FROM public.compute_operations WHERE tenant_id='tenant-a' AND compute_operation_id='ccp-kind-journal-create'")" == "UNKNOWN" ]] || {
+  echo "ComputeOperation journal did not retain UNKNOWN after SIGKILL" >&2
+  exit 1
+}
+[[ "$(psql_at "SELECT job_uid FROM public.kueue_job_create_pins WHERE namespace='ccp-kueue-smoke' AND tenant_id='tenant-a' AND operation_id='ccp-kind-journal-create'")" == "$journal_uid" ]] || {
+  echo "ComputeOperation Job UID pin was not durable" >&2
+  exit 1
+}
+
+echo "journal: fresh process fenced Worker.RecoverUnknown with Inspect only"
+if ! run_durable "$dir/journal-recover.json" journal recover; then
+  cat "$dir/journal-recover.json.err" >&2
+  exit 1
+fi
+jq -e --arg uid "$journal_uid" --argjson previous "$journal_previous_fence"   '.phase == "journal-recover" and .status == "SUCCEEDED" and
+   .pin_durable == true and .uid == $uid and .fence_token > $previous and
+   .observation == "RESOURCE_PRESENT" and .observation_rows == 1 and
+   .outbox_events == 2 and .release_attested == false' "$dir/journal-recover.json" >/dev/null
+[[ "$(kubectl -n "$ns" get job "$journal_name" -o jsonpath='{.metadata.uid}')" == "$journal_uid" &&
+  "$(kubectl -n "$ns" get job "$journal_name" -o jsonpath='{.metadata.creationTimestamp}')" == "$journal_created" &&
+  "$(kubectl -n "$ns" get job "$journal_name" -o jsonpath='{.spec.suspend}')" == "true" ]] || {
+  echo "recovery replaced, unsuspended or recreated the original Job" >&2
+  exit 1
+}
+journal_job_count="$(kubectl -n "$ns" get jobs -o json | jq -r --arg id ccp-kind-journal-create   '[.items[] | select(.metadata.annotations["compute-control-panel.io/operation-id"] == $id)] | length')"
+[[ "$journal_job_count" == "1" ]] || { echo "journal recovery created duplicate Jobs" >&2; exit 1; }
+[[ "$(psql_at "SELECT status || ':' || coalesce(provider_resource_uid,'') FROM public.compute_operations WHERE tenant_id='tenant-a' AND compute_operation_id='ccp-kind-journal-create'")" == "SUCCEEDED:$journal_uid" ]] || {
+  echo "journal finality did not persist exactly for the pinned UID" >&2
+  exit 1
+}
+echo "journal_recovered_uid=$journal_uid journal_fence=$(jq -r '.fence_token' "$dir/journal-recover.json")"
+echo "PASS: disposable CPU-only Kueue quota-denial/QuotaReserved/Admitted, exact Workload/Pod/Job UID+RV and node binding, teardown observation, Postgres pin/tombstone SIGKILL recovery, and real kind + Postgres ComputeOperation UNKNOWN -> fenced Inspect-first SUCCEEDED after process SIGKILL. This is NOT GPU/DRA device release, a production quota-release attestation, Provider retirement, Allocation RELEASED or cost finality."
