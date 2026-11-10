@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	smokeNamespace = "ccp-kueue-smoke"
+	smokeNamespace      = "ccp-kueue-smoke"
 	serviceAccountFiles = "/var/run/secrets/kubernetes.io/serviceaccount"
 )
 
@@ -34,20 +34,20 @@ func lifecycleCreateRequest() provider.Request {
 	return provider.Request{
 		OperationID: "ccp-kind-lifecycle-create", TenantID: "tenant-a",
 		WorkloadID: "workload-a", ProviderID: "kueue",
-		IdempotencyKey: "ccp-kind-create-key",
-		RequestDigest: "sha256:" + strings.Repeat("ab", 32),
+		IdempotencyKey:    "ccp-kind-create-key",
+		RequestDigest:     "sha256:" + strings.Repeat("ab", 32),
 		DesiredGeneration: 7, Kind: operation.Create,
 	}
 }
 
 type lifecycleEvidence struct {
-	CreatedUID string `json:"created_uid"`
-	CreatedResult operation.ObservationResult `json:"created_result"`
+	CreatedUID         string                      `json:"created_uid"`
+	CreatedResult      operation.ObservationResult `json:"created_result"`
 	AfterAdapterReinit operation.ObservationResult `json:"after_adapter_reinit"`
-	RejectedWrongUID bool `json:"rejected_wrong_uid"`
-	DeletedResult operation.ObservationResult `json:"deleted_result"`
-	AfterDeleteReinit operation.ObservationResult `json:"after_delete_reinit"`
-	ReleaseAttested bool `json:"release_attested"`
+	RejectedWrongUID   bool                        `json:"rejected_wrong_uid"`
+	DeletedResult      operation.ObservationResult `json:"deleted_result"`
+	AfterDeleteReinit  operation.ObservationResult `json:"after_delete_reinit"`
+	ReleaseAttested    bool                        `json:"release_attested"`
 }
 
 func apiEndpoint(getenv func(string) string) (string, error) {
