@@ -38,11 +38,11 @@ type KueueJobEvidence struct {
 	JobWorkloadID        string
 	JobDesiredGeneration uint64
 
-	KueueWorkload    KubernetesResourceRef
-	KueueOwnerJobUID  string
+	KueueWorkload      KubernetesResourceRef
+	KueueOwnerJobUID   string
 	KueueQuotaReserved bool
-	KueueClusterQueue string
-	KueueAdmitted     bool
+	KueueClusterQueue  string
+	KueueAdmitted      bool
 
 	Pod            KubernetesResourceRef
 	PodOwnerJobUID string
