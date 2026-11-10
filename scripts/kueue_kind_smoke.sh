@@ -500,6 +500,56 @@ kubectl -n "$ns" get jobs -o json | jq -e '
   all(.items[]; .metadata.annotations["compute-control-panel.io/operation-id"] != "ccp-kind-lifecycle-create")' >/dev/null
 echo "provider_lifecycle=$(jq -c '.' "$dir/lifecycle.json")"
 
+# The previous queued Job was created with kubectl. Verify that CCP's actual
+# HTTPS/ServiceAccount writer can create a Kueue-managed Job too (no direct
+# Workload CR writes, no manual unsuspend, no GPU device attestations).
+kubectl apply -f - <<YAML
+apiVersion: v1
+kind: Pod
+metadata: {name: ccp-queued-submit, namespace: $ns}
+spec:
+  serviceAccountName: ccp-kueue-lifecycle
+  restartPolicy: Never
+  containers:
+  - name: submit
+    image: ccp-kueue-observe:smoke
+    imagePullPolicy: Never
+    command: ["/kueue-provider-smoke", "queued"]
+    env:
+    - name: CCP_DISPOSABLE_KIND_SMOKE
+      value: '1'
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities: {drop: [ALL]}
+      runAsNonRoot: true
+      readOnlyRootFilesystem: true
+YAML
+wait_for 'queued writer Pod completed' bash -c \
+  '[[ "$(kubectl -n "$1" get pod ccp-queued-submit -o jsonpath="{.status.phase}")" == Succeeded ]]' _ "$ns"
+kubectl -n "$ns" logs ccp-queued-submit > "$dir/queued.json"
+jq -e '.resource_id != "" and .resource_uid != "" and .attested_gpu == false and .released == false' "$dir/queued.json" >/dev/null
+queued_ref="$(jq -r .resource_id "$dir/queued.json")"
+[[ "$queued_ref" == "$ns/"* ]] || { echo "queued writer escaped namespace" >&2; exit 1; }
+queued_job="${queued_ref#*/}"
+queued_uid="$(jq -r .resource_uid "$dir/queued.json")"
+kubectl -n "$ns" get job "$queued_job" -o json | jq -e --arg uid "$queued_uid" \
+  '.metadata.uid == $uid and .metadata.labels["kueue.x-k8s.io/queue-name"] == "ccp-smoke" and
+   .spec.template.spec.containers[0].resources.requests.cpu == "100m" and
+   .spec.template.spec.containers[0].resources.requests.memory == "32Mi"' >/dev/null
+wait_for 'queued CCP Job creates owner-linked Kueue Workload' workload_for_uid "$queued_uid"
+wait_for 'queued CCP Job is really admitted by Kueue' workload_admitted "$queued_uid"
+wait_for 'queued CCP Job is unsuspended by Kueue' bash -c \
+  '[[ "$(kubectl -n "$1" get job "$2" -o jsonpath="{.spec.suspend}")" == false ]]' _ "$ns" "$queued_job"
+wait_for 'queued CCP Job Pod placed by scheduler' pod_scheduled "$queued_uid"
+queued_pod_uid="$(pods_json "$queued_uid" | jq -er '.items[0].metadata.uid')"
+queued_workload_uid="$(workloads_json | jq -er --arg id "$queued_uid" \
+  '.items[] | select(any(.metadata.ownerReferences[]?; .kind == "Job" and .uid == $id)) | .metadata.uid')"
+echo "ccp_queued_admission_placement=$(jq -cn --arg job "$queued_uid" --arg pod "$queued_pod_uid" --arg workload "$queued_workload_uid" \
+  '{jobUID:$job,podUID:$pod,workloadUID:$workload,deviceAssignment:"UNPROVEN",release:"UNPROVEN"}')"
+kubectl -n "$ns" delete job "$queued_job" --cascade=background --wait=true
+wait_for 'queued Job original UID absent' bash -c \
+  'kubectl -n "$1" get jobs -o json | jq -e --arg uid "$2" "all(.items[]; .metadata.uid != \\$uid)" >/dev/null' _ "$ns" "$queued_uid"
+
 # Separate OS processes, one disposable Postgres. SIGKILL after the pin or
 # tombstone is durable. This is not Allocation RELEASED or quota release.
 set +e
