@@ -171,7 +171,9 @@ func conditionIsTrue(conditions []kubeCondition, kind string) (bool, error) {
 func nativeKueueCondition(conditions []kubeCondition, kind string) (KueueConditionEvidence, error) {
 	result := KueueConditionEvidence{Status: "MISSING"}
 	for _, c := range conditions {
-		if c.Type != kind { continue }
+		if c.Type != kind {
+			continue
+		}
 		if result.Status != "MISSING" || (c.Status != "True" && c.Status != "False" && c.Status != "Unknown") {
 			return KueueConditionEvidence{}, ErrInvalidKueueObservation
 		}
@@ -179,7 +181,9 @@ func nativeKueueCondition(conditions []kubeCondition, kind string) (KueueConditi
 			Status: c.Status, Reason: c.Reason, Message: c.Message,
 			LastTransitionTime: c.LastTransitionTime, ObservedGeneration: c.ObservedGeneration,
 		}
-		if !validKueueCondition(result) { return KueueConditionEvidence{}, ErrInvalidKueueObservation }
+		if !validKueueCondition(result) {
+			return KueueConditionEvidence{}, ErrInvalidKueueObservation
+		}
 	}
 	return result, nil
 }
@@ -188,11 +192,15 @@ func nativeKueueCondition(conditions []kubeCondition, kind string) (KueueConditi
 // while retaining extended resource names and raw Kubernetes quantity units.
 // This is structural evidence, not a device allocation or cost calculation.
 func canonicalReservedAssignments(assignments []kubePodSetAssignment) (string, error) {
-	if len(assignments) == 0 || len(assignments) > 18 { return "", ErrInvalidKueueObservation }
+	if len(assignments) == 0 || len(assignments) > 18 {
+		return "", ErrInvalidKueueObservation
+	}
 	seen := make(map[string]bool, len(assignments))
 	for _, item := range assignments {
 		if !validKubeName(item.Name) || seen[item.Name] || len(item.ResourceUsage) == 0 ||
-			(item.Count != nil && *item.Count < 0) { return "", ErrInvalidKueueObservation }
+			(item.Count != nil && *item.Count < 0) {
+			return "", ErrInvalidKueueObservation
+		}
 		seen[item.Name] = true
 		for key, value := range item.ResourceUsage {
 			if key == "" || len(key) > 320 || key != strings.TrimSpace(key) || strings.ContainsAny(key, " \t\r\n\\\x00") ||
@@ -208,7 +216,9 @@ func canonicalReservedAssignments(assignments []kubePodSetAssignment) (string, e
 		}
 	}
 	serialized, err := json.Marshal(assignments)
-	if err != nil { return "", ErrInvalidKueueObservation }
+	if err != nil {
+		return "", ErrInvalidKueueObservation
+	}
 	return string(serialized), nil
 }
 
@@ -292,20 +302,28 @@ func (r *KubernetesObservationReader) ObserveJob(
 		e.KueueWorkload = refFromKube(workload.Metadata)
 		e.KueueOwnerJobUID = jobRef.UID
 		quotaCondition, err := nativeKueueCondition(workload.Status.Conditions, "QuotaReserved")
-		if err != nil { return reject(err) }
+		if err != nil {
+			return reject(err)
+		}
 		admissionCondition, err := nativeKueueCondition(workload.Status.Conditions, "Admitted")
-		if err != nil { return reject(err) }
+		if err != nil {
+			return reject(err)
+		}
 		reserved := quotaCondition.Status == "True"
 		admitted := admissionCondition.Status == "True"
 		// An Admitted=True without the independent quota reservation is
 		// contradictory, not evidence that the queue has available resources.
-		if admitted && !reserved { return reject(ErrInvalidKueueObservation) }
+		if admitted && !reserved {
+			return reject(ErrInvalidKueueObservation)
+		}
 		if reserved {
 			if workload.Status.Admission == nil || workload.Status.Admission.ClusterQueue == "" {
 				return reject(ErrInvalidKueueObservation)
 			}
 			assignments, err := canonicalReservedAssignments(workload.Status.Admission.PodSetAssignments)
-			if err != nil { return reject(err) }
+			if err != nil {
+				return reject(err)
+			}
 			e.KueueClusterQueue = workload.Status.Admission.ClusterQueue
 			e.KueuePodSetAssignmentsJSON = assignments
 		}
