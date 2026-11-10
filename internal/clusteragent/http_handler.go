@@ -5,10 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -254,4 +252,3 @@ func writeAgentServiceError(w http.ResponseWriter, err error) {
 	}
 }
 
-var _ = fmt.Sprintf
