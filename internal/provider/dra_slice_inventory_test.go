@@ -73,7 +73,7 @@ func TestDRAPoolInventoryRequiresCompleteCurrentGeneration(t *testing.T) {
 	}{
 		{name: "complete single-node pool with exact allocated device", want: true},
 		{name: "complete two-slice pool with exact device and distinct nodes", first: appendCompleteSecondSlice, want: true, wantCount: 2},
-		{name: "incomplete second read of formerly complete pool", first: appendCompleteSecondSlice},
+		{name: "incomplete second read of formerly complete pool", first: appendCompleteSecondSlice, second: func(map[string]any) {}},
 		{name: "duplicate allocated device across same-generation slices", first: func(v map[string]any) {
 			appendCompleteSecondSlice(v)
 			v["items"].([]any)[1].(map[string]any)["spec"].(map[string]any)["devices"] = []any{map[string]any{"name": "device-a"}}
