@@ -137,6 +137,19 @@ func TestDurableKueueBindingCanonicalRoleAndShadow(t *testing.T) {
 	if !errors.Is(err, ErrInvalidKueueObservation) {
 		t.Fatalf("constructor err=%v", err)
 	}
+	// The queued production constructor must accept exactly the same restricted
+	// durable binding role, and only then validate ServiceAccount transport.
+	_, err = NewQueuedServiceAccountKueueJobAdapter(
+		"https://kubernetes.default.svc", "missing-ca.crt", "missing-token",
+		"tenant-a", "ccp-smoke", dsn,
+	)
+	if errors.Is(err, ErrKueueBindingRole) || errors.Is(err, ErrKueueBindingSchema) ||
+		errors.Is(err, ErrKueueBindingUnavailable) || errors.Is(err, ErrKueueBindingDSNEmpty) {
+		t.Fatalf("queued constructor rejected the canonical durable role: %v", err)
+	}
+	if !errors.Is(err, ErrInvalidKueueObservation) {
+		t.Fatalf("queued constructor did not reach TLS file validation: %v", err)
+	}
 
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
