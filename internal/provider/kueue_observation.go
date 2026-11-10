@@ -39,8 +39,10 @@ type KueueJobEvidence struct {
 	JobDesiredGeneration uint64
 
 	KueueWorkload    KubernetesResourceRef
-	KueueOwnerJobUID string
-	KueueAdmitted    bool
+	KueueOwnerJobUID  string
+	KueueQuotaReserved bool
+	KueueClusterQueue string
+	KueueAdmitted     bool
 
 	Pod            KubernetesResourceRef
 	PodOwnerJobUID string
@@ -88,7 +90,7 @@ func AssessKueueJobObservation(e KueueJobEvidence) (KueueObservationStage, error
 	if !presentKubernetesRef(e.Job) {
 		if e.JobTenantID != "" || e.JobWorkloadID != "" || e.JobDesiredGeneration != 0 ||
 			presentKubernetesRef(e.KueueWorkload) || e.KueueOwnerJobUID != "" ||
-			e.KueueAdmitted || presentKubernetesRef(e.Pod) ||
+			e.KueueAdmitted || e.KueueQuotaReserved || e.KueueClusterQueue != "" || presentKubernetesRef(e.Pod) ||
 			e.PodOwnerJobUID != "" || e.PodScheduled || e.PodNodeName != "" {
 			return reject()
 		}
@@ -100,7 +102,7 @@ func AssessKueueJobObservation(e KueueJobEvidence) (KueueObservationStage, error
 	}
 
 	if !presentKubernetesRef(e.KueueWorkload) {
-		if e.KueueOwnerJobUID != "" || e.KueueAdmitted ||
+		if e.KueueOwnerJobUID != "" || e.KueueAdmitted || e.KueueQuotaReserved || e.KueueClusterQueue != "" ||
 			presentKubernetesRef(e.Pod) || e.PodOwnerJobUID != "" ||
 			e.PodScheduled || e.PodNodeName != "" {
 			return reject()
@@ -110,6 +112,14 @@ func AssessKueueJobObservation(e KueueJobEvidence) (KueueObservationStage, error
 	if !validKubernetesRef(e.KueueWorkload) ||
 		e.KueueWorkload.Namespace != e.Job.Namespace ||
 		e.KueueOwnerJobUID != e.Job.UID {
+		return reject()
+	}
+	if e.KueueQuotaReserved {
+		if e.KueueClusterQueue == "" || e.KueueClusterQueue != strings.TrimSpace(e.KueueClusterQueue) ||
+			strings.ContainsRune(e.KueueClusterQueue, 0) {
+			return reject()
+		}
+	} else if e.KueueClusterQueue != "" || e.KueueAdmitted {
 		return reject()
 	}
 	if !e.KueueAdmitted {
