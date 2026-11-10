@@ -360,9 +360,11 @@ kubectl -n "$ns" logs ccp-provider-lifecycle > "$dir/lifecycle.json"
 jq -e '.created_uid != "" and
   .created_result == "RESOURCE_PRESENT" and
   .after_adapter_reinit == "OPERATION_IN_PROGRESS" and
+  .bound_adapter_reinit_create == "RESOURCE_PRESENT" and
   .rejected_wrong_uid == true and
   .deleted_result == "TARGET_ABSENT" and
   .after_delete_reinit == "CONFLICT" and
+  .bound_adapter_reinit_delete == "TARGET_ABSENT" and
   .release_attested == false' "$dir/lifecycle.json" >/dev/null
 kubectl -n "$ns" get jobs -o json | jq -e '
   all(.items[]; .metadata.annotations["compute-control-panel.io/operation-id"] != "ccp-kind-lifecycle-create")' >/dev/null
