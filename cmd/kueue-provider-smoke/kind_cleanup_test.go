@@ -16,12 +16,12 @@ func TestExistingKindClusterDoesNotRemoveUnownedPostgres(t *testing.T) {
 	binDir := t.TempDir()
 	logPath := filepath.Join(t.TempDir(), "docker-calls")
 	fakes := map[string]string{
-		"kind": "#!/bin/sh\nif [ \"$1\" = get ] && [ \"$2\" = clusters ]; then echo ccp-kueue-smoke; exit 0; fi\nexit 2\n",
-		"docker": "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CCP_KIND_DOCKER_LOG\"\nexit 0\n",
+		"kind":    "#!/bin/sh\nif [ \"$1\" = get ] && [ \"$2\" = clusters ]; then echo ccp-kueue-smoke; exit 0; fi\nexit 2\n",
+		"docker":  "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CCP_KIND_DOCKER_LOG\"\nexit 0\n",
 		"kubectl": "#!/bin/sh\nexit 0\n",
-		"jq": "#!/bin/sh\nexit 0\n",
-		"go": "#!/bin/sh\nexit 0\n",
-		"curl": "#!/bin/sh\nexit 0\n",
+		"jq":      "#!/bin/sh\nexit 0\n",
+		"go":      "#!/bin/sh\nexit 0\n",
+		"curl":    "#!/bin/sh\nexit 0\n",
 	}
 	for name, script := range fakes {
 		if err := os.WriteFile(filepath.Join(binDir, name), []byte(script), 0700); err != nil {
