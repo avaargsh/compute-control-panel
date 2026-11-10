@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -23,11 +24,11 @@ func observedJobQuery() KubernetesJobQuery {
 	}
 }
 
-func testKubeReader(t *testing.T, job, workloads, pods string, status int) (*KubernetesObservationReader, *int, func()) {
+func testKubeReader(t *testing.T, job, workloads, pods string, status int) (*KubernetesObservationReader, *atomic.Int32, func()) {
 	t.Helper()
-	reads := new(int)
+	reads := new(atomic.Int32)
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		*reads++
+		reads.Add(1)
 		if r.Method != http.MethodGet {
 			t.Errorf("Kubernetes observer attempted mutating method: %s", r.Method)
 			http.Error(w, "write forbidden", http.StatusMethodNotAllowed)
@@ -85,8 +86,8 @@ func TestKubernetesObservationReaderStagesFromActualReadOnlyAPI(t *testing.T) {
 			if err != nil || got != tc.want {
 				t.Fatalf("observe stage=%q, err=%v, want=%q", got, err, tc.want)
 			}
-			if e.Job.UID != "job-uid-a" || *reads < 2 {
-				t.Fatalf("missing authoritative Job GET evidence %+v, reads=%d", e.Job, *reads)
+			if e.Job.UID != "job-uid-a" || reads.Load() < 2 {
+				t.Fatalf("missing authoritative Job GET evidence %+v, reads=%d", e.Job, reads.Load())
 			}
 		})
 	}
