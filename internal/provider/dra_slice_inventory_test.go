@@ -64,10 +64,10 @@ func appendCompleteSecondSlice(v map[string]any) {
 
 func TestDRAPoolInventoryRequiresCompleteCurrentGeneration(t *testing.T) {
 	tests := []struct {
-		name   string
-		first  func(map[string]any)
-		second func(map[string]any)
-		status int
+		name      string
+		first     func(map[string]any)
+		second    func(map[string]any)
+		status    int
 		want      bool
 		wantCount int
 	}{
@@ -148,9 +148,11 @@ func TestDRAPoolInventoryRequiresCompleteCurrentGeneration(t *testing.T) {
 				if err != nil || got.PodClaim.Pod.UID != "pod-uid-a" || got.PodClaim.Claim.Claim.UID != "claim-uid-a" ||
 					got.Slice.UID != "slice-uid-a" || got.Slice.Name != "gpu-slice-a" ||
 					got.PoolGeneration != 4 || got.PoolResourceSliceCount != func() int {
-						if tc.wantCount > 0 { return tc.wantCount }
-						return 1
-					}() ||
+					if tc.wantCount > 0 {
+						return tc.wantCount
+					}
+					return 1
+				}() ||
 					podReads.Load() != 4 || claimReads.Load() != 4 || sliceReads.Load() != 2 {
 					t.Fatalf("no complete generation/UID-fenced inventory proof: %+v err=%v calls=%d/%d/%d", got, err, podReads.Load(), claimReads.Load(), sliceReads.Load())
 				}
