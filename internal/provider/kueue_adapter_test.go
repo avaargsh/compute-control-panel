@@ -153,6 +153,13 @@ func (a *kueueAPI) create(w http.ResponseWriter, body []byte) {
 	obj.Metadata.UID = "job-uid-created"
 	obj.Metadata.ResourceVersion = "11"
 	obj.Metadata.Annotations = posted.Metadata.Annotations
+	suspend := posted.Spec.Suspend
+	parallelism := posted.Spec.Parallelism
+	completions := posted.Spec.Completions
+	obj.Spec.Suspend = &suspend
+	obj.Spec.Parallelism = &parallelism
+	obj.Spec.Completions = &completions
+	obj.Spec.Template = posted.Spec.Template
 	a.jobs[posted.Metadata.Name] = obj
 	if a.loseCreateBody {
 		w.WriteHeader(http.StatusCreated)
