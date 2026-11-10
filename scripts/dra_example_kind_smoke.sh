@@ -203,6 +203,16 @@ printf '%s\n' "$claim_json" | jq -e --arg uid "$pod_uid" '
   any(.status.reservedFor[]?; .uid == $uid)' >/dev/null
 claim_uid="$(printf '%s\n' "$claim_json" | jq -er .metadata.uid)"
 device_id="$(printf '%s\n' "$claim_json" | jq -er '.status.allocation.devices.results[0].device')"
+claim_pool="$(printf '%s\n' "$claim_json" | jq -er '.status.allocation.devices.results[0].pool')"
+# Re-list the source API after allocation. A Claim result is valid only if its
+# exact driver/pool/device still belongs to the earlier UID-pinned ResourceSlice.
+fresh_slice="$(kubectl get resourceslices -o json | jq -ce \
+  --arg uid "$slice_uid" --arg pool "$claim_pool" --arg device "$device_id" '
+  [.items[] | select(.metadata.uid == $uid and
+    .spec.driver == "gpu.example.com" and .spec.pool.name == $pool and
+    any(.spec.devices[]?; .name == $device))] |
+  if length == 1 then .[0] else empty end')"
+[[ -n "$fresh_slice" ]] || { echo "DRA Claim device disagrees with pinned ResourceSlice" >&2; exit 1; }
 container_log="$(kubectl -n "$ns" logs "$pod" -c consumer)"
 printf '%s\n' "$container_log" | grep -Eq '^GPU_DEVICE_[0-9]+=' || {
   echo "DRA allocation exists but simulated kubelet/CDI device injection is unproven" >&2; exit 1
