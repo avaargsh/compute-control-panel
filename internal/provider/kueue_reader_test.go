@@ -13,7 +13,7 @@ import (
 )
 
 const testKubeJob = `{"metadata":{"name":"job-a","namespace":"tenant-a","uid":"job-uid-a","resourceVersion":"11","annotations":{"compute-control-panel.io/tenant-id":"tenant-a","compute-control-panel.io/workload-id":"workload-a","compute-control-panel.io/desired-generation":"7"}}}`
-const testKueueWorkloads = `{"metadata":{"resourceVersion":"21"},"items":[{"metadata":{"name":"kueue-a","namespace":"tenant-a","uid":"kueue-uid-a","resourceVersion":"22","ownerReferences":[{"apiVersion":"batch/v1","kind":"Job","uid":"job-uid-a","controller":true}]},"status":{"admission":{"clusterQueue":"cq-a"},"conditions":[{"type":"Admitted","status":"True"}]}}]}`
+const testKueueWorkloads = `{"metadata":{"resourceVersion":"21"},"items":[{"metadata":{"name":"kueue-a","namespace":"tenant-a","uid":"kueue-uid-a","resourceVersion":"22","ownerReferences":[{"apiVersion":"batch/v1","kind":"Job","uid":"job-uid-a","controller":true}]},"status":{"admission":{"clusterQueue":"cq-a"},"conditions":[{"type":"Admitted","status":"True"},{"type":"QuotaReserved","status":"True"}]}}]}`
 const testKubePods = `{"metadata":{"resourceVersion":"31"},"items":[{"metadata":{"name":"pod-a","namespace":"tenant-a","uid":"pod-uid-a","resourceVersion":"32","labels":{"batch.kubernetes.io/controller-uid":"job-uid-a"},"ownerReferences":[{"apiVersion":"batch/v1","kind":"Job","uid":"job-uid-a","controller":true}]},"spec":{"nodeName":"node-a"},"status":{"conditions":[{"type":"PodScheduled","status":"True"}]}}]}`
 
 func observedJobQuery() KubernetesJobQuery {
@@ -101,6 +101,8 @@ func TestKubernetesObservationReaderFailsClosedOnIdentityOrPartialLists(t *testi
 		pods      string
 		status    int
 	}{
+		{"admitted without explicit quota reservation", testKubeJob, strings.Replace(testKueueWorkloads, `,{"type":"QuotaReserved","status":"True"}`, "", 1), testKubePods, 0},
+		{"admitted with revoked quota reservation", testKubeJob, strings.Replace(testKueueWorkloads, `"type":"QuotaReserved","status":"True"`, `"type":"QuotaReserved","status":"False"`, 1), testKubePods, 0},
 		{"successor Job UID", strings.Replace(testKubeJob, "job-uid-a", "job-uid-b", 1), testKueueWorkloads, testKubePods, 0},
 		{"stale generation", strings.Replace(testKubeJob, `"compute-control-panel.io/desired-generation":"7"`, `"compute-control-panel.io/desired-generation":"6"`, 1), testKueueWorkloads, testKubePods, 0},
 		{"cross tenant Job", strings.Replace(testKubeJob, `"compute-control-panel.io/tenant-id":"tenant-a"`, `"compute-control-panel.io/tenant-id":"tenant-b"`, 1), testKueueWorkloads, testKubePods, 0},
