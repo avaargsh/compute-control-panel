@@ -55,10 +55,16 @@ func TestDRAClaimReadOnlyUIDBoundObservation(t *testing.T) {
 		{name: "exact claim, Pod reservation and allocated device", valid: true},
 		{name: "successor Claim UID", change: func(v map[string]any) { v["metadata"].(map[string]any)["uid"] = "successor" }},
 		{name: "missing resourceVersion", change: func(v map[string]any) { v["metadata"].(map[string]any)["resourceVersion"] = "" }},
-		{name: "foreign reserved Pod", change: func(v map[string]any) { v["status"].(map[string]any)["reservedFor"].([]any)[0].(map[string]any)["uid"] = "other-uid" }},
-		{name: "wrong consumer type", change: func(v map[string]any) { v["status"].(map[string]any)["reservedFor"].([]any)[0].(map[string]any)["resource"] = "jobs" }},
+		{name: "foreign reserved Pod", change: func(v map[string]any) {
+			v["status"].(map[string]any)["reservedFor"].([]any)[0].(map[string]any)["uid"] = "other-uid"
+		}},
+		{name: "wrong consumer type", change: func(v map[string]any) {
+			v["status"].(map[string]any)["reservedFor"].([]any)[0].(map[string]any)["resource"] = "jobs"
+		}},
 		{name: "no Pod reservation", change: func(v map[string]any) { v["status"].(map[string]any)["reservedFor"] = []any{} }},
-		{name: "second Pod reservation", change: func(v map[string]any) { v["status"].(map[string]any)["reservedFor"] = []any{map[string]any{"resource": "pods", "name": "gpu-pod-a", "uid": "pod-uid-a"}, map[string]any{"resource": "pods", "name": "other", "uid": "other"}} }},
+		{name: "second Pod reservation", change: func(v map[string]any) {
+			v["status"].(map[string]any)["reservedFor"] = []any{map[string]any{"resource": "pods", "name": "gpu-pod-a", "uid": "pod-uid-a"}, map[string]any{"resource": "pods", "name": "other", "uid": "other"}}
+		}},
 		{name: "unallocated Claim", change: func(v map[string]any) { v["status"].(map[string]any)["allocation"] = nil }},
 		{name: "wrong driver", change: func(v map[string]any) { draFirstDevice(v)["driver"] = "other.example.com" }},
 		{name: "wrong pool", change: func(v map[string]any) { draFirstDevice(v)["pool"] = "other-pool" }},
