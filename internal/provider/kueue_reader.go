@@ -198,7 +198,7 @@ func (r *KubernetesObservationReader) ObserveJob(
 	e := KueueJobEvidence{
 		TenantID: q.TenantID, WorkloadID: q.WorkloadID,
 		DesiredGeneration: q.DesiredGeneration,
-		Job: jobRef, JobTenantID: q.TenantID, JobWorkloadID: q.WorkloadID,
+		Job:               jobRef, JobTenantID: q.TenantID, JobWorkloadID: q.WorkloadID,
 		JobDesiredGeneration: q.DesiredGeneration,
 	}
 
