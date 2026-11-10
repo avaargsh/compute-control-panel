@@ -13,6 +13,11 @@ export KUBECONFIG="$dir/kubeconfig"
 name="ccp-kueue-smoke"
 ns="ccp-kueue-smoke"
 job="ccp-test-job"
+pg_name="ccp-kueue-smoke-pg-${dir##*/}"
+pg_id_file="$dir/pg-container-id"
+pg_port="54329"
+pg_boot_pid=""
+migrate_pid=""
 image="kindest/node:v1.34.0@sha256:7416a61b42b1662ca6ca89f02028ac133a309a2a30ba309614e8ec94d976dc5a"
 created=false
 cleanup() {
@@ -21,6 +26,23 @@ cleanup() {
     kubectl --request-timeout=10s -n "$ns" get jobs,workloads,pods -o wide || true
     kubectl --request-timeout=10s -n "$ns" logs ccp-provider-lifecycle --tail=50 || true
     kubectl --request-timeout=10s -n kueue-system logs deploy/kueue-controller-manager --tail=80 || true
+  fi
+  if [[ "$status" -ne 0 ]]; then
+    for f in "$dir"/durable-*.json "$dir"/durable-*.err "$dir"/pg-boot.log "$dir"/migrate.log; do
+      [[ -f "$f" ]] || continue
+      echo "----- $(basename "$f") -----" >&2
+      tail -n 40 "$f" >&2 || true
+    done
+  fi
+  if [[ -n "${migrate_pid:-}" ]]; then kill "$migrate_pid" >/dev/null 2>&1 || true; fi
+  if [[ -n "${pg_boot_pid:-}" ]]; then kill "$pg_boot_pid" >/dev/null 2>&1 || true; fi
+  # Only remove the container created by this invocation, never a foreign
+  # container whose name happened to match the disposable smoke fixture.
+  if [[ -s "$pg_id_file" ]]; then
+    pg_id="$(< "$pg_id_file")"
+    if [[ "$pg_id" =~ ^[a-f0-9]{64}$ ]]; then
+      docker rm -f "$pg_id" >/dev/null 2>&1 || true
+    fi
   fi
   if [[ "$created" == true ]]; then kind delete cluster --name "$name" || true; fi
   rm -rf "$dir"
@@ -33,6 +55,27 @@ if kind get clusters | grep -Fxq "$name"; then
   echo "existing disposable cluster; refusing to reuse" >&2; exit 2
 fi
 created=true
+# Boot disposable Postgres while kind starts. The binding smoke uses it later.
+start_disposable_postgres() {
+  docker pull postgres:16-alpine
+  # Docker must reject a collision; never remove an existing named container.
+  docker run -d --name "$pg_name" \
+    -e POSTGRES_PASSWORD=compute-ci \
+    -e POSTGRES_USER=postgres \
+    -e POSTGRES_DB=postgres \
+    -p "127.0.0.1:${pg_port}:5432" \
+    postgres:16-alpine > "$pg_id_file"
+  for _ in $(seq 1 60); do
+    if docker exec "$pg_name" pg_isready -U postgres -d postgres >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "disposable postgres did not become ready" >&2
+  return 1
+}
+start_disposable_postgres >"$dir/pg-boot.log" 2>&1 &
+pg_boot_pid=$!
 kind create cluster --name "$name" --image "$image" --wait 180s
 [[ "$(kubectl config current-context)" == "kind-$name" ]] || exit 2
 printf 'source_sha=%s\n' "$(git rev-parse HEAD)"
@@ -169,6 +212,20 @@ kubectl -n "$ns" get localqueue ccp-smoke -o name
 
 CGO_ENABLED=0 go build -trimpath -o "$dir/kueue-observe" ./cmd/kueue-observe
 CGO_ENABLED=0 go build -trimpath -o "$dir/kueue-provider-smoke" ./cmd/kueue-provider-smoke
+set +e
+wait "$pg_boot_pid"
+pg_boot_code=$?
+set -e
+pg_boot_pid=""
+[[ "$pg_boot_code" -eq 0 ]] || { echo "disposable postgres failed to start" >&2; cat "$dir/pg-boot.log" >&2; exit 1; }
+{
+  docker exec -e PGPASSWORD=compute-ci "$pg_name" \
+    psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
+    -c "CREATE ROLE ccp_provider_audit_owner NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
+  DATABASE_URL="postgres://postgres:compute-ci@127.0.0.1:${pg_port}/postgres?sslmode=disable" \
+    go run ./cmd/migrate
+} >"$dir/migrate.log" 2>&1 &
+migrate_pid=$!
 cat > "$dir/Dockerfile" <<'DOCKER'
 FROM scratch
 COPY kueue-observe /kueue-observe
@@ -318,7 +375,8 @@ fi
 kubectl -n "$ns" delete job "$job" --cascade=background --wait=true
 
 # This extra smoke invokes CCP's actual provider.Adapter CREATE/Inspect/DELETE
-# against the same real API. It is NOT a broker/PG worker restart test.
+# against the same real API. Its binding store is process-local memory.
+# Separate-process Postgres recovery follows below and is not this Pod.
 kubectl apply -f - <<YAML
 apiVersion: v1
 kind: Pod
@@ -369,4 +427,243 @@ jq -e '.created_uid != "" and
 kubectl -n "$ns" get jobs -o json | jq -e '
   all(.items[]; .metadata.annotations["compute-control-panel.io/operation-id"] != "ccp-kind-lifecycle-create")' >/dev/null
 echo "provider_lifecycle=$(jq -c '.' "$dir/lifecycle.json")"
-echo "PASS: real Kueue queue/admission/placement, quota cleanup, stale UID rejection and real adapter CREATE/DELETE. NO GPU/DRA readiness or release attestation."
+
+# Separate OS processes, one disposable Postgres. SIGKILL after the pin or
+# tombstone is durable. This is not Allocation RELEASED or quota release.
+set +e
+wait "$migrate_pid"
+migrate_code=$?
+set -e
+migrate_pid=""
+[[ "$migrate_code" -eq 0 ]] || { echo "disposable migration failed" >&2; cat "$dir/migrate.log" >&2; exit 1; }
+server="$(kubectl config view --minify --raw -o jsonpath='{.clusters[0].cluster.server}')"
+server="${server#https://}"
+server="${server%/}"
+api_host="${server%%:*}"
+api_port="${server##*:}"
+[[ -n "$api_host" && "$api_port" != "$server" && "$api_port" =~ ^[0-9]+$ ]] || {
+  echo "unexpected kind API server URL" >&2
+  exit 1
+}
+kubectl config view --minify --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d > "$dir/kube-ca.crt"
+kubectl create token ccp-kueue-lifecycle -n "$ns" --duration=2h > "$dir/sa.token"
+[[ -s "$dir/kube-ca.crt" && -s "$dir/sa.token" ]] || { echo "missing ServiceAccount material" >&2; exit 1; }
+# Same CA and API address kubectl uses. Fail here if the runner cannot verify that cert.
+curl --cacert "$dir/kube-ca.crt" --max-time 15 -sS -o "$dir/api-version.json" \
+  "https://${api_host}:${api_port}/version" || { echo "runner cannot reach the kind API with the cluster CA" >&2; exit 1; }
+(umask 077; printf 'Authorization: Bearer %s\n' "$(tr -d '[:space:]' < "$dir/sa.token")" > "$dir/sa.header")
+token_code="$(curl --cacert "$dir/kube-ca.crt" --max-time 15 -sS -o /dev/null -w '%{http_code}' \
+  -H @"$dir/sa.header" \
+  "https://${api_host}:${api_port}/apis/batch/v1/namespaces/${ns}/jobs/ccp-durable-preflight")"
+[[ "$token_code" == "404" ]] || { echo "lifecycle ServiceAccount was not accepted (HTTP ${token_code})" >&2; exit 1; }
+binding_dsn="postgres://postgres:compute-ci@127.0.0.1:${pg_port}/postgres?sslmode=disable"
+durable_dsn="$binding_dsn"
+durable_target_name=""
+durable_target_uid=""
+
+run_durable() {
+  local outfile="$1"
+  shift
+  set +e
+  CCP_DISPOSABLE_KIND_SMOKE=1 \
+    POD_NAMESPACE="$ns" \
+    KUBERNETES_SERVICE_HOST="$api_host" \
+    KUBERNETES_SERVICE_PORT_HTTPS="$api_port" \
+    CCP_KUEUE_SA_CA="$dir/kube-ca.crt" \
+    CCP_KUEUE_SA_TOKEN="$dir/sa.token" \
+    CCP_KUEUE_BINDING_DSN="$durable_dsn" \
+    CCP_KUEUE_SMOKE_TARGET_NAME="$durable_target_name" \
+    CCP_KUEUE_SMOKE_TARGET_UID="$durable_target_uid" \
+    "$dir/kueue-provider-smoke" "$@" >"$outfile" 2>"$outfile.err"
+  local code=$?
+  set -e
+  return "$code"
+}
+
+sigkill_durable() {
+  local outfile="$1"
+  shift
+  CCP_DISPOSABLE_KIND_SMOKE=1 \
+    POD_NAMESPACE="$ns" \
+    KUBERNETES_SERVICE_HOST="$api_host" \
+    KUBERNETES_SERVICE_PORT_HTTPS="$api_port" \
+    CCP_KUEUE_SA_CA="$dir/kube-ca.crt" \
+    CCP_KUEUE_SA_TOKEN="$dir/sa.token" \
+    CCP_KUEUE_BINDING_DSN="$durable_dsn" \
+    "$dir/kueue-provider-smoke" "$@" >"$outfile" 2>"$outfile.err" &
+  local pid=$!
+  local ready=false
+  for _ in $(seq 1 450); do
+    if jq -e '(.pin_durable == true or .tombstone_durable == true) and .uid != ""' "$outfile" >/dev/null 2>&1; then
+      ready=true
+      break
+    fi
+    if ! kill -0 "$pid" 2>/dev/null; then
+      echo "provider process exited before the binding was durable" >&2
+      cat "$outfile.err" >&2 || true
+      exit 1
+    fi
+    sleep 0.2
+  done
+  if [[ "$ready" != true ]]; then
+    kill -9 "$pid" >/dev/null 2>&1 || true
+    echo "timed out waiting for a durable binding" >&2
+    cat "$outfile.err" >&2 || true
+    exit 1
+  fi
+  kill -9 "$pid" 2>/dev/null || true
+  set +e
+  wait "$pid"
+  local code=$?
+  set -e
+  [[ "$code" -eq 137 ]] || { echo "expected SIGKILL status 137, got $code" >&2; exit 1; }
+}
+
+psql_at() {
+  docker exec -e PGPASSWORD=compute-ci "$pg_name" \
+    psql -U postgres -d postgres -tA -v ON_ERROR_STOP=1 -c "$1"
+}
+
+echo "durable: process A CREATE, then SIGKILL"
+sigkill_durable "$dir/durable-create-a.json" durable create --hold
+pinned_uid="$(jq -r '.uid' "$dir/durable-create-a.json")"
+pinned_name="$(jq -r '.job_name' "$dir/durable-create-a.json")"
+pinned_op="$(jq -r '.operation_id' "$dir/durable-create-a.json")"
+[[ "$pinned_op" == "ccp-kind-durable-create" && -n "$pinned_uid" && -n "$pinned_name" ]] || {
+  echo "create process did not report a pin" >&2
+  exit 1
+}
+created_at="$(kubectl -n "$ns" get job "$pinned_name" -o jsonpath='{.metadata.creationTimestamp}')"
+live_uid="$(kubectl -n "$ns" get job "$pinned_name" -o jsonpath='{.metadata.uid}')"
+[[ "$live_uid" == "$pinned_uid" && -n "$created_at" ]] || { echo "live Job UID != pinned UID" >&2; exit 1; }
+kubectl -n "$ns" get job "$pinned_name" -o json > "$dir/durable-original-job.json"
+
+echo "durable: process B replays CREATE"
+if ! run_durable "$dir/durable-replay-create.json" durable replay create; then
+  cat "$dir/durable-replay-create.json.err" >&2
+  exit 1
+fi
+jq -e --arg uid "$pinned_uid" --arg name "$pinned_name" \
+  '.phase == "replay-create" and .result == "applied" and .uid == $uid and .job_name == $name and .release_attested == false' \
+  "$dir/durable-replay-create.json" >/dev/null
+replay_uid="$(kubectl -n "$ns" get job "$pinned_name" -o jsonpath='{.metadata.uid}')"
+replay_created="$(kubectl -n "$ns" get job "$pinned_name" -o jsonpath='{.metadata.creationTimestamp}')"
+job_count="$(kubectl -n "$ns" get jobs -o json | jq -r --arg id "$pinned_op" --arg name "$pinned_name" \
+  '[.items[] | select(.metadata.name == $name and .metadata.annotations["compute-control-panel.io/operation-id"] == $id)] | length')"
+[[ "$replay_uid" == "$pinned_uid" && "$replay_created" == "$created_at" && "$job_count" == "1" ]] || {
+  echo "CREATE replay posted or replaced the Job" >&2
+  exit 1
+}
+pin_uid="$(psql_at "SELECT job_uid FROM public.kueue_job_create_pins WHERE namespace = 'ccp-kueue-smoke' AND operation_id = 'ccp-kind-durable-create'")"
+pin_count="$(psql_at "SELECT count(*) FROM public.kueue_job_create_pins WHERE namespace = 'ccp-kueue-smoke' AND operation_id = 'ccp-kind-durable-create'")"
+[[ "$pin_uid" == "$pinned_uid" && "$pin_count" == "1" ]] || { echo "create pin row drifted" >&2; exit 1; }
+
+echo "durable: fresh process Inspect CREATE"
+if ! run_durable "$dir/durable-inspect-create.json" durable inspect create; then
+  cat "$dir/durable-inspect-create.json.err" >&2
+  exit 1
+fi
+jq -e --arg uid "$pinned_uid" \
+  '.phase == "inspect-create" and .result == "RESOURCE_PRESENT" and .uid == $uid and .release_attested == false' \
+  "$dir/durable-inspect-create.json" >/dev/null
+
+echo "durable: process C DELETE, then SIGKILL"
+sigkill_durable "$dir/durable-delete-c.json" durable delete --hold
+jq -e --arg uid "$pinned_uid" --arg name "$pinned_name" \
+  '.phase == "delete" and .tombstone_durable == true and .acknowledged == true and .uid == $uid and .job_name == $name and .release_attested == false' \
+  "$dir/durable-delete-c.json" >/dev/null
+
+echo "durable: process D replays DELETE"
+if ! run_durable "$dir/durable-replay-delete.json" durable replay delete; then
+  cat "$dir/durable-replay-delete.json.err" >&2
+  exit 1
+fi
+jq -e --arg uid "$pinned_uid" \
+  '.phase == "replay-delete" and .result == "applied" and .uid == $uid and .release_attested == false' \
+  "$dir/durable-replay-delete.json" >/dev/null
+if ! run_durable "$dir/durable-inspect-delete.json" durable inspect delete; then
+  cat "$dir/durable-inspect-delete.json.err" >&2
+  exit 1
+fi
+jq -e --arg uid "$pinned_uid" \
+  '.phase == "inspect-delete" and .result == "TARGET_ABSENT" and .target_uid == $uid and .uid == "" and .release_attested == false' \
+  "$dir/durable-inspect-delete.json" >/dev/null
+if kubectl -n "$ns" get job "$pinned_name" >/dev/null 2>&1; then
+  echo "pinned Job still present after TARGET_ABSENT" >&2
+  exit 1
+fi
+tomb_uid="$(psql_at "SELECT job_uid FROM public.kueue_job_delete_tombstones WHERE namespace = 'ccp-kueue-smoke' AND operation_id = 'ccp-kind-durable-delete' AND acknowledged")"
+[[ "$tomb_uid" == "$pinned_uid" ]] || { echo "delete tombstone drifted: ${tomb_uid:-<empty>}" >&2; exit 1; }
+
+echo "durable: same-name successor must be JOB_UID_REPLACED and left in place"
+jq -n --arg name "$pinned_name" --arg ns "$ns" --slurpfile src "$dir/durable-original-job.json" '{
+  apiVersion: "batch/v1",
+  kind: "Job",
+  metadata: {name: $name, namespace: $ns, annotations: $src[0].metadata.annotations},
+  spec: {
+    suspend: true,
+    parallelism: 1,
+    completions: 1,
+    template: {spec: {
+      restartPolicy: "Never",
+      containers: [{name: "ccp-suspended", image: "registry.k8s.io/pause:3.10"}]
+    }}
+  }
+}' > "$dir/durable-successor.json"
+kubectl apply -f "$dir/durable-successor.json" >/dev/null
+successor_uid="$(kubectl -n "$ns" get job "$pinned_name" -o jsonpath='{.metadata.uid}')"
+successor_created="$(kubectl -n "$ns" get job "$pinned_name" -o jsonpath='{.metadata.creationTimestamp}')"
+[[ -n "$successor_uid" && "$successor_uid" != "$pinned_uid" && -n "$successor_created" ]] || {
+  echo "successor Job was not a new UID" >&2
+  exit 1
+}
+if ! run_durable "$dir/durable-successor-inspect.json" durable inspect create; then
+  cat "$dir/durable-successor-inspect.json.err" >&2
+  exit 1
+fi
+jq -e '.phase == "inspect-create" and .result == "CONFLICT" and .reason_code == "JOB_UID_REPLACED" and .uid == "" and .release_attested == false' \
+  "$dir/durable-successor-inspect.json" >/dev/null
+[[ "$(kubectl -n "$ns" get job "$pinned_name" -o jsonpath='{.metadata.uid}')" == "$successor_uid" ]] || {
+  echo "JOB_UID_REPLACED process replaced the successor" >&2
+  exit 1
+}
+[[ "$(kubectl -n "$ns" get job "$pinned_name" -o jsonpath='{.metadata.creationTimestamp}')" == "$successor_created" ]] || {
+  echo "JOB_UID_REPLACED process recreated the successor" >&2
+  exit 1
+}
+[[ -z "$(kubectl -n "$ns" get job "$pinned_name" -o jsonpath='{.metadata.deletionTimestamp}')" ]] || {
+  echo "JOB_UID_REPLACED process deleted the successor" >&2
+  exit 1
+}
+
+echo "durable: empty DSN and unreachable database fail closed"
+durable_target_name="$pinned_name"
+durable_target_uid="$successor_uid"
+durable_dsn=""
+if run_durable "$dir/durable-empty.json" durable fail-closed; then
+  echo "empty DSN did not fail" >&2
+  exit 1
+fi
+jq -e '.phase == "fail-closed" and .failed_closed == true and .reason == "empty_dsn" and .create_applied == false and .delete_applied == false and .inspect_present == false' \
+  "$dir/durable-empty.json" >/dev/null
+durable_dsn="postgres://postgres:compute-ci@127.0.0.1:1/postgres?sslmode=disable&connect_timeout=2"
+if run_durable "$dir/durable-unreachable.json" durable fail-closed; then
+  echo "unreachable database did not fail" >&2
+  exit 1
+fi
+jq -e '.phase == "fail-closed" and .failed_closed == true and .reason == "unreachable" and .create_applied == false and .delete_applied == false and .inspect_present == false' \
+  "$dir/durable-unreachable.json" >/dev/null
+[[ "$(kubectl -n "$ns" get job "$pinned_name" -o jsonpath='{.metadata.uid}')" == "$successor_uid" ]] || {
+  echo "fail-closed process deleted or replaced the successor" >&2
+  exit 1
+}
+[[ "$(kubectl -n "$ns" get job "$pinned_name" -o jsonpath='{.metadata.creationTimestamp}')" == "$successor_created" ]] || {
+  echo "fail-closed process recreated the successor" >&2
+  exit 1
+}
+[[ "$(psql_at "SELECT job_uid FROM public.kueue_job_create_pins WHERE namespace = 'ccp-kueue-smoke' AND operation_id = 'ccp-kind-durable-create'")" == "$pinned_uid" ]] || {
+  echo "fail-closed process rewrote the create pin" >&2
+  exit 1
+}
+echo "durable_sigkill_uid=$pinned_uid successor_uid=$successor_uid"
+echo "PASS: real Kueue queue/admission/placement, quota cleanup, stale UID rejection, in-memory adapter CREATE/DELETE, and separate-process Postgres SIGKILL recovery of the Job pin and DELETE tombstone. NO GPU/DRA readiness, quota release, or Allocation RELEASED attestation."
