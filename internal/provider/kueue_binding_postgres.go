@@ -108,7 +108,10 @@ func (s *PostgresKueueJobBindingStore) PutCreatePin(namespace string, req Reques
 			return last
 		}
 	}
-	return fmt.Errorf("write kueue create pin: %w", last)
+	// After a retry, a uniqueness error means another operation owns the
+	// namespace/Job name (or a conflicting operation key). Preserve the
+	// same fail-closed contract as MemoryKueueJobBindingStore.
+	return ErrOperationConflict
 }
 
 func (s *PostgresKueueJobBindingStore) putCreatePinOnce(namespace string, req Request, name, uid string, generation int64) error {
