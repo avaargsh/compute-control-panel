@@ -50,13 +50,13 @@ type KueueJobEvidence struct {
 	JobWorkloadID        string
 	JobDesiredGeneration uint64
 
-	KueueWorkload      KubernetesResourceRef
-	KueueOwnerJobUID   string
-	KueueQuotaReserved        bool
-	KueueClusterQueue         string
-	KueueAdmitted             bool
-	KueueQuotaCondition       KueueConditionEvidence
-	KueueAdmissionCondition   KueueConditionEvidence
+	KueueWorkload           KubernetesResourceRef
+	KueueOwnerJobUID        string
+	KueueQuotaReserved      bool
+	KueueClusterQueue       string
+	KueueAdmitted           bool
+	KueueQuotaCondition     KueueConditionEvidence
+	KueueAdmissionCondition KueueConditionEvidence
 	// Canonical JSON of the native status.admission.podSetAssignments list.
 	// Keep immutable text here so KueueJobEvidence remains a value snapshot;
 	// these quantities are quota reservations, not device or billing usage.
@@ -96,9 +96,13 @@ func validKueueCondition(c KueueConditionEvidence) bool {
 	case "MISSING":
 		return c.Reason == "" && c.Message == "" && c.LastTransitionTime == "" && c.ObservedGeneration == 0
 	case "True", "False", "Unknown":
-		if c.ObservedGeneration < 0 { return false }
+		if c.ObservedGeneration < 0 {
+			return false
+		}
 		if c.LastTransitionTime != "" {
-			if _, err := time.Parse(time.RFC3339Nano, c.LastTransitionTime); err != nil { return false }
+			if _, err := time.Parse(time.RFC3339Nano, c.LastTransitionTime); err != nil {
+				return false
+			}
 		}
 		return true
 	default:
