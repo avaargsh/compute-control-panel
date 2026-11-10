@@ -92,14 +92,26 @@ func NewKueueJobAdapterWithBindings(apiURL, namespace string, client *http.Clien
 // update, patch, or cluster-admin, and do not add create or delete to the
 // observer Role. Provenance from Inspect stays unattested.
 func NewServiceAccountKueueJobAdapter(apiURL, caPath, tokenPath, namespace string) (*KueueJobAdapter, error) {
-	if !validKubeName(namespace) {
+	return NewServiceAccountKueueJobAdapterWithBindings(
+		apiURL, caPath, tokenPath, namespace, NewMemoryKueueJobBindingStore(),
+	)
+}
+
+// NewServiceAccountKueueJobAdapterWithBindings reuses the authenticated,
+// CA-pinned ServiceAccount transport while accepting an explicit trusted
+// binding store. The supplied in-memory store supports only adapter-object
+// reinitialization; it is NOT durable after process termination.
+func NewServiceAccountKueueJobAdapterWithBindings(
+	apiURL, caPath, tokenPath, namespace string, bindings KueueJobBindingStore,
+) (*KueueJobAdapter, error) {
+	if !validKubeName(namespace) || bindings == nil {
 		return nil, ErrInvalidKueueObservation
 	}
 	client, closeIdle, err := newServiceAccountHTTPClient(caPath, tokenPath)
 	if err != nil {
 		return nil, err
 	}
-	adapter, err := NewKueueJobAdapter(apiURL, namespace, client)
+	adapter, err := NewKueueJobAdapterWithBindings(apiURL, namespace, client, bindings)
 	if err != nil {
 		closeIdle()
 		return nil, err
