@@ -62,8 +62,28 @@ func (c *HTTPClient) post(ctx context.Context, path string, request any, respons
 		return nil
 	}
 	if resp.StatusCode != http.StatusOK {
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("Cluster Agent API returned HTTP %d", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		var apiError struct {
+			Code string `json:"code"`
+		}
+		_ = json.Unmarshal(body, &apiError)
+		switch apiError.Code {
+		case "AGENT_UNAUTHENTICATED":
+			return ErrUnauthorized
+		case "AGENT_UNAVAILABLE":
+			return ErrAgentUnavailable
+		case "STALE_AGENT_FENCE":
+			return ErrStaleSession
+		case "AGENT_COMMAND_NOT_FOUND":
+			return ErrCommandNotFound
+		case "AGENT_COMMAND_CONFLICT":
+			return ErrCommandConflict
+		case "INVALID_AGENT_MESSAGE", "INVALID_AGENT_HEARTBEAT", "INVALID_AGENT_CLAIM",
+			"INVALID_AGENT_COMPLETION":
+			return ErrInvalid
+		default:
+			return fmt.Errorf("Cluster Agent API returned HTTP %d", resp.StatusCode)
+		}
 	}
 	if response == nil {
 		_, err := io.Copy(io.Discard, io.LimitReader(resp.Body, maxAgentResponseBody))
