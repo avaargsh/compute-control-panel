@@ -275,3 +275,23 @@ func (r *KubernetesObservationReader) ObserveJob(
 	}
 	return e, stage, nil
 }
+
+// Collect adapts the bounded HTTPS Kubernetes reader to the shared read-only
+// Collector contract. Provenance labels and local observation time identify
+// this code path; they are NOT authenticated cluster evidence or a GPU device
+// attestation. No Kubernetes write, Allocation mutation or scheduling occurs.
+func (r *KubernetesObservationReader) Collect(
+	ctx context.Context, q KubernetesJobQuery,
+) (KueueJobCollection, error) {
+	observed, _, err := r.ObserveJob(ctx, q)
+	if err != nil {
+		return KueueJobCollection{Stage: KueueUnproven}, err
+	}
+	return bindKueueJobCollection(q, observed, KueueEvidenceProvenance{
+		Source:         "kubernetes-https-readonly-unattested",
+		AdapterVersion: "kueue-v1beta1-single-pod-v1",
+		ObservedAt:     time.Now().UTC(),
+	})
+}
+
+var _ Collector = (*KubernetesObservationReader)(nil)
