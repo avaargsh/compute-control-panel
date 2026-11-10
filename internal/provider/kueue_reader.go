@@ -276,7 +276,6 @@ func (r *KubernetesObservationReader) ObserveJob(
 	return e, stage, nil
 }
 
-
 // Collect adapts the bounded HTTPS Kubernetes reader to the shared read-only
 // Collector contract. Provenance labels and local observation time identify
 // this code path; they are NOT authenticated cluster evidence or a GPU device
