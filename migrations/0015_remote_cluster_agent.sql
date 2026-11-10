@@ -30,7 +30,8 @@ CREATE TABLE public.compute_cluster_agents (
     registered_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     CHECK ((instance_id IS NULL) = (lease_expires_at IS NULL)),
-    CHECK (instance_id IS NULL OR (length(instance_id) BETWEEN 1 AND 128 AND btrim(instance_id)=instance_id))
+    CHECK (instance_id IS NULL OR (length(instance_id) BETWEEN 1 AND 128 AND btrim(instance_id)=instance_id)),
+    UNIQUE (agent_id, cluster_scope)
 );
 
 CREATE TABLE public.compute_cluster_agent_provider_bindings (
@@ -189,20 +190,26 @@ DECLARE
     action_value TEXT;
 BEGIN
     IF TG_OP='INSERT' THEN
-        action_value := 'REGISTERED';
-    ELSIF NEW.instance_id IS DISTINCT FROM OLD.instance_id THEN
-        action_value := 'SESSION_CONNECTED';
-    ELSE
-        action_value := 'STATE_TRANSITIONED';
-    END IF;
-    IF TG_OP='INSERT' OR NEW.state IS DISTINCT FROM OLD.state
-       OR NEW.instance_id IS DISTINCT FROM OLD.instance_id THEN
         INSERT INTO public.compute_cluster_agent_lifecycle_audit (
             agent_id, version, lease_epoch, previous_state, state,
             action, reason_code, instance_id
         ) VALUES (
-            NEW.agent_id, NEW.version, NEW.lease_epoch,
-            CASE WHEN TG_OP='INSERT' THEN NULL ELSE OLD.state END,
+            NEW.agent_id, NEW.version, NEW.lease_epoch, NULL,
+            NEW.state, 'REGISTERED', NEW.last_reason_code, NEW.instance_id
+        );
+        RETURN NEW;
+    END IF;
+    IF NEW.state IS DISTINCT FROM OLD.state OR NEW.instance_id IS DISTINCT FROM OLD.instance_id THEN
+        IF NEW.instance_id IS DISTINCT FROM OLD.instance_id THEN
+            action_value := 'SESSION_CONNECTED';
+        ELSE
+            action_value := 'STATE_TRANSITIONED';
+        END IF;
+        INSERT INTO public.compute_cluster_agent_lifecycle_audit (
+            agent_id, version, lease_epoch, previous_state, state,
+            action, reason_code, instance_id
+        ) VALUES (
+            NEW.agent_id, NEW.version, NEW.lease_epoch, OLD.state,
             NEW.state, action_value, NEW.last_reason_code, NEW.instance_id
         );
     END IF;
