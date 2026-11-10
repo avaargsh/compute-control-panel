@@ -31,9 +31,9 @@ const (
 func journalCreateRequest() provider.Request {
 	return provider.Request{
 		OperationID: journalSmokeOperationID,
-		TenantID: "tenant-a", WorkloadID: "workload-kind-journal",
+		TenantID:    "tenant-a", WorkloadID: "workload-kind-journal",
 		ProviderID: "kueue-journal", IdempotencyKey: "journal-kind-create-idem",
-		RequestDigest: "sha256:" + strings.Repeat("ef", 32),
+		RequestDigest:     "sha256:" + strings.Repeat("ef", 32),
 		DesiredGeneration: 1, Kind: operation.Create,
 	}
 }
@@ -101,7 +101,7 @@ func journalCreate(getenv func(string) string, out io.Writer) error {
 		OwnerResourceType: "run", OwnerResourceID: "run-kind-journal",
 		NormalizedRequest: normalized, RequestDigest: "sha256:" + hex.EncodeToString(sum[:]),
 		IdempotencyKey: "workload-kind-journal-idem",
-		EventID: "workload-kind-journal-event", CorrelationID: "kind-journal",
+		EventID:        "workload-kind-journal-event", CorrelationID: "kind-journal",
 	})
 	if err != nil || !created {
 		return fmt.Errorf("record isolated journal Workload: created=%t err=%v", created, err)
@@ -182,7 +182,7 @@ func journalRecover(getenv func(string) string, out io.Writer) error {
 	}
 	worker, err := recovery.NewWorker(repo, map[string]recovery.RegisteredProvider{
 		req.ProviderID: {
-			Adapter: journalReadOnly{Adapter: adapter},
+			Adapter:      journalReadOnly{Adapter: adapter},
 			ClusterScope: journalSmokeScope, Source: journalSmokeSource,
 			AdapterVersion: journalSmokeVersion, CapabilityDigest: journalSmokeCapability,
 		},
