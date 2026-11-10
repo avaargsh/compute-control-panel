@@ -98,6 +98,15 @@ func (s *MemoryKueueJobBindingStore) PutCreatePin(namespace string, req Request,
 		}
 		return nil
 	}
+	// CreatePinUID looks up by namespace and name, not by operation. Enforce
+	// one owner while holding the same mutex as the insert; otherwise its
+	// result would depend on map iteration order and could return a successor
+	// UID to a DELETE fence.
+	for _, prev := range s.pins {
+		if prev.Namespace == namespace && prev.Name == name {
+			return ErrOperationConflict
+		}
+	}
 	s.pins[key] = KueueCreatePin{Namespace: namespace, Name: name, UID: uid, Request: req}
 	return nil
 }

@@ -459,3 +459,32 @@ func TestKueuePostCreateBindingReadErrorPreservesUnknown(t *testing.T) {
 		t.Fatalf("uncommitted UID pin trusted: ok=%v err=%v", ok, err)
 	}
 }
+
+func TestMemoryKueueJobBindingStoreRefusesAmbiguousNameOwnership(t *testing.T) {
+	store := NewMemoryKueueJobBindingStore()
+	original := kueueAdapterRequest()
+	const name = "ccp-shared-job"
+	if err := store.PutCreatePin("tenant-a", original, name, "job-uid-original"); err != nil {
+		t.Fatal(err)
+	}
+	successor := original
+	successor.OperationID = "op-create-successor"
+	successor.IdempotencyKey = "idem-create-successor"
+	for _, uid := range []string{"job-uid-successor", "job-uid-original"} {
+		if err := store.PutCreatePin("tenant-a", successor, name, uid); !errors.Is(err, ErrOperationConflict) {
+			t.Fatalf("name was assigned to two distinct CREATE operations (uid %s): %v", uid, err)
+		}
+	}
+	if _, found, err := store.GetCreatePin("tenant-a", successor); err != nil || found {
+		t.Fatalf("colliding operation received a trusted pin: found=%v err=%v", found, err)
+	}
+	if uid, found, err := store.CreatePinUID("tenant-a", name); err != nil || !found || uid != "job-uid-original" {
+		t.Fatalf("ambiguous pin-by-name: uid=%q found=%v err=%v", uid, found, err)
+	}
+	if err := store.PutCreatePin("tenant-a", successor, "ccp-unrelated-job", "job-uid-successor"); err != nil {
+		t.Fatalf("unique same-namespace name was rejected: %v", err)
+	}
+	if err := store.PutCreatePin("other-ns", successor, name, "job-uid-successor"); err != nil {
+		t.Fatalf("different namespace must isolate the name: %v", err)
+	}
+}
