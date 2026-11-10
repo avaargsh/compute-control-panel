@@ -58,6 +58,16 @@ func assertKueueJobBindingStoreConformance(t *testing.T, store KueueJobBindingSt
 	if err := store.PutCreatePin(namespace, req, jobName, uid); err != nil {
 		t.Fatal(err)
 	}
+	// A Job name has one CREATE owner per namespace, even for a distinct
+	// operation or tenant. This must match the memory store after restart.
+	another := uniqueKueueRequest(t)
+	if err := store.PutCreatePin(namespace, another, jobName, uid); !errors.Is(err, ErrOperationConflict) {
+		t.Fatalf("second operation reused name and uid: %v", err)
+	}
+	another.TenantID = "another-tenant"
+	if err := store.PutCreatePin(namespace, another, jobName, uid+"-other"); !errors.Is(err, ErrOperationConflict) {
+		t.Fatalf("cross-tenant name/uid ownership conflict: %v", err)
+	}
 	if err := store.PutCreatePin(namespace, req, jobName, uid); err != nil {
 		t.Fatal(err)
 	}
