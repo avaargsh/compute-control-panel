@@ -381,12 +381,48 @@ func (r *Repository) Execute(ctx context.Context, providerID string, action clus
 	if err != nil {
 		return clusteragent.ExecutionResult{}, err
 	}
-	_, err = r.db.ExecContext(ctx, `INSERT INTO public.compute_cluster_agent_commands (
-		command_id, agent_id, cluster_scope, provider_id, operation_id, tenant_id,
-		workload_id, desired_generation, command_action, request_digest, request
-	) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)
-	ON CONFLICT (agent_id, operation_id, command_action) DO NOTHING`,
-		commandID, agentID, clusterScope, providerID, request.OperationID,
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return clusteragent.ExecutionResult{}, fmt.Errorf("begin remote command enqueue: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Serialize command sequence allocation against other commands for this
+	// ComputeOperation. Apply is sequence 1 and idempotent; every new Inspect
+	// gets a new sequence so Recovery Worker can re-inspect after UNKNOWN.
+	var bound int
+	err = tx.QueryRowContext(ctx, `SELECT 1 FROM public.compute_operations
+		WHERE compute_operation_id=$1 AND workload_id=$2 AND tenant_id=$3
+		  AND provider_id=$4 AND desired_generation=$5
+		  AND operation_kind=$6 AND provider_request_digest=$7 AND idempotency_key=$8
+		FOR UPDATE`,
+		request.OperationID, request.WorkloadID, request.TenantID, request.ProviderID,
+		request.DesiredGeneration, string(request.OperationKind), request.RequestDigest, request.IdempotencyKey,
+	).Scan(&bound)
+	if errors.Is(err, sql.ErrNoRows) {
+		return clusteragent.ExecutionResult{}, clusteragent.ErrCommandConflict
+	}
+	if err != nil {
+		return clusteragent.ExecutionResult{}, fmt.Errorf("bind remote command to ComputeOperation: %w", err)
+	}
+	sequence := int64(1)
+	if action == clusteragent.ActionInspect {
+		err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(command_sequence),0)+1
+			FROM public.compute_cluster_agent_commands
+			WHERE agent_id=$1 AND operation_id=$2 AND command_action='INSPECT'`,
+			agentID, request.OperationID,
+		).Scan(&sequence)
+		if err != nil {
+			return clusteragent.ExecutionResult{}, fmt.Errorf("allocate INSPECT command sequence: %w", err)
+		}
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO public.compute_cluster_agent_commands (
+		command_id, agent_id, cluster_scope, provider_id, operation_id,
+		command_sequence, tenant_id, workload_id, desired_generation,
+		command_action, request_digest, request
+	) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)
+	ON CONFLICT (agent_id, operation_id, command_action, command_sequence) DO NOTHING`,
+		commandID, agentID, clusterScope, providerID, request.OperationID, sequence,
 		request.TenantID, request.WorkloadID, request.DesiredGeneration,
 		string(action), request.RequestDigest, requestJSON,
 	)
@@ -397,11 +433,11 @@ func (r *Repository) Execute(ctx context.Context, providerID string, action clus
 	var storedDigest string
 	var storedBody []byte
 	var storedState string
-	err = r.db.QueryRowContext(ctx, `SELECT request_digest, request, state
+	err = tx.QueryRowContext(ctx, `SELECT command_id, request_digest, request, state
 		FROM public.compute_cluster_agent_commands
-		WHERE agent_id=$1 AND operation_id=$2 AND command_action=$3`,
-		agentID, request.OperationID, string(action),
-	).Scan(&storedDigest, &storedBody, &storedState)
+		WHERE agent_id=$1 AND operation_id=$2 AND command_action=$3 AND command_sequence=$4`,
+		agentID, request.OperationID, string(action), sequence,
+	).Scan(&commandID, &storedDigest, &storedBody, &storedState)
 	if err != nil {
 		return clusteragent.ExecutionResult{}, fmt.Errorf("read remote Provider command: %w", err)
 	}
@@ -415,6 +451,9 @@ func (r *Repository) Execute(ctx context.Context, providerID string, action clus
 	if storedState == "UNKNOWN" {
 		return clusteragent.ExecutionResult{Outcome: clusteragent.OutcomeUnknown, ErrorCode: "REMOTE_COMMAND_UNKNOWN"}, clusteragent.ErrCommandUnknown
 	}
+	if err := tx.Commit(); err != nil {
+		return clusteragent.ExecutionResult{}, fmt.Errorf("commit remote Provider command: %w", err)
+	}
 
 	ticker := time.NewTicker(clusterAgentWaitInterval)
 	defer ticker.Stop()
@@ -424,8 +463,8 @@ func (r *Repository) Execute(ctx context.Context, providerID string, action clus
 		var result []byte
 		err := r.db.QueryRowContext(ctx, `SELECT state, outcome, result, error_code
 			FROM public.compute_cluster_agent_commands
-			WHERE agent_id=$1 AND operation_id=$2 AND command_action=$3`,
-			agentID, request.OperationID, string(action),
+			WHERE command_id=$1`,
+			commandID,
 		).Scan(&state, &outcome, &result, &errorCode)
 		if err != nil {
 			return clusteragent.ExecutionResult{}, fmt.Errorf("wait for remote Provider command: %w", err)
