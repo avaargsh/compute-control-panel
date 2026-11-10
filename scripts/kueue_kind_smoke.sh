@@ -13,7 +13,8 @@ export KUBECONFIG="$dir/kubeconfig"
 name="ccp-kueue-smoke"
 ns="ccp-kueue-smoke"
 job="ccp-test-job"
-pg_name="ccp-kueue-smoke-pg"
+pg_name="ccp-kueue-smoke-pg-${dir##*/}"
+pg_id_file="$dir/pg-container-id"
 pg_port="54329"
 pg_boot_pid=""
 migrate_pid=""
@@ -35,7 +36,14 @@ cleanup() {
   fi
   if [[ -n "${migrate_pid:-}" ]]; then kill "$migrate_pid" >/dev/null 2>&1 || true; fi
   if [[ -n "${pg_boot_pid:-}" ]]; then kill "$pg_boot_pid" >/dev/null 2>&1 || true; fi
-  if [[ -n "${pg_name:-}" ]]; then docker rm -f "$pg_name" >/dev/null 2>&1 || true; fi
+  # Only remove the container created by this invocation, never a foreign
+  # container whose name happened to match the disposable smoke fixture.
+  if [[ -s "$pg_id_file" ]]; then
+    pg_id="$(< "$pg_id_file")"
+    if [[ "$pg_id" =~ ^[a-f0-9]{64}$ ]]; then
+      docker rm -f "$pg_id" >/dev/null 2>&1 || true
+    fi
+  fi
   if [[ "$created" == true ]]; then kind delete cluster --name "$name" || true; fi
   rm -rf "$dir"
   exit "$status"
@@ -50,13 +58,13 @@ created=true
 # Boot disposable Postgres while kind starts. The binding smoke uses it later.
 start_disposable_postgres() {
   docker pull postgres:16-alpine
-  docker rm -f "$pg_name" >/dev/null 2>&1 || true
+  # Docker must reject a collision; never remove an existing named container.
   docker run -d --name "$pg_name" \
     -e POSTGRES_PASSWORD=compute-ci \
     -e POSTGRES_USER=postgres \
     -e POSTGRES_DB=postgres \
     -p "127.0.0.1:${pg_port}:5432" \
-    postgres:16-alpine
+    postgres:16-alpine > "$pg_id_file"
   for _ in $(seq 1 60); do
     if docker exec "$pg_name" pg_isready -U postgres -d postgres >/dev/null 2>&1; then
       return 0
