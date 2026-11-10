@@ -27,17 +27,17 @@ const (
 	kueueAnnotationIdempotencyKey = "compute-control-panel.io/idempotency-key"
 	kueueAnnotationProviderID     = "compute-control-panel.io/provider-id"
 
-	// kueueSuspendedJobImage fills the batch/v1 schema only. The Job is created
-	// suspended and without a Kueue queue label, so this slice does not ask
-	// Kueue to admit it and does not ask a kubelet to run it.
+	// kueueSuspendedJobImage is used for inert default and CPU-only queued
+	// smoke Jobs. Neither path demonstrates any physical GPU assignment.
 	kueueSuspendedJobImage = "registry.k8s.io/pause:3.10"
 )
 
 var errKueueJobAlreadyExists = errors.New("kubernetes job already exists")
 
-// KueueJobAdapter is a first-cut batch/v1 Job writer. Apply accepts CREATE
-// and DELETE. CREATE posts one suspended Job and pins the returned UID in
-// the binding store. DELETE GETs that name and deletes only the requested
+// KueueJobAdapter is a batch/v1 Job writer. Default CREATE posts an inert,
+// unqueued suspended Job. An explicit queued constructor submits a labeled
+// Job with bounded requests, allowing Kueue to own its suspension and resume.
+// Both modes pin the returned UID in the binding store. DELETE targets only
 // target UID. CREATE Inspect reads that UID back through
 // KubernetesObservationReader.Collect.
 //
@@ -46,28 +46,27 @@ var errKueueJobAlreadyExists = errors.New("kubernetes job already exists")
 // DELETE TARGET_ABSENT is a stored tombstone for that UID plus a UID-fenced
 // 404. It is not Allocation cleanup, Kueue quota release, or device or claim
 // deallocation. A 404 with no stored CREATE pin and no stored DELETE tombstone
-// stays ambiguous. NewKueueJobAdapter is the explicit in-memory constructor
-// for tests and fakes. An in-cluster ServiceAccount process uses
-// NewServiceAccountKueueJobAdapter, which requires a durable Postgres store
-// and never substitutes memory. A later adapter that cannot load the same
-// store still fails closed and MUST NOT reconstruct a pin from the Job name
-// or annotations.
-// This type does not admit, schedule, claim devices, or mount an HTTP handler.
+// stays ambiguous. The default in-memory store is test-only; in-cluster
+// ServiceAccount construction requires a durable PostgreSQL binding store.
+// A later adapter must not reconstruct a lost pin from a name or annotations.
+// The adapter itself does not admit, schedule, allocate devices, or mount an
+// HTTP handler. A Kueue-managed queued Job can later be admitted and placed.
 type KueueJobAdapter struct {
 	namespace string
 	apiURL    string
 	client    http.Client
 	reader    *KubernetesObservationReader
 	bindings  KueueJobBindingStore
+	// Empty means the original inert suspended Job mode. A non-empty LocalQueue
+	// explicitly opts into Kueue-controlled suspend/unsuspend and Pod creation.
+	queueName string
 }
 
 // NewKueueJobAdapter binds CREATE and Inspect to one namespace and an HTTPS
 // client the caller has already authenticated. The client is shared with the
-// read-only reader. No cluster credential is built here. This is the explicit
-// in-memory constructor for tests and fakes: the adapter keeps a private
-// memory store, so a later adapter cannot see its pins. In-cluster deployment
-// must not call it. Use NewServiceAccountKueueJobAdapter, which refuses to
-// start without a durable Postgres binding store.
+// read-only reader. No cluster credential is built here. This is an
+// explicit test-only in-memory constructor; in-cluster use requires the
+// durable ServiceAccount constructor and a restricted database login.
 func NewKueueJobAdapter(apiURL, namespace string, client *http.Client) (*KueueJobAdapter, error) {
 	return NewKueueJobAdapterWithBindings(apiURL, namespace, client, NewMemoryKueueJobBindingStore())
 }
@@ -90,6 +89,43 @@ func NewKueueJobAdapterWithBindings(apiURL, namespace string, client *http.Clien
 		reader:    reader,
 		bindings:  bindings,
 	}, nil
+}
+
+// NewQueuedKueueJobAdapterWithBindings opts into submitting a Job to the
+// specified LocalQueue. Kueue, not CCP, owns its suspend/unsuspend transitions.
+// A persistent binding store and authenticated client remain caller requirements.
+func NewQueuedKueueJobAdapterWithBindings(
+	apiURL, namespace, localQueue string, client *http.Client, bindings KueueJobBindingStore,
+) (*KueueJobAdapter, error) {
+	if !validKubeName(localQueue) {
+		return nil, ErrInvalidKueueObservation
+	}
+	adapter, err := NewKueueJobAdapterWithBindings(apiURL, namespace, client, bindings)
+	if err != nil {
+		return nil, err
+	}
+	adapter.queueName = localQueue
+	return adapter, nil
+}
+
+// NewQueuedServiceAccountKueueJobAdapterWithBindings is the authenticated
+// scoped writer for the opt-in queued mode; no patch/update rights are needed.
+func NewQueuedServiceAccountKueueJobAdapterWithBindings(
+	apiURL, caPath, tokenPath, namespace, localQueue string, bindings KueueJobBindingStore,
+) (*KueueJobAdapter, error) {
+	if !validKubeName(localQueue) || !validKubeName(namespace) || bindings == nil {
+		return nil, ErrInvalidKueueObservation
+	}
+	client, closeIdle, err := newServiceAccountHTTPClient(caPath, tokenPath)
+	if err != nil {
+		return nil, err
+	}
+	adapter, err := NewQueuedKueueJobAdapterWithBindings(apiURL, namespace, localQueue, client, bindings)
+	if err != nil {
+		closeIdle()
+		return nil, err
+	}
+	return adapter, nil
 }
 
 // NewServiceAccountKueueJobAdapter is the in-cluster constructor. It uses the
@@ -317,6 +353,27 @@ func exactSuspendedJobSpec(job kubeObject) bool {
 	return container.Name == "ccp-suspended" && container.Image == kueueSuspendedJobImage
 }
 
+// exactJobSpec preserves the immutable submitted shape while allowing the
+// Kueue controller to change only suspend. Admission is never assumed here.
+func (a *KueueJobAdapter) exactJobSpec(job kubeObject) bool {
+	if a.queueName == "" {
+		return exactSuspendedJobSpec(job)
+	}
+	if job.Metadata.Labels["kueue.x-k8s.io/queue-name"] != a.queueName ||
+		job.Spec.Parallelism == nil || *job.Spec.Parallelism != 1 ||
+		job.Spec.Completions == nil || *job.Spec.Completions != 1 ||
+		job.Spec.Template.Spec.RestartPolicy != "Never" ||
+		len(job.Spec.Template.Spec.Containers) != 1 {
+		return false
+	}
+	container := job.Spec.Template.Spec.Containers[0]
+	return container.Name == "ccp-queued" && container.Image == kueueSuspendedJobImage &&
+		len(container.Command) == 0 && len(container.Args) == 0 &&
+		container.Resources != nil && len(container.Resources.Requests) == 2 &&
+		len(container.Resources.Limits) == 0 &&
+		container.Resources.Requests["cpu"] == "100m" && container.Resources.Requests["memory"] == "32Mi"
+}
+
 func (a *KueueJobAdapter) getJob(ctx context.Context, name string) (kubeMeta, int, error) {
 	status, body, err := a.exchange(ctx, http.MethodGet, a.jobPath(name), nil)
 	if err != nil {
@@ -329,7 +386,7 @@ func (a *KueueJobAdapter) getJob(ctx context.Context, name string) (kubeMeta, in
 	if json.Unmarshal(body, &obj) != nil {
 		return kubeMeta{}, 0, ErrInvalidKueueObservation
 	}
-	if !exactSuspendedJobSpec(obj) {
+	if !a.exactJobSpec(obj) {
 		return kubeMeta{}, 0, fmt.Errorf("%w: JOB_SPEC_MISMATCH", ErrOperationConflict)
 	}
 	return obj.Metadata, status, nil
@@ -346,6 +403,7 @@ type kueueBatchJobMeta struct {
 	Name        string            `json:"name"`
 	Namespace   string            `json:"namespace"`
 	Annotations map[string]string `json:"annotations"`
+	Labels      map[string]string `json:"labels,omitempty"`
 }
 
 type kueueBatchJobSpec struct {
@@ -365,8 +423,16 @@ type kueueBatchPodSpec struct {
 }
 
 type kueueBatchContainer struct {
-	Name  string `json:"name"`
-	Image string `json:"image"`
+	Name      string               `json:"name"`
+	Image     string               `json:"image"`
+	Command   []string             `json:"command,omitempty"`
+	Args      []string             `json:"args,omitempty"`
+	Resources *kueueBatchResources `json:"resources,omitempty"`
+}
+
+type kueueBatchResources struct {
+	Requests map[string]string `json:"requests,omitempty"`
+	Limits   map[string]string `json:"limits,omitempty"`
 }
 
 func (a *KueueJobAdapter) jobBody(req Request, name string) ([]byte, error) {
@@ -391,6 +457,14 @@ func (a *KueueJobAdapter) jobBody(req Request, name string) ([]byte, error) {
 			}},
 		},
 	}
+	if a.queueName != "" {
+		payload.Metadata.Labels = map[string]string{"kueue.x-k8s.io/queue-name": a.queueName}
+		payload.Spec.Suspend = false // Kueue's mutating webhook may immediately suspend it.
+		payload.Spec.Template.Spec.Containers[0] = kueueBatchContainer{
+			Name: "ccp-queued", Image: kueueSuspendedJobImage,
+			Resources: &kueueBatchResources{Requests: map[string]string{"cpu": "100m", "memory": "32Mi"}},
+		}
+	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, ErrInvalidRequest
@@ -413,7 +487,7 @@ func (a *KueueJobAdapter) postJob(ctx context.Context, req Request, name string)
 		if json.Unmarshal(raw, &obj) != nil || !acceptableJobUID(obj.Metadata.UID) ||
 			obj.Metadata.Name != name || obj.Metadata.Namespace != a.namespace ||
 			!validKubernetesRef(refFromKube(obj.Metadata)) ||
-			!exactSuspendedJobSpec(obj) {
+			!a.exactJobSpec(obj) {
 			return kubeMeta{}, ErrAcknowledgementLost
 		}
 		reason, bad, err := a.jobConflictReason(req, name, obj.Metadata)
@@ -465,8 +539,9 @@ func (a *KueueJobAdapter) acknowledgeExisting(ctx context.Context, req Request, 
 	return Acknowledgement{OperationID: req.OperationID, RequestDigest: req.RequestDigest}, nil
 }
 
-// Apply creates one suspended batch/v1 Job for a CREATE operation and pins its
-// UID, or deletes that exact UID for a DELETE operation. An identical replay
+// Apply creates one default suspended Job (or explicitly configured queued
+// Job) for CREATE and pins its UID, or deletes that exact UID for DELETE.
+// An identical replay
 // does not post again and, once DELETE is acknowledged, does not delete again.
 // A later adapter with the same binding store can make that replay. UPDATE is
 // rejected. A lost or unreadable create or delete response returns
