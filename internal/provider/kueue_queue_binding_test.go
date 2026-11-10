@@ -28,7 +28,9 @@ func queueBindingReader(t *testing.T, localFirst, localSecond, clusterFirst, clu
 	t.Helper()
 	var lqReads, cqReads atomic.Int32
 	var totalReads atomic.Int32
-	var wl struct { Items []json.RawMessage `json:"items"` }
+	var wl struct {
+		Items []json.RawMessage `json:"items"`
+	}
 	if err := json.Unmarshal([]byte(workloadList), &wl); err != nil || len(wl.Items) != 1 {
 		t.Fatalf("bad workload fixture: %v", err)
 	}
@@ -54,9 +56,17 @@ func queueBindingReader(t *testing.T, localFirst, localSecond, clusterFirst, clu
 				http.Error(w, "denied", queueStatus)
 				return
 			}
-			if lqReads.Add(1) == 1 { fmt.Fprint(w, localFirst) } else { fmt.Fprint(w, localSecond) }
+			if lqReads.Add(1) == 1 {
+				fmt.Fprint(w, localFirst)
+			} else {
+				fmt.Fprint(w, localSecond)
+			}
 		case "/apis/kueue.x-k8s.io/v1beta1/clusterqueues/cq-a":
-			if cqReads.Add(1) == 1 { fmt.Fprint(w, clusterFirst) } else { fmt.Fprint(w, clusterSecond) }
+			if cqReads.Add(1) == 1 {
+				fmt.Fprint(w, clusterFirst)
+			} else {
+				fmt.Fprint(w, clusterSecond)
+			}
 		default:
 			t.Errorf("unexpected Kube API GET %s", r.URL.Path)
 			http.NotFound(w, r)
@@ -65,7 +75,10 @@ func queueBindingReader(t *testing.T, localFirst, localSecond, clusterFirst, clu
 	client := server.Client()
 	client.Timeout = 3 * time.Second
 	reader, err := NewKubernetesObservationReader(server.URL, client)
-	if err != nil { server.Close(); t.Fatal(err) }
+	if err != nil {
+		server.Close()
+		t.Fatal(err)
+	}
 	return reader, &totalReads, server.Close
 }
 
@@ -92,15 +105,15 @@ func TestKueueQueueBindingPinsLocalAndClusterUID(t *testing.T) {
 
 func TestKueueQueueBindingRejectsIncompleteOrReplacedQueue(t *testing.T) {
 	tests := []struct {
-		name string
-		q func(*KueueQueueBindingQuery)
-		firstLocal, nextLocal string
+		name                      string
+		q                         func(*KueueQueueBindingQuery)
+		firstLocal, nextLocal     string
 		firstCluster, nextCluster string
-		workload string
-		status int
+		workload                  string
+		status                    int
 	}{
-		{"missing trusted LocalQueue UID", func(q *KueueQueueBindingQuery){q.LocalQueueUID = ""}, queueLocalJSON, queueLocalJSON, queueClusterJSON, queueClusterJSON, queueWorkloadFixture(), 0},
-		{"missing trusted ClusterQueue UID", func(q *KueueQueueBindingQuery){q.ClusterQueueUID = ""}, queueLocalJSON, queueLocalJSON, queueClusterJSON, queueClusterJSON, queueWorkloadFixture(), 0},
+		{"missing trusted LocalQueue UID", func(q *KueueQueueBindingQuery) { q.LocalQueueUID = "" }, queueLocalJSON, queueLocalJSON, queueClusterJSON, queueClusterJSON, queueWorkloadFixture(), 0},
+		{"missing trusted ClusterQueue UID", func(q *KueueQueueBindingQuery) { q.ClusterQueueUID = "" }, queueLocalJSON, queueLocalJSON, queueClusterJSON, queueClusterJSON, queueWorkloadFixture(), 0},
 		{"foreign localqueue mapping", nil, strings.Replace(queueLocalJSON, `"clusterQueue":"cq-a"`, `"clusterQueue":"cq-b"`, 1), queueLocalJSON, queueClusterJSON, queueClusterJSON, queueWorkloadFixture(), 0},
 		{"localqueue successor UID", nil, strings.Replace(queueLocalJSON, "local-uid-a", "local-uid-b", 1), queueLocalJSON, queueClusterJSON, queueClusterJSON, queueWorkloadFixture(), 0},
 		{"clusterqueue successor UID", nil, queueLocalJSON, queueLocalJSON, strings.Replace(queueClusterJSON, "cluster-uid-a", "cluster-uid-b", 1), queueClusterJSON, queueWorkloadFixture(), 0},
@@ -118,12 +131,16 @@ func TestKueueQueueBindingRejectsIncompleteOrReplacedQueue(t *testing.T) {
 			reader, reads, done := queueBindingReader(t, tc.firstLocal, tc.nextLocal, tc.firstCluster, tc.nextCluster, tc.workload, tc.status)
 			defer done()
 			query := pinnedQueueQuery()
-			if tc.q != nil {tc.q(&query)}
+			if tc.q != nil {
+				tc.q(&query)
+			}
 			got, err := reader.ObserveQueueBinding(context.Background(), query)
 			if err == nil || got != (KueueQueueBindingEvidence{}) {
 				t.Fatalf("invalid queue proof accepted: %+v err=%v", got, err)
 			}
-			if tc.q != nil && reads.Load() != 0 { t.Fatalf("invalid query caused API I/O: %d", reads.Load()) }
+			if tc.q != nil && reads.Load() != 0 {
+				t.Fatalf("invalid query caused API I/O: %d", reads.Load())
+			}
 		})
 	}
 }
