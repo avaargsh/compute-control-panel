@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"testing"
 
 	"github.com/avaargsh/compute-control-panel/internal/operation"
@@ -36,5 +37,30 @@ func TestDisposableLifecycleGuardRequiresExactOptIn(t *testing.T) {
 		return ""
 	}) {
 		t.Fatal("explicit disposable test opt-in rejected")
+	}
+}
+
+func TestStableJobObservationRetriesOnlyUnprovenSnapshot(t *testing.T) {
+	calls := 0
+	got, err := stableJobObservation(context.Background(), func(context.Context) (operation.Observation, error) {
+		calls++
+		if calls == 1 {
+			return operation.Observation{
+				Result: operation.ObservationConflict, ReasonCode: "KUEUE_OBSERVATION_UNPROVEN",
+			}, nil
+		}
+		return operation.Observation{Result: operation.ResourcePresent, ResourceUID: "trusted-uid"}, nil
+	})
+	if err != nil || got.Result != operation.ResourcePresent || got.ResourceUID != "trusted-uid" || calls != 2 {
+		t.Fatalf("snapshot recovery: %+v calls=%d err=%v", got, calls, err)
+	}
+
+	calls = 0
+	got, err = stableJobObservation(context.Background(), func(context.Context) (operation.Observation, error) {
+		calls++
+		return operation.Observation{Result: operation.ObservationConflict, ReasonCode: "JOB_UID_REPLACED"}, nil
+	})
+	if err != nil || calls != 1 || got.ReasonCode != "JOB_UID_REPLACED" {
+		t.Fatalf("unsafe UID conflict was retried or swallowed: %+v calls=%d err=%v", got, calls, err)
 	}
 }
