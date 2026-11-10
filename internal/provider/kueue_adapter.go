@@ -219,6 +219,22 @@ func (a *KueueJobAdapter) exchange(ctx context.Context, method, path string, pay
 	return resp.StatusCode, read, nil
 }
 
+// exactSuspendedJobSpec requires the inert, single-container Job this adapter
+// actually creates. A name and matching annotations alone do not authorize
+// adoption of a changed executable or a separately queued Job.
+func exactSuspendedJobSpec(job kubeObject) bool {
+	if job.Spec.Suspend == nil || !*job.Spec.Suspend ||
+		job.Spec.Parallelism == nil || *job.Spec.Parallelism != 1 ||
+		job.Spec.Completions == nil || *job.Spec.Completions != 1 ||
+		job.Metadata.Labels["kueue.x-k8s.io/queue-name"] != "" ||
+		job.Spec.Template.Spec.RestartPolicy != "Never" ||
+		len(job.Spec.Template.Spec.Containers) != 1 {
+		return false
+	}
+	container := job.Spec.Template.Spec.Containers[0]
+	return container.Name == "ccp-suspended" && container.Image == kueueSuspendedJobImage
+}
+
 func (a *KueueJobAdapter) getJob(ctx context.Context, name string) (kubeMeta, int, error) {
 	status, body, err := a.exchange(ctx, http.MethodGet, a.jobPath(name), nil)
 	if err != nil {
@@ -230,6 +246,9 @@ func (a *KueueJobAdapter) getJob(ctx context.Context, name string) (kubeMeta, in
 	var obj kubeObject
 	if json.Unmarshal(body, &obj) != nil {
 		return kubeMeta{}, 0, ErrInvalidKueueObservation
+	}
+	if !exactSuspendedJobSpec(obj) {
+		return kubeMeta{}, 0, fmt.Errorf("%w: JOB_SPEC_MISMATCH", ErrOperationConflict)
 	}
 	return obj.Metadata, status, nil
 }
@@ -311,7 +330,8 @@ func (a *KueueJobAdapter) postJob(ctx context.Context, req Request, name string)
 		var obj kubeObject
 		if json.Unmarshal(raw, &obj) != nil || !acceptableJobUID(obj.Metadata.UID) ||
 			obj.Metadata.Name != name || obj.Metadata.Namespace != a.namespace ||
-			!validKubernetesRef(refFromKube(obj.Metadata)) {
+			!validKubernetesRef(refFromKube(obj.Metadata)) ||
+			!exactSuspendedJobSpec(obj) {
 			return kubeMeta{}, ErrAcknowledgementLost
 		}
 		if reason, bad := a.jobConflictReason(req, name, obj.Metadata); bad {
@@ -329,6 +349,9 @@ func (a *KueueJobAdapter) postJob(ctx context.Context, req Request, name string)
 
 func (a *KueueJobAdapter) acknowledgeExisting(ctx context.Context, req Request, name string) (Acknowledgement, error) {
 	meta, status, err := a.getJob(ctx, name)
+	if errors.Is(err, ErrOperationConflict) {
+		return Acknowledgement{}, err
+	}
 	if err != nil || status != http.StatusOK {
 		if err != nil && ctx.Err() != nil {
 			return Acknowledgement{}, fmt.Errorf("%w: %w", ErrAcknowledgementLost, ctx.Err())
@@ -435,6 +458,9 @@ func (a *KueueJobAdapter) Inspect(ctx context.Context, req Request) (operation.O
 	}
 	name := kueueCreateJobName(req.TenantID, req.OperationID)
 	meta, status, err := a.getJob(ctx, name)
+	if errors.Is(err, ErrOperationConflict) {
+		return conflictObservation(req, "JOB_SPEC_MISMATCH"), nil
+	}
 	if err != nil {
 		return operation.Observation{}, err
 	}

@@ -153,6 +153,13 @@ func (a *kueueAPI) create(w http.ResponseWriter, body []byte) {
 	obj.Metadata.UID = "job-uid-created"
 	obj.Metadata.ResourceVersion = "11"
 	obj.Metadata.Annotations = posted.Metadata.Annotations
+	suspend := posted.Spec.Suspend
+	parallelism := posted.Spec.Parallelism
+	completions := posted.Spec.Completions
+	obj.Spec.Suspend = &suspend
+	obj.Spec.Parallelism = &parallelism
+	obj.Spec.Completions = &completions
+	obj.Spec.Template = posted.Spec.Template
 	a.jobs[posted.Metadata.Name] = obj
 	if a.loseCreateBody {
 		w.WriteHeader(http.StatusCreated)
@@ -556,5 +563,61 @@ func TestKueueCreateJobNameIsStableDNSLabel(t *testing.T) {
 		name == kueueCreateJobName(req.TenantID, req.OperationID+"-other") ||
 		name == kueueCreateJobName("other-tenant", req.OperationID) {
 		t.Fatalf("job name %s", name)
+	}
+}
+
+func TestKueueJobAdapterRejectsReplayedJobWithUnsafeChangedSpec(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*kubeObject)
+	}{
+		{
+			name: "job was unsuspended",
+			mutate: func(job *kubeObject) {
+				suspended := false
+				job.Spec.Suspend = &suspended
+			},
+		},
+		{
+			name: "job image changed",
+			mutate: func(job *kubeObject) {
+				job.Spec.Template.Spec.Containers[0].Image = "busybox:1.36"
+			},
+		},
+		{
+			name: "job parallelism changed",
+			mutate: func(job *kubeObject) {
+				parallelism := 2
+				job.Spec.Parallelism = &parallelism
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			adapter, api, server := newKueueAdapterFixture(t, &kueueAPI{})
+			defer server.Close()
+			req := kueueAdapterRequest()
+			if _, err := adapter.Apply(context.Background(), req); err != nil {
+				t.Fatal(err)
+			}
+			name := kueueCreateJobName(req.TenantID, req.OperationID)
+			api.mu.Lock()
+			obj := api.jobs[name]
+			tc.mutate(&obj)
+			api.jobs[name] = obj
+			api.mu.Unlock()
+
+			if _, err := adapter.Apply(context.Background(), req); !errors.Is(err, ErrOperationConflict) {
+				t.Fatalf("replay accepted changed job spec: %v", err)
+			}
+			got, err := adapter.Inspect(context.Background(), req)
+			if err != nil || got.Result != operation.ObservationConflict ||
+				got.ReasonCode != "JOB_SPEC_MISMATCH" || got.ResourceUID != "" {
+				t.Fatalf("unsafe Job treated as authorized: %+v err=%v", got, err)
+			}
+			if api.postCount() != 1 {
+				t.Fatalf("replay created a second job: %d posts", api.postCount())
+			}
+		})
 	}
 }
