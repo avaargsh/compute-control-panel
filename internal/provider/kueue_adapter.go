@@ -420,9 +420,9 @@ func unboundKueueJobObservation(req Request) operation.Observation {
 		OperationID: req.OperationID, TenantID: req.TenantID,
 		WorkloadID: req.WorkloadID, ProviderID: req.ProviderID,
 		DesiredGeneration: req.DesiredGeneration,
-		ObservedAt: time.Now().UTC(),
-		ResourceVersion: "kubernetes-job/uid-unbound",
-		Result: operation.OperationInProgress,
+		ObservedAt:        time.Now().UTC(),
+		ResourceVersion:   "kubernetes-job/uid-unbound",
+		Result:            operation.OperationInProgress,
 	}
 }
 
