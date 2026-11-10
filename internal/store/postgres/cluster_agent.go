@@ -172,7 +172,7 @@ func (r *Repository) Claim(ctx context.Context, spiffeID string, request cluster
 	var epoch int64
 	var leaseValid bool
 	err = tx.QueryRowContext(ctx, `SELECT agent_id, state, instance_id,
-		lease_epoch, lease_expires_at > pg_catalog.clock_timestamp()
+		lease_epoch, COALESCE(lease_expires_at > pg_catalog.clock_timestamp(), FALSE)
 		FROM public.compute_cluster_agents
 		WHERE spiffe_id=$1 FOR UPDATE`, spiffeID,
 	).Scan(&agentID, &state, &instanceID, &epoch, &leaseValid)
@@ -208,7 +208,7 @@ func (r *Repository) Claim(ctx context.Context, spiffeID string, request cluster
 		FROM public.compute_cluster_agent_commands
 		WHERE agent_id=$1 AND state='PENDING'
 		ORDER BY created_at, command_id
-		FOR UPDATE SKIP LOCKED LIMIT 1`, agentID,
+		LIMIT 1 FOR UPDATE SKIP LOCKED`, agentID,
 	).Scan(&commandID)
 	if errors.Is(err, sql.ErrNoRows) {
 		if err := tx.Commit(); err != nil {
@@ -277,7 +277,7 @@ func (r *Repository) Complete(ctx context.Context, spiffeID string, completion c
 	var existingOutcome, existingError sql.NullString
 	var existingResult []byte
 	err = tx.QueryRowContext(ctx, `SELECT state, lease_owner_instance_id,
-		lease_epoch, command_fence, lease_expires_at > pg_catalog.clock_timestamp(),
+		lease_epoch, command_fence, COALESCE(lease_expires_at > pg_catalog.clock_timestamp(), FALSE),
 		outcome, result, error_code
 		FROM public.compute_cluster_agent_commands
 		WHERE command_id=$1 AND agent_id=$2 FOR UPDATE`,
