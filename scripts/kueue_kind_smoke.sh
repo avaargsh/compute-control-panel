@@ -569,6 +569,19 @@ queued_job_absent() {
   kubectl -n "$ns" get jobs -o json | jq -e --arg uid "$queued_uid" 'all(.items[]; .metadata.uid != $uid)' >/dev/null
 }
 wait_for 'queued Job original UID absent' queued_job_absent
+queued_pod_absent() {
+  kubectl -n "$ns" get pods -o json | jq -e --arg uid "$queued_pod_uid" 'all(.items[]; .metadata.uid != $uid)' >/dev/null
+}
+queued_workload_absent() {
+  kubectl -n "$ns" get workloads -o json | jq -e --arg uid "$queued_workload_uid" 'all(.items[]; .metadata.uid != $uid)' >/dev/null
+}
+queued_quota_clear() {
+  kubectl get clusterqueue ccp-smoke -o json | jq -e '.status.reservingWorkloads == 0 and .status.admittedWorkloads == 0' >/dev/null
+}
+wait_for 'queued Pod original UID absent' queued_pod_absent
+wait_for 'queued Kueue Workload original UID absent' queued_workload_absent
+wait_for 'queued Kueue reservation counters explicitly zero' queued_quota_clear
+echo "ccp_queued_release_observation=$(kubectl get clusterqueue ccp-smoke -o json | jq -c --arg job "$queued_uid" --arg pod "$queued_pod_uid" --arg workload "$queued_workload_uid" '{oldJobUID:$job,oldPodUID:$pod,oldWorkloadUID:$workload,clusterQueueUID:.metadata.uid,clusterQueueRV:.metadata.resourceVersion,reserving:.status.reservingWorkloads,admitted:.status.admittedWorkloads,deviceRelease:"UNPROVEN",allocationReleased:false}')"
 
 # Separate OS processes, one disposable Postgres. SIGKILL after the pin or
 # tombstone is durable. This is not Allocation RELEASED or quota release.
