@@ -46,14 +46,14 @@ func podDRAMeta(v map[string]any) map[string]any {
 
 func TestDRAClaimRequiresLivePodClaimAndContainerConsumer(t *testing.T) {
 	cases := []struct {
-		name             string
-		changePod        func(map[string]any)
-		changeQuery      func(*DRAPodClaimQuery)
-		secondPodChange  func(map[string]any)
-		changeClaim      func(map[string]any)
-		podHTTPStatus    int
-		claimHTTPStatus  int
-		wantValid        bool
+		name            string
+		changePod       func(map[string]any)
+		changeQuery     func(*DRAPodClaimQuery)
+		secondPodChange func(map[string]any)
+		changeClaim     func(map[string]any)
+		podHTTPStatus   int
+		claimHTTPStatus int
+		wantValid       bool
 	}{
 		{name: "exact Job owned placed Pod, Pod resourceClaim and container", wantValid: true},
 		{name: "same-name replacement Pod UID", changePod: func(v map[string]any) { podDRAMeta(v)["uid"] = "successor-pod-uid" }},
