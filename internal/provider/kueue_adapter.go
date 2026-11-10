@@ -209,6 +209,13 @@ func (a *KueueJobAdapter) jobsPath() string {
 	return "/apis/batch/v1/namespaces/" + url.PathEscape(a.namespace) + "/jobs"
 }
 
+// Binding failures after an external side effect must preserve the UNKNOWN
+// outcome: Kubernetes may already have applied the operation while the
+// authoritative UID receipt or DELETE intent could not be committed.
+func uncommittedKueueBinding(kind string, cause error) error {
+	return fmt.Errorf("%w: %s binding not committed after Kubernetes side effect: %w", ErrAcknowledgementLost, kind, cause)
+}
+
 func (a *KueueJobAdapter) jobPath(name string) string {
 	return a.jobsPath() + "/" + url.PathEscape(name)
 }
@@ -488,7 +495,7 @@ func (a *KueueJobAdapter) Apply(ctx context.Context, req Request) (Acknowledgeme
 		return Acknowledgement{}, err
 	}
 	if err := a.pin(req, name, created.UID); err != nil {
-		return Acknowledgement{}, err
+		return Acknowledgement{}, uncommittedKueueBinding("CREATE", err)
 	}
 	return Acknowledgement{OperationID: req.OperationID, RequestDigest: req.RequestDigest}, nil
 }
@@ -583,7 +590,7 @@ func (a *KueueJobAdapter) deleteJob(ctx context.Context, req Request, name, uid 
 	status, raw, err := a.exchange(ctx, http.MethodDelete, a.jobPath(name), body)
 	if err != nil {
 		if recErr := a.recordDelete(req, name, uid, false); recErr != nil {
-			return Acknowledgement{}, recErr
+			return Acknowledgement{}, uncommittedKueueBinding("DELETE", recErr)
 		}
 		return Acknowledgement{}, err
 	}
@@ -596,14 +603,14 @@ func (a *KueueJobAdapter) deleteJob(ctx context.Context, req Request, name, uid 
 			return Acknowledgement{}, fmt.Errorf("%w: job delete response unreadable", ErrAcknowledgementLost)
 		}
 		if err := a.recordDelete(req, name, uid, true); err != nil {
-			return Acknowledgement{}, err
+			return Acknowledgement{}, uncommittedKueueBinding("DELETE", err)
 		}
 		return Acknowledgement{OperationID: req.OperationID, RequestDigest: req.RequestDigest}, nil
 	case http.StatusNotFound:
 		// The fenced name is already gone. A successor at this name would be a
 		// different UID and a precondition conflict, not a 404.
 		if err := a.recordDelete(req, name, uid, true); err != nil {
-			return Acknowledgement{}, err
+			return Acknowledgement{}, uncommittedKueueBinding("DELETE", err)
 		}
 		return Acknowledgement{OperationID: req.OperationID, RequestDigest: req.RequestDigest}, nil
 	case http.StatusConflict:
@@ -613,7 +620,7 @@ func (a *KueueJobAdapter) deleteJob(ctx context.Context, req Request, name, uid 
 		return Acknowledgement{}, fmt.Errorf("%w: job delete rejected with HTTP %d", ErrInvalidRequest, status)
 	default:
 		if recErr := a.recordDelete(req, name, uid, false); recErr != nil {
-			return Acknowledgement{}, recErr
+			return Acknowledgement{}, uncommittedKueueBinding("DELETE", recErr)
 		}
 		return Acknowledgement{}, fmt.Errorf("%w: job delete returned HTTP %d", ErrAcknowledgementLost, status)
 	}
@@ -651,7 +658,7 @@ func (a *KueueJobAdapter) applyDelete(ctx context.Context, req Request) (Acknowl
 			return Acknowledgement{}, fmt.Errorf("%w: delete target is absent", ErrOperationConflict)
 		}
 		if err = a.recordDelete(req, name, req.TargetResourceUID, true); err != nil {
-			return Acknowledgement{}, err
+			return Acknowledgement{}, uncommittedKueueBinding("DELETE", err)
 		}
 		return Acknowledgement{OperationID: req.OperationID, RequestDigest: req.RequestDigest}, nil
 	case http.StatusOK:
