@@ -98,3 +98,20 @@ func TestQueuedKueueJobRejectsInvalidLocalQueue(t *testing.T) {
 		}
 	}
 }
+
+func TestQueuedServiceAccountAdapterRequiresDurableBindingStore(t *testing.T) {
+	// The queued runtime path must not silently reuse the test-only
+	// WithBindings constructor with a private memory store.
+	api := "https://kubernetes.default.svc"
+	ca, token, namespace, queue := "/not-read-before-dsn", "/not-read-before-dsn", "tenant-a", "ccp-smoke"
+	if _, err := NewQueuedServiceAccountKueueJobAdapter(api, ca, token, namespace, queue, ""); !errors.Is(err, ErrKueueBindingDSNEmpty) {
+		t.Fatalf("queued constructor did not refuse missing durable binding: %v", err)
+	}
+	if _, err := NewQueuedServiceAccountKueueJobAdapter(api, ca, token, namespace, "Bad/Queue", ""); !errors.Is(err, ErrInvalidKueueObservation) {
+		t.Fatalf("invalid LocalQueue did not fail before contacting DB: %v", err)
+	}
+	unreachable := "postgres://ccp_kueue_job_binding@127.0.0.1:1/postgres?sslmode=disable&connect_timeout=1"
+	if _, err := NewQueuedServiceAccountKueueJobAdapter(api, ca, token, namespace, queue, unreachable); !errors.Is(err, ErrKueueBindingUnavailable) {
+		t.Fatalf("queued constructor accepted unreachable binding database: %v", err)
+	}
+}

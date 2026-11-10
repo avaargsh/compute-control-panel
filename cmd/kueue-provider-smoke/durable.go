@@ -64,9 +64,11 @@ func durableCredentialPaths(getenv func(string) string) (string, string) {
 }
 
 // openDurableAdapter uses the ServiceAccount constructor with a PostgreSQL
-// binding store. NewKueueJobAdapter's private memory store is unchanged.
-// An empty DSN is refused here. A later query error is returned to the
-// adapter, which fails closed.
+// binding store the disposable smoke already opened. That login is a
+// superuser, so this path does not call NewServiceAccountKueueJobAdapter,
+// which would refuse it. NewKueueJobAdapter's private memory store is the
+// explicit test constructor and is unchanged. An empty DSN is refused here.
+// A later query error is returned to the adapter, which fails closed.
 func openDurableAdapter(getenv func(string) string) (*sql.DB, *provider.KueueJobAdapter, error) {
 	if err := requireDisposableSmoke(getenv); err != nil {
 		return nil, nil, err

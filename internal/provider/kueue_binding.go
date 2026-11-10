@@ -30,11 +30,14 @@ type KueueDeleteTombstone struct {
 // loads the same records. A missing record is not proof the Kubernetes call
 // never happened, and a read error is not a missing record.
 //
-// MemoryKueueJobBindingStore keeps the records in process memory. It outlives
-// one adapter value only when that same store is passed to
-// NewKueueJobAdapterWithBindings. PostgresKueueJobBindingStore keeps the same
-// records in PostgreSQL, so a later process can load them from a new
-// connection. That is the Job UID pin and the DELETE tombstone only. It is
+// MemoryKueueJobBindingStore keeps the records in process memory. It is the
+// explicit test and fake store. It outlives one adapter value only when that
+// same store is passed to NewKueueJobAdapterWithBindings.
+// PostgresKueueJobBindingStore keeps the same records in PostgreSQL, so a
+// later process can load them from a new connection. In-cluster construction
+// opens that store with OpenDurablePostgresKueueJobBindingStore and refuses
+// a login that is broader than the binding DML. That is the Job UID pin and
+// the DELETE tombstone only. It is
 // not Allocation RELEASED, Kueue quota release, or a signed receipt.
 // compute_operations.provider_resource_uid is not this store: it is recorded
 // only after SUCCEEDED, and that success already required this pin.

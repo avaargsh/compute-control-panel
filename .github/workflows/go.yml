@@ -52,13 +52,14 @@ jobs:
         run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
       - name: Verify module checksums
         run: go mod verify
-      - name: Provision dedicated audit owner in disposable CI database
+      - name: Provision dedicated database roles in disposable CI database
         env:
           PGPASSWORD: compute-ci
         run: >-
           psql --host=127.0.0.1 --username=postgres --dbname=postgres
           --set=ON_ERROR_STOP=1
           --command="CREATE ROLE ccp_provider_audit_owner NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
+          --command="CREATE ROLE ccp_kueue_job_binding LOGIN PASSWORD 'kueue-binding-ci-only' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
       - name: Apply PostgreSQL migrations (checksummed runner, run twice for idempotency)
         env:
           DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
