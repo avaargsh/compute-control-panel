@@ -74,6 +74,7 @@ func TestKubernetesObservationReaderStagesFromActualReadOnlyAPI(t *testing.T) {
 		{"admitted but pod absent", testKueueWorkloads, `{"items":[]}`, KueueAdmitted},
 		{"kueue not admitted", strings.Replace(testKueueWorkloads, `"status":"True"`, `"status":"False"`, 1), `{"items":[]}`, KueueUnproven},
 		{"no kueue workload", `{"items":[]}`, `{"items":[]}`, KueueUnproven},
+		{"unrelated Kueue workload is not admission evidence", strings.Replace(testKueueWorkloads, "job-uid-a", "job-uid-b", 1), `{"items":[]}`, KueueUnproven},
 		{"pod scheduled condition not ready", testKueueWorkloads, strings.Replace(testKubePods, `"status":"True"`, `"status":"False"`, 1), KueueAdmitted},
 	}
 	for _, tc := range tests {
@@ -102,12 +103,11 @@ func TestKubernetesObservationReaderFailsClosedOnIdentityOrPartialLists(t *testi
 		{"successor Job UID", strings.Replace(testKubeJob, "job-uid-a", "job-uid-b", 1), testKueueWorkloads, testKubePods, 0},
 		{"stale generation", strings.Replace(testKubeJob, `"desired-generation":"7"`, `"desired-generation":"6"`, 1), testKueueWorkloads, testKubePods, 0},
 		{"cross tenant Job", strings.Replace(testKubeJob, `"tenant-id":"tenant-a"`, `"tenant-id":"tenant-b"`, 1), testKueueWorkloads, testKubePods, 0},
-		{"foreign Kueue owner", testKubeJob, strings.Replace(testKueueWorkloads, "job-uid-a", "job-uid-b", 1), testKubePods, 0},
 		{"incomplete Kueue list", testKubeJob, strings.Replace(testKueueWorkloads, `"resourceVersion":"21"`, `"continue":"next","resourceVersion":"21"`, 1), testKubePods, 0},
 		{"foreign Pod owner", testKubeJob, testKueueWorkloads, strings.Replace(testKubePods, `"uid":"job-uid-a","controller"`, `"uid":"other-job","controller"`, 1), 0},
 		{"incomplete Pod list", testKubeJob, testKueueWorkloads, strings.Replace(testKubePods, `"resourceVersion":"31"`, `"continue":"next","resourceVersion":"31"`, 1), 0},
 		{"Kueue API forbidden", testKubeJob, testKueueWorkloads, testKubePods, http.StatusForbidden},
-		{"duplicate Kueue owners", testKubeJob, strings.Replace(testKueueWorkloads, `]},"status"`, `]},"status"`, 1), testKubePods, 0},
+		{"duplicate Kueue owners", testKubeJob, `{"items":[{"metadata":{"namespace":"tenant-a","name":"kueue-a","uid":"kueue-uid-a","resourceVersion":"21","ownerReferences":[{"apiVersion":"batch/v1","kind":"Job","uid":"job-uid-a","controller":true}]},"status":{"admission":{"clusterQueue":"cq"},"conditions":[{"type":"Admitted","status":"True"}]}},{"metadata":{"namespace":"tenant-a","name":"kueue-b","uid":"kueue-uid-b","resourceVersion":"22","ownerReferences":[{"apiVersion":"batch/v1","kind":"Job","uid":"job-uid-a","controller":true}]},"status":{"admission":{"clusterQueue":"cq"},"conditions":[{"type":"Admitted","status":"True"}]}}]}`, testKubePods, 0},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
