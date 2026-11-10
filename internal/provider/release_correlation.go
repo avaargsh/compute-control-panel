@@ -150,14 +150,14 @@ func CorrelateReleaseEvidence(e ReleaseEvidenceCandidate) (ReleaseEvidenceCorrel
 		return ReleaseEvidenceCorrelation{}, ErrUncorrelatedReleaseEvidence
 	}
 	return ReleaseEvidenceCorrelation{
-		TenantID: e.Delete.TenantID,
-		WorkloadID: e.Delete.WorkloadID,
-		AllocationID: e.Delete.AllocationID,
-		ProviderID: e.Delete.ProviderID,
+		TenantID:          e.Delete.TenantID,
+		WorkloadID:        e.Delete.WorkloadID,
+		AllocationID:      e.Delete.AllocationID,
+		ProviderID:        e.Delete.ProviderID,
 		DeleteOperationID: e.Delete.ID,
-		Job: e.PriorQueue.Job.Job,
-		Pod: e.PriorPodClaim.Pod,
-		Claim: e.ClaimUnallocated.CurrentClaim,
-		Device: e.ClaimUnallocated.PreviousDevice,
+		Job:               e.PriorQueue.Job.Job,
+		Pod:               e.PriorPodClaim.Pod,
+		Claim:             e.ClaimUnallocated.CurrentClaim,
+		Device:            e.ClaimUnallocated.PreviousDevice,
 	}, nil
 }
