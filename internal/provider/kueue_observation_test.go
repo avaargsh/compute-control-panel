@@ -91,7 +91,7 @@ func TestKueueObservationSeparatesAdmissionFromPlacement(t *testing.T) {
 
 func TestKueueObservationRejectsContradictoryOrCrossScopeEvidence(t *testing.T) {
 	tests := []struct {
-		name string
+		name   string
 		change func(*KueueJobEvidence)
 	}{
 		{"missing canonical tenant", func(e *KueueJobEvidence) { e.TenantID = "" }},
