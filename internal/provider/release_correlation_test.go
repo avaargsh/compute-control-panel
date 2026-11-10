@@ -35,19 +35,19 @@ func releaseCandidateFixture() ReleaseEvidenceCandidate {
 	obs := operation.Observation{
 		OperationID: del.ID, TenantID: del.TenantID, WorkloadID: del.WorkloadID,
 		ProviderID: del.ProviderID, DesiredGeneration: del.Generation,
-		Result: operation.TargetAbsent,
+		Result:           operation.TargetAbsent,
 		TargetResourceID: del.TargetResourceID, TargetResourceUID: del.TargetResourceUID,
 		ResourceVersion: "delete-journal-5", ObservedAt: time.Date(2026, 11, 10, 10, 0, 0, 0, time.UTC),
 	}
 	claim := previousDRAClaimAllocation()
 	return ReleaseEvidenceCandidate{
-		Delete: del,
+		Delete:          del,
 		ProviderAbsence: obs,
-		PriorQueue: q,
+		PriorQueue:      q,
 		QuotaCleared: KueueQuotaClearedObservation{
-			PreviousWorkload: q.Job.KueueWorkload,
+			PreviousWorkload:            q.Job.KueueWorkload,
 			WorkloadListResourceVersion: "70",
-			LocalQueue: q.LocalQueue,
+			LocalQueue:                  q.LocalQueue,
 			ClusterQueue: KubernetesResourceRef{
 				Name: "cq-a", UID: "cluster-uid-a", ResourceVersion: "65",
 			},
@@ -69,9 +69,9 @@ func releaseCandidateFixture() ReleaseEvidenceCandidate {
 
 func TestReleaseEvidenceCorrelationRejectsCrossAllocationSplicing(t *testing.T) {
 	tests := []struct {
-		name string
+		name   string
 		mutate func(*ReleaseEvidenceCandidate)
-		valid bool
+		valid  bool
 	}{
 		{name: "all exact resource identities for one Allocation correlate but do not release", valid: true},
 		{name: "DELETE pending not terminal", mutate: func(e *ReleaseEvidenceCandidate) { e.Delete.Status = operation.Pending }},
@@ -93,7 +93,10 @@ func TestReleaseEvidenceCorrelationRejectsCrossAllocationSplicing(t *testing.T) 
 		{name: "Kueue prior from different tenant", mutate: func(e *ReleaseEvidenceCandidate) { e.PriorQueue.Job.TenantID = "tenant-b" }},
 		{name: "Kueue prior from different Workload", mutate: func(e *ReleaseEvidenceCandidate) { e.PriorQueue.Job.JobWorkloadID = "workload-b" }},
 		{name: "old Job UID differs", mutate: func(e *ReleaseEvidenceCandidate) { e.PriorQueue.Job.Job.UID = "foreign-job" }},
-		{name: "old Job generation after DELETE", mutate: func(e *ReleaseEvidenceCandidate) { e.PriorQueue.Job.DesiredGeneration = 9; e.PriorQueue.Job.JobDesiredGeneration = 9 }},
+		{name: "old Job generation after DELETE", mutate: func(e *ReleaseEvidenceCandidate) {
+			e.PriorQueue.Job.DesiredGeneration = 9
+			e.PriorQueue.Job.JobDesiredGeneration = 9
+		}},
 		{name: "Kueue previous reservation missing", mutate: func(e *ReleaseEvidenceCandidate) { e.PriorQueue.Job.KueueQuotaReserved = false }},
 		{name: "Kueue previous stage did not prove Pod", mutate: func(e *ReleaseEvidenceCandidate) { e.PriorQueue.Stage = KueueAdmitted }},
 		{name: "quota clear snapshot missing", mutate: func(e *ReleaseEvidenceCandidate) { e.QuotaCleared = KueueQuotaClearedObservation{} }},
@@ -117,7 +120,9 @@ func TestReleaseEvidenceCorrelationRejectsCrossAllocationSplicing(t *testing.T) 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			input := releaseCandidateFixture()
-			if tc.mutate != nil { tc.mutate(&input) }
+			if tc.mutate != nil {
+				tc.mutate(&input)
+			}
 			got, err := CorrelateReleaseEvidence(input)
 			if tc.valid {
 				if err != nil || got.AllocationID != "allocation-a" ||
