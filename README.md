@@ -2,6 +2,13 @@
 
 Go-based Compute Control Plane for self-hosted, Kubernetes-first heterogeneous compute.
 
+## Interview highlights
+
+- **Evidence-first Compute Economics**: Separates allocated GPU time, active time, attributable direct cost, reserved/unallocated capacity, and revenue/margin. All costing is derived from immutable, provenance-tracked evidence with exact decimal arithmetic; incomplete or contradictory evidence fails closed.
+- **Strict authority boundaries**: Does not implement a custom scheduler. The control plane owns intent, reconciliation, allocation references, and economics; Kubernetes, Kueue, DRA/device plugins, and Providers remain authoritative for admission, placement, and resource realization.
+- **Production-oriented foundations already in main**: Atomic Workload acceptance with dispatchable Outbox events, SPIFFE identity directory, independent Provider audit writer role (migration 0013), generation-fenced state machines, UNKNOWN reconciliation invariants, and migration lineage guards that prevented real version collisions.
+- **Current honest status**: Go/PostgreSQL core, authenticated Workload/Provider handlers, E1 policy/approval persistence, and deterministic cost calculator are implemented and covered by CI. Live Provider/Kueue/DRA admission/release evidence and production metering remain open gates (see issues #3, #32, #33, #39). Repository tests do not claim production readiness.
+
 ## Product boundary
 
 Owns compute provider registrations, pools, workload intent, allocation references, quota bindings, reconciliation, normalized compute evidence and workload-attributed economics. Kubernetes, Kueue, device plugins/DRA and provider APIs remain authoritative for actual scheduling, admission, placement and resource realization.
