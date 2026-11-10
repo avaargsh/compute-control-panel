@@ -48,6 +48,8 @@ CREATE TABLE public.compute_cluster_agent_provider_bindings (
 
 CREATE TABLE public.compute_cluster_agent_commands (
     command_id TEXT PRIMARY KEY,
+    schema_version TEXT NOT NULL DEFAULT 'compute.cluster-agent/v1'
+        CHECK (schema_version='compute.cluster-agent/v1'),
     agent_id TEXT NOT NULL,
     cluster_scope TEXT NOT NULL,
     provider_id TEXT NOT NULL,
@@ -75,6 +77,8 @@ CREATE TABLE public.compute_cluster_agent_commands (
         REFERENCES public.compute_cluster_agents (agent_id, cluster_scope),
     FOREIGN KEY (provider_id, cluster_scope)
         REFERENCES public.compute_providers (provider_id, cluster_scope),
+    FOREIGN KEY (operation_id, workload_id, tenant_id, provider_id, desired_generation)
+        REFERENCES public.compute_operations (compute_operation_id, workload_id, tenant_id, provider_id, desired_generation),
     CHECK (
         (state='LEASED' AND lease_owner_instance_id IS NOT NULL
             AND lease_epoch IS NOT NULL AND lease_epoch > 0
