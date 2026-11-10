@@ -10,27 +10,27 @@ import (
 // not an untrusted tenant request. Until a server-owned QuotaBinding resolves
 // its UID fences, this reader remains a structural, non-production proof.
 type KueueQueueBindingQuery struct {
-	Job KubernetesJobQuery
-	LocalQueueName string
-	LocalQueueUID string
+	Job              KubernetesJobQuery
+	LocalQueueName   string
+	LocalQueueUID    string
 	ClusterQueueName string
-	ClusterQueueUID string
+	ClusterQueueUID  string
 }
 
 // KueueQueueBindingEvidence proves the observed Kueue routing object chain,
 // not GPU allocation, tenant policy enforcement, quota-release finality or
 // the authority to mark an Allocation READY/RELEASED.
 type KueueQueueBindingEvidence struct {
-	Job KueueJobEvidence
-	Stage KueueObservationStage
-	LocalQueue KubernetesResourceRef
+	Job          KueueJobEvidence
+	Stage        KueueObservationStage
+	LocalQueue   KubernetesResourceRef
 	ClusterQueue KubernetesResourceRef
 }
 
 type kueueQueueObject struct {
 	Metadata kubeMeta `json:"metadata"`
-	Spec struct {
-		QueueName string `json:"queueName"`
+	Spec     struct {
+		QueueName    string `json:"queueName"`
 		ClusterQueue string `json:"clusterQueue"`
 	} `json:"spec"`
 }
@@ -87,9 +87,9 @@ func (r *KubernetesObservationReader) ObserveQueueBinding(
 		return reject()
 	}
 	if !sameKueueObjectIdentity(wl.Metadata, kubeMeta{
-		Namespace: jobEvidence.KueueWorkload.Namespace,
-		Name: jobEvidence.KueueWorkload.Name,
-		UID: jobEvidence.KueueWorkload.UID,
+		Namespace:       jobEvidence.KueueWorkload.Namespace,
+		Name:            jobEvidence.KueueWorkload.Name,
+		UID:             jobEvidence.KueueWorkload.UID,
 		ResourceVersion: jobEvidence.KueueWorkload.ResourceVersion,
 	}) || wl.Spec.QueueName != q.LocalQueueName {
 		return reject()
