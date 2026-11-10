@@ -24,8 +24,8 @@ type DRAPoolInventoryObservation struct {
 }
 
 type draResourceSlice struct {
-	APIVersion string `json:"apiVersion"`
-	Kind       string `json:"kind"`
+	APIVersion string   `json:"apiVersion"`
+	Kind       string   `json:"kind"`
 	Metadata   kubeMeta `json:"metadata"`
 	Spec       struct {
 		Driver                 string          `json:"driver"`
@@ -47,7 +47,7 @@ type draResourceSlice struct {
 type draResourceSliceList struct {
 	APIVersion string `json:"apiVersion"`
 	Kind       string `json:"kind"`
-	Metadata struct {
+	Metadata   struct {
 		ResourceVersion string `json:"resourceVersion"`
 		Continue        string `json:"continue"`
 	} `json:"metadata"`
