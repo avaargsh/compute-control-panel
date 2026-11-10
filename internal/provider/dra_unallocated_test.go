@@ -42,11 +42,11 @@ func clearedDRAClaimJSON(t *testing.T, change func(map[string]any)) string {
 // is necessary evidence in some DRA release paths, but NOT driver deallocation.
 func TestDRAClaimClearObservationRequiresStableUnallocatedStatus(t *testing.T) {
 	cases := []struct {
-		name string
-		first, second func(map[string]any)
-		prior func(*DRAClaimObservation)
+		name                      string
+		first, second             func(map[string]any)
+		prior                     func(*DRAClaimObservation)
 		firstStatus, secondStatus int
-		valid bool
+		valid                     bool
 	}{
 		{name: "stable same UID unallocated Claim", valid: true},
 		{name: "same-name successor UID", first: func(v map[string]any) {
