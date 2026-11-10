@@ -429,3 +429,33 @@ func TestKueueSuccessfulDeleteThenBindingWriteFailureRemainsUnknown(t *testing.T
 		t.Fatalf("bare 404 incorrectly proved release: %+v err=%v", obs, err)
 	}
 }
+
+type brokenReadAfterCreate struct {
+	*MemoryKueueJobBindingStore
+	api *kueueAPI
+}
+
+func (s *brokenReadAfterCreate) GetCreatePin(ns string, req Request) (KueueCreatePin, bool, error) {
+	if s.api.postCount() != 0 {
+		return KueueCreatePin{}, false, errBindingUnreadable
+	}
+	return s.MemoryKueueJobBindingStore.GetCreatePin(ns, req)
+}
+
+func TestKueuePostCreateBindingReadErrorPreservesUnknown(t *testing.T) {
+	api := &kueueAPI{}
+	store := &brokenReadAfterCreate{MemoryKueueJobBindingStore: NewMemoryKueueJobBindingStore(), api: api}
+	adapter, api, server := newKueueAdapterFixtureWithStore(t, api, store)
+	defer server.Close()
+	req := kueueAdapterRequest()
+	_, err := adapter.Apply(context.Background(), req)
+	if !errors.Is(err, ErrAcknowledgementLost) || !errors.Is(err, errBindingUnreadable) {
+		t.Fatalf("successful Kubernetes POST followed by unreadable binding was not UNKNOWN: %v", err)
+	}
+	if api.postCount() != 1 || api.storedJobs() != 1 {
+		t.Fatalf("successful POST not preserved as ambiguous: posts=%d jobs=%d", api.postCount(), api.storedJobs())
+	}
+	if _, ok, err := store.MemoryKueueJobBindingStore.GetCreatePin("tenant-a", req); err != nil || ok {
+		t.Fatalf("uncommitted UID pin trusted: ok=%v err=%v", ok, err)
+	}
+}
