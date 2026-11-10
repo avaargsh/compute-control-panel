@@ -24,7 +24,7 @@
 - [ ] FakeProvider create/inspect/delete conformance suite.
 - [ ] UNKNOWN, lost-ACK, process-restart and manual-review recovery tests.
 - [ ] Kubernetes Job adapter with Kueue built-in Job integration.
-- [x] Read-only Kueue Job `Collector` and in-memory `FakeCollector` (#33 slice): return `KueueJobEvidence` plus provenance only when tenant, workload, generation, namespace, Job name, and Job UID match; identity mismatch returns `ErrInvalidKueueObservation` and `UNPROVEN` with no evidence. No Kubernetes client, Kubernetes write, Allocation READY mutation, or device-assignment claim. A real read-only Kubernetes collector remains open.
+- [x] Read-only Kueue Job `Collector` and in-memory `FakeCollector` (#33 slice): return `KueueJobEvidence` plus provenance only when tenant, workload, generation, namespace, Job name, and Job UID match; identity mismatch returns `ErrInvalidKueueObservation` and `UNPROVEN` with no evidence. No Kubernetes client, Kubernetes write, Allocation READY mutation, or device-assignment claim. The existing HTTPS KubernetesObservationReader must implement Collector with explicitly unattested provenance; trusted live cluster, write adapter and release gates remain open.
 - [ ] Kueue admission, queueing, requeue, Pod placement and quota-release integration tests.
 - [ ] Provider expansion only after first adapter conformance passes.
 

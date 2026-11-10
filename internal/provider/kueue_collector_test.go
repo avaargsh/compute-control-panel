@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-func kueueQueryFixture() KueueJobQuery {
-	return KueueJobQuery{
+func kueueQueryFixture() KubernetesJobQuery {
+	return KubernetesJobQuery{
 		TenantID: "tenant-a", WorkloadID: "compute-workload-a",
 		DesiredGeneration: 7, Namespace: "tenant-a",
 		JobName: "job-a", ExpectedJobUID: "job-uid-a",
@@ -94,7 +94,7 @@ func TestFakeCollectorIdentityMismatchDoesNotPromoteStatus(t *testing.T) {
 	tests := []struct {
 		name     string
 		evidence func(*KueueJobEvidence)
-		query    func(*KueueJobQuery)
+		query    func(*KubernetesJobQuery)
 		seed     bool
 	}{
 		{
@@ -157,35 +157,35 @@ func TestFakeCollectorIdentityMismatchDoesNotPromoteStatus(t *testing.T) {
 		},
 		{
 			name: "blank tenant query",
-			query: func(q *KueueJobQuery) {
+			query: func(q *KubernetesJobQuery) {
 				q.TenantID = ""
 			},
 			seed: true,
 		},
 		{
 			name: "zero desired generation",
-			query: func(q *KueueJobQuery) {
+			query: func(q *KubernetesJobQuery) {
 				q.DesiredGeneration = 0
 			},
 			seed: true,
 		},
 		{
 			name: "unpinned job uid",
-			query: func(q *KueueJobQuery) {
+			query: func(q *KubernetesJobQuery) {
 				q.ExpectedJobUID = ""
 			},
 			seed: true,
 		},
 		{
 			name: "padded workload id",
-			query: func(q *KueueJobQuery) {
+			query: func(q *KubernetesJobQuery) {
 				q.WorkloadID = " compute-workload-a "
 			},
 			seed: true,
 		},
 		{
 			name: "different job name",
-			query: func(q *KueueJobQuery) {
+			query: func(q *KubernetesJobQuery) {
 				q.JobName = "job-b"
 			},
 			seed: true,
@@ -334,5 +334,33 @@ func TestFakeCollectorRejectsIncompleteProvenanceAndCanceledContext(t *testing.T
 	}
 	if err := collector.Seed(KueueJobEvidence{}); !errors.Is(err, ErrInvalidKueueObservation) {
 		t.Fatalf("unaddressable snapshot seeded: %v", err)
+	}
+}
+
+func TestKubernetesObservationReaderImplementsCollectorWithExplicitUnattestedProvenance(t *testing.T) {
+	reader, reads, closeServer := testKubeReader(t, testKubeJob, testKueueWorkloads, testKubePods, 0)
+	defer closeServer()
+	var collector Collector = reader
+	got, err := collector.Collect(context.Background(), observedJobQuery())
+	if err != nil || got.Stage != KueuePodPlaced ||
+		got.Evidence.Job.UID != "job-uid-a" ||
+		got.Provenance.Source != "kubernetes-https-readonly-unattested" ||
+		got.Provenance.AdapterVersion != "kueue-v1beta1-single-pod-v1" ||
+		got.Provenance.ObservedAt.IsZero() || reads.Load() < 3 {
+		t.Fatalf("UID-pinned read-only collection: %+v err=%v reads=%d", got, err, reads.Load())
+	}
+}
+
+func TestKubernetesObservationReaderCollectDoesNotLeakSuccessorOrForeignEvidence(t *testing.T) {
+	reader, _, closeServer := testKubeReader(t, testKubeJob, testKueueWorkloads, testKubePods, 0)
+	defer closeServer()
+	var collector Collector = reader
+	query := observedJobQuery()
+	query.ExpectedJobUID = "successor-uid"
+	got, err := collector.Collect(context.Background(), query)
+	if !errors.Is(err, ErrInvalidKueueObservation) ||
+		got.Stage != KueueUnproven || got.Evidence != (KueueJobEvidence{}) ||
+		got.Provenance != (KueueEvidenceProvenance{}) {
+		t.Fatalf("successor UID leaked evidence: %+v err=%v", got, err)
 	}
 }

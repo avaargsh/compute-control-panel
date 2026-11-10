@@ -14,20 +14,7 @@ import (
 // or claim device assignment. A successful collection is structural evidence
 // plus reader provenance, not a capacity or readiness decision.
 type Collector interface {
-	Collect(context.Context, KueueJobQuery) (KueueJobCollection, error)
-}
-
-// KueueJobQuery is the caller's expected Job identity. Namespace and JobName
-// address the object. ExpectedJobUID pins the immutable Job UID so a later
-// object that reuses the name cannot satisfy an older observation. The query
-// does not authorize a Kubernetes write or an Allocation transition.
-type KueueJobQuery struct {
-	TenantID          string
-	WorkloadID        string
-	DesiredGeneration uint64
-	Namespace         string
-	JobName           string
-	ExpectedJobUID    string
+	Collect(context.Context, KubernetesJobQuery) (KueueJobCollection, error)
 }
 
 // KueueEvidenceProvenance identifies the reader that produced a collection.
@@ -53,15 +40,6 @@ func validObservationLabel(value string) bool {
 		!strings.ContainsRune(value, 0) && len(value) <= 256
 }
 
-func (q KueueJobQuery) validate() error {
-	if !validObservationLabel(q.TenantID) || !validObservationLabel(q.WorkloadID) ||
-		!validObservationLabel(q.Namespace) || !validObservationLabel(q.JobName) ||
-		!validObservationLabel(q.ExpectedJobUID) || q.DesiredGeneration == 0 {
-		return ErrInvalidKueueObservation
-	}
-	return nil
-}
-
 func (p KueueEvidenceProvenance) validate() error {
 	if !validObservationLabel(p.Source) || !validObservationLabel(p.AdapterVersion) ||
 		p.ObservedAt.IsZero() {
@@ -76,7 +54,7 @@ func (p KueueEvidenceProvenance) validate() error {
 // ErrInvalidKueueObservation. It performs no Kubernetes I/O and does not
 // rewrite the snapshot to force a match.
 func bindKueueJobCollection(
-	q KueueJobQuery, observed KueueJobEvidence, provenance KueueEvidenceProvenance,
+	q KubernetesJobQuery, observed KueueJobEvidence, provenance KueueEvidenceProvenance,
 ) (KueueJobCollection, error) {
 	reject := func() (KueueJobCollection, error) {
 		return KueueJobCollection{Stage: KueueUnproven}, ErrInvalidKueueObservation
@@ -163,7 +141,7 @@ func (f *FakeCollector) Seed(observed KueueJobEvidence) error {
 // mismatches, missing snapshots, and incomplete provenance return UNPROVEN
 // with ErrInvalidKueueObservation and no evidence. The returned stage is not
 // an Allocation phase and does not claim device assignment.
-func (f *FakeCollector) Collect(ctx context.Context, q KueueJobQuery) (KueueJobCollection, error) {
+func (f *FakeCollector) Collect(ctx context.Context, q KubernetesJobQuery) (KueueJobCollection, error) {
 	if err := ctx.Err(); err != nil {
 		return KueueJobCollection{}, err
 	}
