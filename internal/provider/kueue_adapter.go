@@ -27,17 +27,17 @@ const (
 	kueueAnnotationIdempotencyKey = "compute-control-panel.io/idempotency-key"
 	kueueAnnotationProviderID     = "compute-control-panel.io/provider-id"
 
-	// kueueSuspendedJobImage fills the batch/v1 schema only. The Job is created
-	// suspended and without a Kueue queue label, so this slice does not ask
-	// Kueue to admit it and does not ask a kubelet to run it.
+	// kueueSuspendedJobImage is used for inert default and CPU-only queued
+	// smoke Jobs. Neither path demonstrates any physical GPU assignment.
 	kueueSuspendedJobImage = "registry.k8s.io/pause:3.10"
 )
 
 var errKueueJobAlreadyExists = errors.New("kubernetes job already exists")
 
-// KueueJobAdapter is a first-cut batch/v1 Job writer. Apply accepts CREATE
-// and DELETE. CREATE posts one suspended Job and pins the returned UID in
-// the binding store. DELETE GETs that name and deletes only the requested
+// KueueJobAdapter is a batch/v1 Job writer. Default CREATE posts an inert,
+// unqueued suspended Job. An explicit queued constructor submits a labeled
+// Job with bounded requests, allowing Kueue to own its suspension and resume.
+// Both modes pin the returned UID in the binding store. DELETE targets only
 // target UID. CREATE Inspect reads that UID back through
 // KubernetesObservationReader.Collect.
 //
@@ -49,7 +49,8 @@ var errKueueJobAlreadyExists = errors.New("kubernetes job already exists")
 // stays ambiguous. NewKueueJobAdapter keeps a private in-memory store, so a
 // later adapter that cannot load the same store still fails closed and MUST
 // NOT reconstruct a pin from the Job name or annotations.
-// This type does not admit, schedule, claim devices, or mount an HTTP handler.
+// The adapter itself does not admit, schedule, allocate devices, or mount an
+// HTTP handler. A Kueue-managed queued Job can later be admitted and placed.
 type KueueJobAdapter struct {
 	namespace string
 	apiURL    string
@@ -507,8 +508,9 @@ func (a *KueueJobAdapter) acknowledgeExisting(ctx context.Context, req Request, 
 	return Acknowledgement{OperationID: req.OperationID, RequestDigest: req.RequestDigest}, nil
 }
 
-// Apply creates one suspended batch/v1 Job for a CREATE operation and pins its
-// UID, or deletes that exact UID for a DELETE operation. An identical replay
+// Apply creates one default suspended Job (or explicitly configured queued
+// Job) for CREATE and pins its UID, or deletes that exact UID for DELETE.
+// An identical replay
 // does not post again and, once DELETE is acknowledged, does not delete again.
 // A later adapter with the same binding store can make that replay. UPDATE is
 // rejected. A lost or unreadable create or delete response returns
