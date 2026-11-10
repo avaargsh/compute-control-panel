@@ -37,28 +37,43 @@ const (
 var errKueueJobAlreadyExists = errors.New("kubernetes job already exists")
 
 // KueueJobAdapter is a first-cut batch/v1 Job writer. Apply accepts CREATE
-// only: it posts one suspended Job and pins the returned UID in memory.
-// Inspect reads that UID back through KubernetesObservationReader.Collect.
+// and DELETE. CREATE posts one suspended Job and pins the returned UID in
+// memory. DELETE GETs that name and deletes only the pinned target UID.
+// CREATE Inspect reads that UID back through KubernetesObservationReader.Collect.
 //
 // Structural stages UNPROVEN, KUEUE_ADMITTED and POD_PLACED all mean only that
 // the pinned Job object was observed. POD_PLACED is not Allocation READY.
-// This type does not delete, finalize, admit, schedule, claim devices, or
-// mount an HTTP handler. Process-local pins are recovered from Job
-// annotations after a lost create response; they are not a second database.
+// DELETE absence is process-local intent plus a UID-fenced 404. It is not
+// Allocation cleanup, quota release, or a durable tombstone: after a process
+// restart a bare 404 is still ambiguous. This type does not admit, schedule,
+// claim devices, or mount an HTTP handler. Process-local pins are recovered
+// from Job annotations after a lost create response; they are not a second database.
 type KueueJobAdapter struct {
 	namespace string
 	apiURL    string
 	client    http.Client
 	reader    *KubernetesObservationReader
 
-	mu   sync.Mutex
-	pins map[string]kueuePinnedJob
+	mu      sync.Mutex
+	pins    map[string]kueuePinnedJob
+	deletes map[string]kueueDeleteIntent
 }
 
 type kueuePinnedJob struct {
 	name    string
 	uid     string
 	request Request
+}
+
+// kueueDeleteIntent records that this process issued a UID-fenced DELETE.
+// Acknowledged means the API accepted that exact UID or then reported it gone.
+// An unacknowledged intent is a lost response: later calls must re-GET and
+// must not delete a different UID. This map is not durable across restarts.
+type kueueDeleteIntent struct {
+	name         string
+	uid          string
+	request      Request
+	acknowledged bool
 }
 
 // NewKueueJobAdapter binds CREATE and Inspect to one namespace and an HTTPS
@@ -78,13 +93,14 @@ func NewKueueJobAdapter(apiURL, namespace string, client *http.Client) (*KueueJo
 		client:    reader.client,
 		reader:    reader,
 		pins:      make(map[string]kueuePinnedJob),
+		deletes:   make(map[string]kueueDeleteIntent),
 	}, nil
 }
 
 // NewServiceAccountKueueJobAdapter uses the same pinned ServiceAccount HTTPS
-// client as the read-only observer. Bind a separate Role: create and get
-// batch/v1 Jobs, plus list Pods and Kueue Workloads for Inspect. Do not add
-// delete, update, patch, or cluster-admin, and do not add create to the
+// client as the read-only observer. Bind a separate Role: create, delete, and
+// get batch/v1 Jobs, plus list Pods and Kueue Workloads for Inspect. Do not add
+// update, patch, or cluster-admin, and do not add create or delete to the
 // observer Role. Provenance from Inspect stays unattested.
 func NewServiceAccountKueueJobAdapter(apiURL, caPath, tokenPath, namespace string) (*KueueJobAdapter, error) {
 	if !validKubeName(namespace) {
@@ -152,6 +168,45 @@ func (a *KueueJobAdapter) pin(req Request, name, uid string) error {
 	return nil
 }
 
+func (a *KueueJobAdapter) lookupDelete(req Request) (kueueDeleteIntent, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	intent, ok := a.deletes[kueuePinKey(req)]
+	return intent, ok
+}
+
+func (a *KueueJobAdapter) recordDelete(req Request, name, uid string, acknowledged bool) error {
+	if !validKubeName(name) || !acceptableJobUID(uid) {
+		return ErrInvalidKueueObservation
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	key := kueuePinKey(req)
+	if prev, ok := a.deletes[key]; ok {
+		if prev.uid != uid || prev.name != name || !sameRequest(prev.request, req) {
+			return ErrOperationConflict
+		}
+		if prev.acknowledged {
+			acknowledged = true
+		}
+	}
+	a.deletes[key] = kueueDeleteIntent{
+		name: name, uid: uid, request: req, acknowledged: acknowledged,
+	}
+	return nil
+}
+
+func (a *KueueJobAdapter) pinnedUIDForName(name string) (string, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, pin := range a.pins {
+		if pin.name == name {
+			return pin.uid, true
+		}
+	}
+	return "", false
+}
+
 // jobConflictReason reports why this Job must not be adopted. A pinned UID is
 // never moved onto a successor object that reused the name.
 func (a *KueueJobAdapter) jobConflictReason(req Request, name string, meta kubeMeta) (string, bool) {
@@ -200,21 +255,30 @@ func (a *KueueJobAdapter) exchange(ctx context.Context, method, path string, pay
 	}
 	resp, err := a.client.Do(req)
 	if err != nil {
-		if method == http.MethodPost {
+		switch method {
+		case http.MethodPost:
 			return 0, nil, fmt.Errorf("%w: job create response lost: %v", ErrAcknowledgementLost, err)
+		case http.MethodDelete:
+			// The DELETE may already have been accepted. Do not report a clean failure.
+			return 0, nil, fmt.Errorf("%w: job delete response lost: %v", ErrAcknowledgementLost, err)
+		default:
+			return 0, nil, err
 		}
-		return 0, nil, err
 	}
 	defer resp.Body.Close()
 	read, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20+1))
 	if err != nil || len(read) > 1<<20 {
-		if method == http.MethodPost {
+		switch method {
+		case http.MethodPost:
 			return 0, nil, fmt.Errorf("%w: job create response unreadable", ErrAcknowledgementLost)
+		case http.MethodDelete:
+			return 0, nil, fmt.Errorf("%w: job delete response unreadable", ErrAcknowledgementLost)
+		default:
+			if err != nil {
+				return 0, nil, err
+			}
+			return 0, nil, ErrInvalidKueueObservation
 		}
-		if err != nil {
-			return 0, nil, err
-		}
-		return 0, nil, ErrInvalidKueueObservation
 	}
 	return resp.StatusCode, read, nil
 }
@@ -345,8 +409,9 @@ func (a *KueueJobAdapter) acknowledgeExisting(ctx context.Context, req Request, 
 }
 
 // Apply creates one suspended batch/v1 Job for a CREATE operation and pins its
-// UID. An identical replay reads the existing Job and does not post again.
-// UPDATE and DELETE are rejected. A lost or unreadable create response returns
+// UID, or deletes that exact UID for a DELETE operation. An identical replay
+// does not post again and, once DELETE is acknowledged, does not delete again.
+// UPDATE is rejected. A lost or unreadable create or delete response returns
 // ErrAcknowledgementLost after the side effect may already have happened.
 func (a *KueueJobAdapter) Apply(ctx context.Context, req Request) (Acknowledgement, error) {
 	if err := ctx.Err(); err != nil {
@@ -357,6 +422,9 @@ func (a *KueueJobAdapter) Apply(ctx context.Context, req Request) (Acknowledgeme
 	}
 	if err := req.Validate(); err != nil {
 		return Acknowledgement{}, err
+	}
+	if req.Kind == operation.Delete {
+		return a.applyDelete(ctx, req)
 	}
 	if req.Kind != operation.Create {
 		return Acknowledgement{}, ErrInvalidRequest
@@ -398,6 +466,163 @@ func (a *KueueJobAdapter) Apply(ctx context.Context, req Request) (Acknowledgeme
 	return Acknowledgement{OperationID: req.OperationID, RequestDigest: req.RequestDigest}, nil
 }
 
+func (a *KueueJobAdapter) deleteJobName(req Request) (string, error) {
+	namespace, name, ok := strings.Cut(req.TargetResourceID, "/")
+	if !ok || namespace != a.namespace || req.TargetResourceID != namespace+"/"+name ||
+		!validKubeName(name) || !acceptableJobUID(req.TargetResourceUID) {
+		return "", ErrInvalidRequest
+	}
+	return name, nil
+}
+
+// deleteConflictReason refuses a same-name object that is not the exact UID
+// and desired generation this DELETE named. The successor is left in place.
+func (a *KueueJobAdapter) deleteConflictReason(req Request, name string, meta kubeMeta) (string, bool) {
+	if meta.Name != name || meta.Namespace != a.namespace || !acceptableJobUID(meta.UID) {
+		return "JOB_IDENTITY_MISMATCH", true
+	}
+	if meta.UID != req.TargetResourceUID {
+		return "JOB_UID_REPLACED", true
+	}
+	got := meta.Annotations
+	if got[kueueAnnotationDesiredGeneration] != strconv.FormatUint(req.DesiredGeneration, 10) {
+		return "RESOURCE_GENERATION_SUPERSEDED", true
+	}
+	if got[kueueAnnotationTenantID] != req.TenantID ||
+		got[kueueAnnotationWorkloadID] != req.WorkloadID ||
+		got[kueueAnnotationProviderID] != req.ProviderID {
+		return "JOB_IDENTITY_MISMATCH", true
+	}
+	if pinUID, ok := a.pinnedUIDForName(name); ok && pinUID != req.TargetResourceUID {
+		return "JOB_UID_REPLACED", true
+	}
+	if intent, ok := a.lookupDelete(req); ok &&
+		(intent.uid != req.TargetResourceUID || intent.name != name || !sameRequest(intent.request, req)) {
+		return "JOB_UID_REPLACED", true
+	}
+	return "", false
+}
+
+type kueueDeleteOptions struct {
+	APIVersion    string                   `json:"apiVersion"`
+	Kind          string                   `json:"kind"`
+	Preconditions kueueDeletePreconditions `json:"preconditions"`
+}
+
+type kueueDeletePreconditions struct {
+	UID string `json:"uid"`
+}
+
+func kueueDeleteResponseAccepted(raw []byte, namespace, name, uid string) bool {
+	if len(raw) == 0 || !json.Valid(raw) {
+		return false
+	}
+	// Job status is an object. A metav1.Status response uses the same JSON
+	// field as a string. Keep it raw so a deleted Job body still decodes.
+	var probe struct {
+		Kind     string          `json:"kind"`
+		Status   json.RawMessage `json:"status"`
+		Metadata kubeMeta        `json:"metadata"`
+	}
+	if json.Unmarshal(raw, &probe) != nil {
+		return false
+	}
+	if probe.Kind == "Status" {
+		var status string
+		return json.Unmarshal(probe.Status, &status) == nil && status == "Success"
+	}
+	if probe.Metadata.Namespace != "" && probe.Metadata.Namespace != namespace {
+		return false
+	}
+	return probe.Metadata.Name == name && probe.Metadata.UID == uid
+}
+
+func (a *KueueJobAdapter) deleteJob(ctx context.Context, req Request, name, uid string) (Acknowledgement, error) {
+	body, err := json.Marshal(kueueDeleteOptions{
+		APIVersion:    "v1",
+		Kind:          "DeleteOptions",
+		Preconditions: kueueDeletePreconditions{UID: uid},
+	})
+	if err != nil {
+		return Acknowledgement{}, ErrInvalidRequest
+	}
+	status, raw, err := a.exchange(ctx, http.MethodDelete, a.jobPath(name), body)
+	if err != nil {
+		if recErr := a.recordDelete(req, name, uid, false); recErr != nil {
+			return Acknowledgement{}, recErr
+		}
+		return Acknowledgement{}, err
+	}
+	switch status {
+	case http.StatusOK, http.StatusAccepted:
+		if !kueueDeleteResponseAccepted(raw, a.namespace, name, uid) {
+			if recErr := a.recordDelete(req, name, uid, false); recErr != nil {
+				return Acknowledgement{}, recErr
+			}
+			return Acknowledgement{}, fmt.Errorf("%w: job delete response unreadable", ErrAcknowledgementLost)
+		}
+		if err := a.recordDelete(req, name, uid, true); err != nil {
+			return Acknowledgement{}, err
+		}
+		return Acknowledgement{OperationID: req.OperationID, RequestDigest: req.RequestDigest}, nil
+	case http.StatusNotFound:
+		// The fenced name is already gone. A successor at this name would be a
+		// different UID and a precondition conflict, not a 404.
+		if err := a.recordDelete(req, name, uid, true); err != nil {
+			return Acknowledgement{}, err
+		}
+		return Acknowledgement{OperationID: req.OperationID, RequestDigest: req.RequestDigest}, nil
+	case http.StatusConflict:
+		// UID precondition failed before deletion. The live object was not deleted.
+		return Acknowledgement{}, fmt.Errorf("%w: JOB_UID_REPLACED", ErrOperationConflict)
+	case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusUnprocessableEntity:
+		return Acknowledgement{}, fmt.Errorf("%w: job delete rejected with HTTP %d", ErrInvalidRequest, status)
+	default:
+		if recErr := a.recordDelete(req, name, uid, false); recErr != nil {
+			return Acknowledgement{}, recErr
+		}
+		return Acknowledgement{}, fmt.Errorf("%w: job delete returned HTTP %d", ErrAcknowledgementLost, status)
+	}
+}
+
+// applyDelete removes one Job only when its UID is the request target UID.
+// A replay after acknowledgement re-reads the name and does not DELETE again,
+// so a successor that reused the name cannot be removed by this operation.
+func (a *KueueJobAdapter) applyDelete(ctx context.Context, req Request) (Acknowledgement, error) {
+	name, err := a.deleteJobName(req)
+	if err != nil {
+		return Acknowledgement{}, err
+	}
+	if intent, ok := a.lookupDelete(req); ok && !sameRequest(intent.request, req) {
+		return Acknowledgement{}, ErrOperationConflict
+	}
+	meta, status, err := a.getJob(ctx, name)
+	if err != nil {
+		return Acknowledgement{}, err
+	}
+	switch status {
+	case http.StatusNotFound:
+		intent, ok := a.lookupDelete(req)
+		if !ok || intent.uid != req.TargetResourceUID || intent.name != name {
+			return Acknowledgement{}, fmt.Errorf("%w: delete target is absent", ErrOperationConflict)
+		}
+		if err := a.recordDelete(req, name, req.TargetResourceUID, true); err != nil {
+			return Acknowledgement{}, err
+		}
+		return Acknowledgement{OperationID: req.OperationID, RequestDigest: req.RequestDigest}, nil
+	case http.StatusOK:
+		if reason, bad := a.deleteConflictReason(req, name, meta); bad {
+			return Acknowledgement{}, fmt.Errorf("%w: %s", ErrOperationConflict, reason)
+		}
+		if intent, ok := a.lookupDelete(req); ok && intent.acknowledged {
+			return Acknowledgement{OperationID: req.OperationID, RequestDigest: req.RequestDigest}, nil
+		}
+		return a.deleteJob(ctx, req, name, meta.UID)
+	default:
+		return Acknowledgement{}, fmt.Errorf("%w: job lookup returned HTTP %d", ErrInvalidKueueObservation, status)
+	}
+}
+
 func (a *KueueJobAdapter) observationQuery(req Request, name, uid string) KubernetesJobQuery {
 	return KubernetesJobQuery{
 		TenantID: req.TenantID, WorkloadID: req.WorkloadID,
@@ -416,10 +641,23 @@ func conflictObservation(req Request, reason string) operation.Observation {
 	}
 }
 
-// Inspect re-reads the Job through the existing UID-pinned collector. A
-// missing Job is a conflict, not authoritative proof that CREATE never
-// happened. Every successful stage, including POD_PLACED, becomes
-// ResourcePresent for the Job object only.
+func absentObservation(req Request) operation.Observation {
+	return operation.Observation{
+		OperationID: req.OperationID, TenantID: req.TenantID,
+		WorkloadID: req.WorkloadID, ProviderID: req.ProviderID,
+		DesiredGeneration: req.DesiredGeneration, ObservedAt: time.Now().UTC(),
+		ResourceVersion:   "kubernetes-job/absent",
+		Result:            operation.TargetAbsent,
+		TargetResourceID:  req.TargetResourceID,
+		TargetResourceUID: req.TargetResourceUID,
+	}
+}
+
+// Inspect re-reads the Job through the existing UID-pinned collector for
+// CREATE. A missing Job on CREATE is a conflict, not authoritative proof that
+// CREATE never happened. Every successful stage, including POD_PLACED, becomes
+// ResourcePresent for the Job object only. DELETE absence is reported only
+// after this process recorded an intended delete of that exact UID.
 func (a *KueueJobAdapter) Inspect(ctx context.Context, req Request) (operation.Observation, error) {
 	if err := ctx.Err(); err != nil {
 		return operation.Observation{}, err
@@ -429,6 +667,9 @@ func (a *KueueJobAdapter) Inspect(ctx context.Context, req Request) (operation.O
 	}
 	if err := req.Validate(); err != nil {
 		return operation.Observation{}, err
+	}
+	if req.Kind == operation.Delete {
+		return a.inspectDelete(ctx, req)
 	}
 	if req.Kind != operation.Create {
 		return operation.Observation{}, ErrInvalidRequest
@@ -486,6 +727,41 @@ func (a *KueueJobAdapter) Inspect(ctx context.Context, req Request) (operation.O
 		ResourceVersion:     collected.Evidence.Job.ResourceVersion,
 		ObservedAt:          collected.Provenance.ObservedAt,
 	}, nil
+}
+
+// inspectDelete reports TARGET_ABSENT only when this process intended to
+// delete that UID and the name is now authoritatively gone. A 404 with no
+// such intent stays a conflict. The live successor is not adopted.
+func (a *KueueJobAdapter) inspectDelete(ctx context.Context, req Request) (operation.Observation, error) {
+	name, err := a.deleteJobName(req)
+	if err != nil {
+		return operation.Observation{}, err
+	}
+	meta, status, err := a.getJob(ctx, name)
+	if err != nil {
+		return operation.Observation{}, err
+	}
+	intent, intended := a.lookupDelete(req)
+	if intended && (!sameRequest(intent.request, req) || intent.name != name || intent.uid != req.TargetResourceUID) {
+		return conflictObservation(req, "OPERATION_FINGERPRINT_MISMATCH"), nil
+	}
+	switch status {
+	case http.StatusNotFound:
+		if !intended {
+			return conflictObservation(req, "MISSING_AUTHORITATIVE_OPERATION"), nil
+		}
+		return absentObservation(req), nil
+	case http.StatusOK:
+		if reason, bad := a.deleteConflictReason(req, name, meta); bad {
+			return conflictObservation(req, reason), nil
+		}
+		if intended {
+			return conflictObservation(req, "DELETE_TARGET_STILL_PRESENT"), nil
+		}
+		return conflictObservation(req, "OPERATION_STATE_UNCONFIRMED"), nil
+	default:
+		return operation.Observation{}, fmt.Errorf("%w: job lookup returned HTTP %d", ErrInvalidKueueObservation, status)
+	}
 }
 
 var _ Adapter = (*KueueJobAdapter)(nil)
