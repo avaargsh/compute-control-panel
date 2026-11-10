@@ -108,8 +108,10 @@ func NewQueuedKueueJobAdapterWithBindings(
 	return adapter, nil
 }
 
-// NewQueuedServiceAccountKueueJobAdapterWithBindings is the authenticated
-// scoped writer for the opt-in queued mode; no patch/update rights are needed.
+// NewQueuedServiceAccountKueueJobAdapterWithBindings uses a caller-supplied
+// binding store for the opt-in queued mode. It is retained for disposable
+// fixtures and tests; production callers use NewQueuedServiceAccountKueueJobAdapter
+// to verify the restricted durable database login before writing any Job.
 func NewQueuedServiceAccountKueueJobAdapterWithBindings(
 	apiURL, caPath, tokenPath, namespace, localQueue string, bindings KueueJobBindingStore,
 ) (*KueueJobAdapter, error) {
@@ -125,6 +127,25 @@ func NewQueuedServiceAccountKueueJobAdapterWithBindings(
 		closeIdle()
 		return nil, err
 	}
+	return adapter, nil
+}
+
+// NewQueuedServiceAccountKueueJobAdapter is the production-facing queued
+// counterpart of NewServiceAccountKueueJobAdapter. Queue selection is explicit;
+// the same restricted, durable UID pin/tombstone store must pass startup
+// attestation before the queued writer is available. This does not attest a
+// physical GPU or authorize Allocation READY/RELEASED.
+func NewQueuedServiceAccountKueueJobAdapter(
+	apiURL, caPath, tokenPath, namespace, localQueue, bindingDSN string,
+) (*KueueJobAdapter, error) {
+	if !validKubeName(localQueue) {
+		return nil, ErrInvalidKueueObservation
+	}
+	adapter, err := NewServiceAccountKueueJobAdapter(apiURL, caPath, tokenPath, namespace, bindingDSN)
+	if err != nil {
+		return nil, err
+	}
+	adapter.queueName = localQueue
 	return adapter, nil
 }
 
