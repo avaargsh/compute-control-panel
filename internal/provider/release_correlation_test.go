@@ -39,8 +39,16 @@ func releaseCandidateFixture() ReleaseEvidenceCandidate {
 		TargetResourceID: del.TargetResourceID, TargetResourceUID: del.TargetResourceUID,
 		ResourceVersion: "delete-journal-5", ObservedAt: time.Date(2026, 11, 10, 10, 0, 0, 0, time.UTC),
 	}
+	create := operation.Operation{
+		ID: "create-op-a", TenantID: "tenant-a", WorkloadID: "workload-a",
+		AllocationID: "allocation-a", ProviderID: "provider-a",
+		IdempotencyKey: "create-a", RequestDigest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		Generation: 7, Version: 4, Kind: operation.Create, Status: operation.Succeeded,
+		ProviderResourceID: "tenant-a/job-a", ProviderResourceUID: "job-uid-a",
+	}
 	claim := previousDRAClaimAllocation()
 	return ReleaseEvidenceCandidate{
+		Create:          create,
 		Delete:          del,
 		ProviderAbsence: obs,
 		PriorQueue:      q,
@@ -74,6 +82,14 @@ func TestReleaseEvidenceCorrelationRejectsCrossAllocationSplicing(t *testing.T) 
 		valid  bool
 	}{
 		{name: "all exact resource identities for one Allocation correlate but do not release", valid: true},
+		{name: "CREATE missing durable Allocation ID", mutate: func(e *ReleaseEvidenceCandidate) { e.Create.AllocationID = "" }},
+		{name: "CREATE belongs to different Allocation", mutate: func(e *ReleaseEvidenceCandidate) { e.Create.AllocationID = "allocation-b" }},
+		{name: "CREATE belongs to different Provider", mutate: func(e *ReleaseEvidenceCandidate) { e.Create.ProviderID = "provider-b" }},
+		{name: "CREATE not confirmed", mutate: func(e *ReleaseEvidenceCandidate) { e.Create.Status = operation.Unknown; e.Create.ProviderResourceID = ""; e.Create.ProviderResourceUID = "" }},
+		{name: "CREATE Job UID differs", mutate: func(e *ReleaseEvidenceCandidate) { e.Create.ProviderResourceUID = "other-job-uid" }},
+		{name: "CREATE Job name differs", mutate: func(e *ReleaseEvidenceCandidate) { e.Create.ProviderResourceID = "tenant-a/job-b" }},
+		{name: "CREATE generation mismatches Kueue pin", mutate: func(e *ReleaseEvidenceCandidate) { e.Create.Generation = 9 }},
+		{name: "DELETE references older-than-CREATE generation", mutate: func(e *ReleaseEvidenceCandidate) { e.Delete.Generation = 6; e.ProviderAbsence.DesiredGeneration = 6 }},
 		{name: "DELETE pending not terminal", mutate: func(e *ReleaseEvidenceCandidate) { e.Delete.Status = operation.Pending }},
 		{name: "DELETE from wrong kind", mutate: func(e *ReleaseEvidenceCandidate) { e.Delete.Kind = operation.Update }},
 		{name: "Allocation missing", mutate: func(e *ReleaseEvidenceCandidate) { e.Delete.AllocationID = "" }},
