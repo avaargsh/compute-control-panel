@@ -44,7 +44,7 @@ CREATE TABLE public.kueue_job_create_pins (
     CONSTRAINT kueue_job_create_pins_pkey PRIMARY KEY (namespace, tenant_id, operation_id)
 );
 
-CREATE INDEX kueue_job_create_pins_namespace_job
+CREATE UNIQUE INDEX kueue_job_create_pins_namespace_job
     ON public.kueue_job_create_pins (namespace, job_name);
 
 COMMENT ON TABLE public.kueue_job_create_pins IS
