@@ -28,7 +28,7 @@ cleanup() {
     kubectl --request-timeout=10s -n kueue-system logs deploy/kueue-controller-manager --tail=80 || true
   fi
   if [[ "$status" -ne 0 ]]; then
-    for f in "$dir"/durable-*.json "$dir"/durable-*.err "$dir"/pg-boot.log "$dir"/migrate.log; do
+    for f in "$dir"/durable-*.json "$dir"/durable-*.err "$dir"/journal-*.json "$dir"/journal-*.err "$dir"/pg-boot.log "$dir"/migrate.log; do
       [[ -f "$f" ]] || continue
       echo "----- $(basename "$f") -----" >&2
       tail -n 40 "$f" >&2 || true
@@ -536,7 +536,7 @@ sigkill_durable() {
   local pid=$!
   local ready=false
   for _ in $(seq 1 450); do
-    if jq -e '(.pin_durable == true or .tombstone_durable == true) and .uid != ""' "$outfile" >/dev/null 2>&1; then
+    if jq -e '(.pin_durable == true or .tombstone_durable == true or (.phase == "journal-successor" and .status == "UNKNOWN" and .target_uid != "")) and (.uid != "" or .target_uid != "")' "$outfile" >/dev/null 2>&1; then
       ready=true
       break
     fi
@@ -759,4 +759,176 @@ journal_job_count="$(kubectl -n "$ns" get jobs -o json | jq -r --arg id ccp-kind
   exit 1
 }
 echo "journal_recovered_uid=$journal_uid journal_fence=$(jq -r '.fence_token' "$dir/journal-recover.json")"
-echo "PASS: disposable CPU-only Kueue quota-denial/QuotaReserved/Admitted, exact Workload/Pod/Job UID+RV and node binding, teardown observation, Postgres pin/tombstone SIGKILL recovery, and real kind + Postgres ComputeOperation UNKNOWN -> fenced Inspect-first SUCCEEDED after process SIGKILL. This is NOT GPU/DRA device release, a production quota-release attestation, Provider retirement, Allocation RELEASED or cost finality."
+kubectl -n "$ns" get job "$journal_name" -o json > "$dir/journal-original-job.json"
+
+# DELETE recovery uses the same suspended Job. TARGET_ABSENT is the tombstone
+# for that UID plus a 404. It is not Allocation RELEASED, quota release, or
+# device release, and it does not use compute_operations.provider_resource_uid.
+echo "journal: UID-fenced DELETE persisted as UNKNOWN, then SIGKILL"
+sigkill_durable "$dir/journal-delete.json" journal delete --hold
+jq -e --arg uid "$journal_uid" --arg name "$journal_name" \
+  '.phase == "journal-delete" and .status == "UNKNOWN" and
+   .tombstone_durable == true and .acknowledged == true and
+   .uid == $uid and .target_uid == $uid and .job_name == $name and
+   .operation_id == "ccp-kind-journal-delete" and .release_attested == false' \
+  "$dir/journal-delete.json" >/dev/null
+journal_delete_fence="$(jq -r '.fence_token' "$dir/journal-delete.json")"
+for _ in $(seq 1 50); do
+  if ! kubectl -n "$ns" get job "$journal_name" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.2
+done
+if kubectl -n "$ns" get job "$journal_name" >/dev/null 2>&1; then
+  echo "UID-fenced DELETE left the original Job in place" >&2
+  exit 1
+fi
+journal_delete_row="$(psql_at "SELECT status || '|' || coalesce(target_resource_uid,'') || '|' || (provider_resource_uid IS NULL)::text FROM public.compute_operations WHERE tenant_id='tenant-a' AND compute_operation_id='ccp-kind-journal-delete'")"
+[[ "$journal_delete_row" == "UNKNOWN|${journal_uid}|true" ]] || {
+  echo "DELETE ComputeOperation was not UNKNOWN for the exact target UID: ${journal_delete_row:-<empty>}" >&2
+  exit 1
+}
+[[ "$(psql_at "SELECT job_uid FROM public.kueue_job_delete_tombstones WHERE namespace='ccp-kueue-smoke' AND tenant_id='tenant-a' AND operation_id='ccp-kind-journal-delete' AND acknowledged")" == "$journal_uid" ]] || {
+  echo "acknowledged DELETE tombstone was not the original UID" >&2
+  exit 1
+}
+[[ "$(kubectl -n "$ns" get job "$pinned_name" -o jsonpath='{.metadata.uid}')" == "$successor_uid" ]] || {
+  echo "DELETE process removed a different UID" >&2
+  exit 1
+}
+
+echo "journal: empty and unreachable DSN fail closed before DELETE recovery"
+durable_dsn=""
+if run_durable "$dir/journal-delete-empty.json" journal fail-closed; then
+  echo "empty journal DSN did not fail" >&2
+  exit 1
+fi
+jq -e '.phase == "journal-fail-closed" and .failed_closed == true and .reason == "empty_dsn" and .delete_applied == false and .release_attested == false' \
+  "$dir/journal-delete-empty.json" >/dev/null
+durable_dsn="postgres://postgres:compute-ci@127.0.0.1:1/postgres?sslmode=disable&connect_timeout=2"
+if run_durable "$dir/journal-delete-unreachable.json" journal fail-closed; then
+  echo "unreachable journal DSN did not fail" >&2
+  exit 1
+fi
+jq -e '.phase == "journal-fail-closed" and .failed_closed == true and .reason == "unreachable" and .delete_applied == false and .release_attested == false' \
+  "$dir/journal-delete-unreachable.json" >/dev/null
+durable_dsn="$binding_dsn"
+[[ "$(psql_at "SELECT status FROM public.compute_operations WHERE tenant_id='tenant-a' AND compute_operation_id='ccp-kind-journal-delete'")" == "UNKNOWN" ]] || {
+  echo "unreachable DSN changed the DELETE journal" >&2
+  exit 1
+}
+[[ "$(psql_at "SELECT count(*) FROM public.compute_resource_observations WHERE tenant_id='tenant-a' AND compute_operation_id='ccp-kind-journal-delete'")" == "0" ]] || {
+  echo "unreachable DSN persisted a DELETE observation" >&2
+  exit 1
+}
+[[ "$(kubectl -n "$ns" get job "$pinned_name" -o jsonpath='{.metadata.uid}')" == "$successor_uid" ]] || {
+  echo "unreachable DSN deleted a different UID" >&2
+  exit 1
+}
+
+echo "journal: fresh process fenced Worker.RecoverUnknown Inspects DELETE only"
+if ! run_durable "$dir/journal-recover-delete.json" journal recover-delete; then
+  cat "$dir/journal-recover-delete.json.err" >&2
+  exit 1
+fi
+jq -e --arg uid "$journal_uid" --argjson previous "$journal_delete_fence" \
+  '.phase == "journal-recover-delete" and .status == "SUCCEEDED" and
+   .tombstone_durable == true and .acknowledged == true and
+   .uid == "" and .target_uid == $uid and .fence_token > $previous and
+   .observation == "TARGET_ABSENT" and .observation_rows == 1 and
+   .outbox_events == 2 and .release_attested == false' \
+  "$dir/journal-recover-delete.json" >/dev/null
+journal_delete_final="$(psql_at "SELECT status || '|' || coalesce(target_resource_uid,'') || '|' || (provider_resource_uid IS NULL)::text FROM public.compute_operations WHERE tenant_id='tenant-a' AND compute_operation_id='ccp-kind-journal-delete'")"
+[[ "$journal_delete_final" == "SUCCEEDED|${journal_uid}|true" ]] || {
+  echo "DELETE finality wrote provider_resource_uid or lost the target UID: ${journal_delete_final:-<empty>}" >&2
+  exit 1
+}
+[[ "$(psql_at "SELECT operation_result || '|' || coalesce(details->>'TargetResourceUID','') || '|' || coalesce(provider_resource_uid,'') FROM public.compute_resource_observations WHERE tenant_id='tenant-a' AND compute_operation_id='ccp-kind-journal-delete'")" == "TARGET_ABSENT|${journal_uid}|" ]] || {
+  echo "TARGET_ABSENT observation was not the exact deleted UID" >&2
+  exit 1
+}
+if kubectl -n "$ns" get job "$journal_name" >/dev/null 2>&1; then
+  echo "DELETE recovery recreated the Job" >&2
+  exit 1
+fi
+[[ "$(kubectl -n "$ns" get job "$pinned_name" -o jsonpath='{.metadata.uid}')" == "$successor_uid" ]] || {
+  echo "DELETE recovery removed a different UID" >&2
+  exit 1
+}
+
+echo "journal: same-name successor is JOB_UID_REPLACED and is not deleted"
+jq -n --arg name "$journal_name" --arg ns "$ns" --slurpfile src "$dir/journal-original-job.json" '{
+  apiVersion: "batch/v1",
+  kind: "Job",
+  metadata: {name: $name, namespace: $ns, annotations: $src[0].metadata.annotations},
+  spec: {
+    suspend: true,
+    parallelism: 1,
+    completions: 1,
+    template: {spec: {
+      restartPolicy: "Never",
+      containers: [{name: "ccp-suspended", image: "registry.k8s.io/pause:3.10"}]
+    }}
+  }
+}' > "$dir/journal-successor-job.json"
+kubectl apply -f "$dir/journal-successor-job.json" >/dev/null
+journal_successor_uid="$(kubectl -n "$ns" get job "$journal_name" -o jsonpath='{.metadata.uid}')"
+journal_successor_created="$(kubectl -n "$ns" get job "$journal_name" -o jsonpath='{.metadata.creationTimestamp}')"
+[[ -n "$journal_successor_uid" && "$journal_successor_uid" != "$journal_uid" && -n "$journal_successor_created" ]] || {
+  echo "journal successor was not a new UID" >&2
+  exit 1
+}
+sigkill_durable "$dir/journal-successor.json" journal successor --hold
+jq -e --arg uid "$journal_uid" --arg name "$journal_name" \
+  '.phase == "journal-successor" and .status == "UNKNOWN" and
+   .uid == "" and .target_uid == $uid and .job_name == $name and
+   .operation_id == "ccp-kind-journal-delete-successor" and
+   .tombstone_durable == false and .release_attested == false' \
+  "$dir/journal-successor.json" >/dev/null
+journal_successor_fence="$(jq -r '.fence_token' "$dir/journal-successor.json")"
+[[ "$(kubectl -n "$ns" get job "$journal_name" -o jsonpath='{.metadata.uid}')" == "$journal_successor_uid" ]] || {
+  echo "successor journal process deleted the replacement Job" >&2
+  exit 1
+}
+durable_dsn="postgres://postgres:compute-ci@127.0.0.1:1/postgres?sslmode=disable&connect_timeout=2"
+if run_durable "$dir/journal-successor-unreachable.json" journal fail-closed; then
+  echo "unreachable DSN during successor recovery did not fail" >&2
+  exit 1
+fi
+durable_dsn="$binding_dsn"
+[[ "$(kubectl -n "$ns" get job "$journal_name" -o jsonpath='{.metadata.uid}')" == "$journal_successor_uid" ]] || {
+  echo "unreachable DSN deleted the same-name successor" >&2
+  exit 1
+}
+[[ "$(psql_at "SELECT status FROM public.compute_operations WHERE tenant_id='tenant-a' AND compute_operation_id='ccp-kind-journal-delete-successor'")" == "UNKNOWN" ]] || {
+  echo "unreachable DSN resolved the successor DELETE" >&2
+  exit 1
+}
+if ! run_durable "$dir/journal-recover-successor.json" journal recover-successor; then
+  cat "$dir/journal-recover-successor.json.err" >&2
+  exit 1
+fi
+jq -e --arg uid "$journal_uid" --argjson previous "$journal_successor_fence" \
+  '.phase == "journal-recover-successor" and .status == "MANUAL_REVIEW" and
+   .reason_code == "JOB_UID_REPLACED" and .observation == "CONFLICT" and
+   .uid == "" and .target_uid == $uid and .fence_token > $previous and
+   .observation_rows == 1 and .outbox_events == 2 and .release_attested == false' \
+  "$dir/journal-recover-successor.json" >/dev/null
+journal_successor_row="$(psql_at "SELECT status || '|' || coalesce(manual_review_code,'') || '|' || coalesce(target_resource_uid,'') || '|' || (provider_resource_uid IS NULL)::text FROM public.compute_operations WHERE tenant_id='tenant-a' AND compute_operation_id='ccp-kind-journal-delete-successor'")"
+[[ "$journal_successor_row" == "MANUAL_REVIEW|JOB_UID_REPLACED|${journal_uid}|true" ]] || {
+  echo "successor recovery did not stay MANUAL_REVIEW for the original UID: ${journal_successor_row:-<empty>}" >&2
+  exit 1
+}
+[[ "$(kubectl -n "$ns" get job "$journal_name" -o jsonpath='{.metadata.uid}')" == "$journal_successor_uid" &&
+  "$(kubectl -n "$ns" get job "$journal_name" -o jsonpath='{.metadata.creationTimestamp}')" == "$journal_successor_created" &&
+  -z "$(kubectl -n "$ns" get job "$journal_name" -o jsonpath='{.metadata.deletionTimestamp}')" &&
+  "$(kubectl -n "$ns" get job "$journal_name" -o jsonpath='{.spec.suspend}')" == "true" ]] || {
+  echo "JOB_UID_REPLACED recovery deleted, unsuspended, or replaced the successor" >&2
+  exit 1
+}
+[[ "$(kubectl -n "$ns" get job "$pinned_name" -o jsonpath='{.metadata.uid}')" == "$successor_uid" ]] || {
+  echo "successor recovery removed a different UID" >&2
+  exit 1
+}
+echo "journal_delete_uid=$journal_uid journal_successor_uid=$journal_successor_uid"
+echo "PASS: disposable CPU-only Kueue quota-denial/QuotaReserved/Admitted, exact Workload/Pod/Job UID+RV and node binding, teardown observation, Postgres pin/tombstone SIGKILL recovery, and real kind + Postgres ComputeOperation UNKNOWN -> fenced Inspect-first CREATE SUCCEEDED and DELETE TARGET_ABSENT after process SIGKILL. TARGET_ABSENT is not Allocation RELEASED, Kueue quota release, or device release. This is NOT GPU/DRA device release, a production quota-release attestation, Provider retirement, Allocation RELEASED or cost finality."
