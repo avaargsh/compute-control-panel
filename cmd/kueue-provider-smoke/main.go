@@ -44,9 +44,11 @@ type lifecycleEvidence struct {
 	CreatedUID         string                      `json:"created_uid"`
 	CreatedResult      operation.ObservationResult `json:"created_result"`
 	AfterAdapterReinit operation.ObservationResult `json:"after_adapter_reinit"`
+	BoundReinitCreate  operation.ObservationResult `json:"bound_adapter_reinit_create"`
 	RejectedWrongUID   bool                        `json:"rejected_wrong_uid"`
 	DeletedResult      operation.ObservationResult `json:"deleted_result"`
 	AfterDeleteReinit  operation.ObservationResult `json:"after_delete_reinit"`
+	BoundReinitDelete  operation.ObservationResult `json:"bound_adapter_reinit_delete"`
 	ReleaseAttested    bool                        `json:"release_attested"`
 }
 
@@ -69,8 +71,9 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	adapter, err := provider.NewServiceAccountKueueJobAdapter(
-		apiURL, serviceAccountFiles+"/ca.crt", serviceAccountFiles+"/token", smokeNamespace,
+	bindings := provider.NewMemoryKueueJobBindingStore()
+	adapter, err := provider.NewServiceAccountKueueJobAdapterWithBindings(
+		apiURL, serviceAccountFiles+"/ca.crt", serviceAccountFiles+"/token", smokeNamespace, bindings,
 	)
 	if err != nil {
 		return err
@@ -98,6 +101,23 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 	}
 	if _, err := restarted.Apply(ctx, create); !errors.Is(err, provider.ErrAcknowledgementLost) {
 		return fmt.Errorf("restart replay improperly acknowledged: %v", err)
+	}
+
+	// Re-create only the adapter object with the caller-owned binding store.
+	// This does NOT simulate an OS process restart or persistent storage.
+	bound, err := provider.NewServiceAccountKueueJobAdapterWithBindings(
+		apiURL, serviceAccountFiles+"/ca.crt", serviceAccountFiles+"/token", smokeNamespace, bindings,
+	)
+	if err != nil {
+		return err
+	}
+	if _, err := bound.Apply(ctx, create); err != nil {
+		return fmt.Errorf("trusted pin replay failed: %w", err)
+	}
+	boundPresent, err := bound.Inspect(ctx, create)
+	if err != nil || boundPresent.Result != operation.ResourcePresent ||
+		boundPresent.ResourceUID != present.ResourceUID {
+		return fmt.Errorf("bound adapter adopted wrong UID: %+v: %w", boundPresent, err)
 	}
 
 	remove := create
@@ -141,6 +161,20 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 	if gone.TargetResourceUID != present.ResourceUID {
 		return errors.New("observed delete UID mismatch")
 	}
+	boundAgain, err := provider.NewServiceAccountKueueJobAdapterWithBindings(
+		apiURL, serviceAccountFiles+"/ca.crt", serviceAccountFiles+"/token", smokeNamespace, bindings,
+	)
+	if err != nil {
+		return err
+	}
+	boundGone, err := boundAgain.Inspect(ctx, remove)
+	if err != nil || boundGone.Result != operation.TargetAbsent ||
+		boundGone.TargetResourceUID != present.ResourceUID {
+		return fmt.Errorf("bound tombstone not carried across adapters: %+v: %w", boundGone, err)
+	}
+	if _, err := boundAgain.Apply(ctx, remove); err != nil {
+		return fmt.Errorf("bound delete replay was not idempotent: %w", err)
+	}
 	postRestart, err := provider.NewServiceAccountKueueJobAdapter(
 		apiURL, serviceAccountFiles+"/ca.crt", serviceAccountFiles+"/token", smokeNamespace,
 	)
@@ -154,8 +188,9 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 	}
 	return json.NewEncoder(out).Encode(lifecycleEvidence{
 		CreatedUID: present.ResourceUID, CreatedResult: present.Result,
-		AfterAdapterReinit: unbound.Result, RejectedWrongUID: true,
-		DeletedResult: gone.Result, AfterDeleteReinit: unintended.Result,
+		AfterAdapterReinit: unbound.Result, BoundReinitCreate: boundPresent.Result,
+		RejectedWrongUID: true, DeletedResult: gone.Result,
+		AfterDeleteReinit: unintended.Result, BoundReinitDelete: boundGone.Result,
 		ReleaseAttested: false,
 	})
 }
