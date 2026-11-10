@@ -53,12 +53,12 @@ func (r *Repository) ClaimOutbox(ctx context.Context, tenantID, owner string, tt
 		return OutboxEvent{}, ErrOutboxInvalid
 	}
 	const query = `WITH next_event AS (
-        SELECT e.event_id FROM compute_outbox_events e
+        SELECT e.event_id FROM public.compute_outbox_events e
         WHERE e.tenant_id=$1
           AND ((e.delivery_state='PENDING' AND e.next_attempt_at <= clock_timestamp())
             OR (e.delivery_state='PUBLISHING' AND e.lease_expires_at <= clock_timestamp()))
           AND NOT EXISTS (
-            SELECT 1 FROM compute_outbox_events older
+            SELECT 1 FROM public.compute_outbox_events older
             WHERE older.producer=e.producer AND older.tenant_id=e.tenant_id
               AND older.aggregate_type=e.aggregate_type AND older.aggregate_id=e.aggregate_id
               AND older.aggregate_version < e.aggregate_version
@@ -66,7 +66,7 @@ func (r *Repository) ClaimOutbox(ctx context.Context, tenantID, owner string, tt
         ORDER BY e.occurred_at, e.event_id
         FOR UPDATE OF e SKIP LOCKED LIMIT 1
     )
-    UPDATE compute_outbox_events e SET
+    UPDATE public.compute_outbox_events e SET
         delivery_state='PUBLISHING', attempts=e.attempts+1,
         lease_owner=$2,
         lease_expires_at=clock_timestamp()+($3::bigint * INTERVAL '1 microsecond')
@@ -89,7 +89,7 @@ func (r *Repository) MarkOutboxPublished(ctx context.Context, tenantID, eventID,
 	if !outboxLabel(tenantID) || !outboxLabel(eventID) || !outboxLabel(owner) || attempt <= 0 {
 		return ErrOutboxInvalid
 	}
-	result, err := r.db.ExecContext(ctx, `UPDATE compute_outbox_events SET
+	result, err := r.db.ExecContext(ctx, `UPDATE public.compute_outbox_events SET
         delivery_state='PUBLISHED', published_at=clock_timestamp(),
         lease_owner=NULL, lease_expires_at=NULL, last_error_code=NULL
         WHERE tenant_id=$1 AND event_id=$2 AND lease_owner=$3 AND attempts=$4
@@ -116,7 +116,7 @@ func (r *Repository) RetryOutbox(ctx context.Context, tenantID, eventID, owner s
 		backoff < 0 || backoff > 24*time.Hour || !outboxLabel(reason) {
 		return ErrOutboxInvalid
 	}
-	result, err := r.db.ExecContext(ctx, `UPDATE compute_outbox_events SET
+	result, err := r.db.ExecContext(ctx, `UPDATE public.compute_outbox_events SET
         delivery_state='PENDING', lease_owner=NULL, lease_expires_at=NULL,
         next_attempt_at=clock_timestamp()+($5::bigint * INTERVAL '1 microsecond'),
         last_error_code=$6
