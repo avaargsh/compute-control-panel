@@ -66,6 +66,26 @@ func TestQueuedKueueJobIsUIDPinnedAcrossAdmissionSuspendTransitions(t *testing.T
 	if api.postCount() != 1 {
 		t.Fatalf("replay created a second Job")
 	}
+	// Name reuse cannot move the durable CREATE receipt to a successor UID.
+	api.setReplacement("successor-uid", "")
+	observed, err := adapter.Inspect(context.Background(), req)
+	if err != nil || observed.Result != operation.ObservationConflict {
+		t.Fatalf("successor UID was adopted: %+v: %v", observed, err)
+	}
+	if _, err := adapter.Apply(context.Background(), req); !errors.Is(err, ErrOperationConflict) {
+		t.Fatalf("successor UID replay was not rejected: %v", err)
+	}
+	api.setReplacement("", "")
+	// A queue reassignment is not an allowed Kueue suspend transition.
+	api.mu.Lock()
+	for name, job := range api.jobs {
+		job.Metadata.Labels["kueue.x-k8s.io/queue-name"] = "other-queue"
+		api.jobs[name] = job
+	}
+	api.mu.Unlock()
+	if _, err := adapter.Apply(context.Background(), req); !errors.Is(err, ErrOperationConflict) {
+		t.Fatalf("reassigned LocalQueue was silently adopted: %v", err)
+	}
 }
 
 func TestQueuedKueueJobRejectsInvalidLocalQueue(t *testing.T) {
