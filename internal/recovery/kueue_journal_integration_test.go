@@ -141,15 +141,15 @@ func TestKueuePostgresJournalInspectFirstRecovery(t *testing.T) {
 		wantReason    string
 	}{
 		{
-			name: "durable original UID resolves UNKNOWN without a second POST",
+			name:       "durable original UID resolves UNKNOWN without a second POST",
 			wantStatus: operation.Succeeded, wantResult: operation.ResourcePresent,
 		},
 		{
-			name: "lost CREATE ACK leaves durable UNKNOWN without adopting an unbound UID",
+			name:          "lost CREATE ACK leaves durable UNKNOWN without adopting an unbound UID",
 			loseCreateACK: true, wantStatus: operation.Unknown, wantResult: operation.OperationInProgress,
 		},
 		{
-			name: "same-name successor becomes manual review without rewriting original UID",
+			name:         "same-name successor becomes manual review without rewriting original UID",
 			successorUID: "job-uid-successor", wantStatus: operation.ManualReview,
 			wantResult: operation.ObservationConflict, wantReason: "JOB_UID_REPLACED",
 		},
