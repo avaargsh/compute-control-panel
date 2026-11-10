@@ -2,7 +2,7 @@
 
 Evidence level: **Code + TLS mock tests only** until a real cluster run produces immutable, reviewed logs and an accepted observation manifest.
 
-This slice offers a one-shot, read-only Kubernetes API inspection of an **existing** Job pinned to `namespace/name/UID`. It **cannot create Jobs**, patch Kueue admission, mark a Compute Allocation READY, verify GPU device assignment, prove quota release, or finalize deletion. It does not replace the historical kind + Kueue + Fake GPU Golden Path.
+This slice offers a one-shot, read-only Kubernetes API inspection of an **existing** Job pinned to `namespace/name/UID`. The `kueue-observe` command **cannot create Jobs**, patch Kueue admission, mark a Compute Allocation READY, verify GPU device assignment, prove quota release, or finalize deletion. It does not replace the historical kind + Kueue + Fake GPU Golden Path. A separate library CREATE path is described at the end of this document and is not this command.
 
 ## Trusted input and minimal ServiceAccount
 
@@ -79,3 +79,33 @@ Output is a JSON `KueueJobCollection` with a structural stage `UNPROVEN`, `KUEUE
 Record source commit and image digest; cluster and Kueue versions; namespace and ServiceAccount role; Job UID/resourceVersion; Kueue Workload UID/resourceVersion and `Admitted` condition; Pod UID/resourceVersion and Node binding; timestamp plus API errors. Run at least: queued without Pod; admitted without Node binding; scheduled Pod without GPU device claim; Job recreation with different UID; token rotation; revoked RBAC; invalid CA; lost API response. All mismatches must remain `UNPROVEN` or return a nonzero error.
 
 Further required before #33 can close: version-pinned kind/Kueue/Fake GPU installation, durable Workload/Operation -> Job creation, unknown/lost-ACK restart, single-authority finalizers, Kueue quota release and independently verified device release. Unit TLS tests and this command are **not** real-cluster E2E.
+
+## CREATE then observe (NOT Golden E2E)
+
+`provider.KueueJobAdapter` is a library slice only. It is not mounted on a production HTTP handler, it does not run inside `kueue-observe`, and it does not close #33.
+
+`Apply(CREATE)` posts one suspended `batch/v1` Job into the adapter's configured namespace and pins the Job UID returned by the API. The Job carries the tenant, workload, and desired-generation annotations the reader already checks, plus operation, digest, idempotency, and provider annotations. It has no Kueue queue label, no second Kueue Workload object, no finalizer, and no GPU or DRA request. A lost or unreadable create response returns `ErrAcknowledgementLost`. The next `Apply` or `Inspect` reads the existing object by deterministic name and will not post a second Job or adopt a replacement UID.
+
+`Inspect` reuses `KubernetesObservationReader.Collect`. `UNPROVEN`, `KUEUE_ADMITTED`, and `POD_PLACED` are structural Job observations. **POD_PLACED is not Allocation READY.** Absence of the Job is a conflict, not proof that CREATE never happened.
+
+Use a different ServiceAccount and Role from `ccp-kueue-observer`. `create` is the only mutable verb. Do not add these rules to the read-only observer Role, and do not grant `update`, `patch`, `delete`, `watch`, or cluster-admin:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ccp-kueue-job-creator
+  namespace: tenant-a
+rules:
+- apiGroups: ["batch"]
+  resources: ["jobs"]
+  verbs: ["create", "get"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["list"]
+- apiGroups: ["kueue.x-k8s.io"]
+  resources: ["workloads"]
+  verbs: ["list"]
+```
+
+List Pods and Kueue Workloads are the same reads the observer already performs, so Inspect can classify a later admission without promoting readiness. No DELETE, Finalizer, Kueue CR self-scheduling, DRA, cost ledger, or #39 billing-trust work is in this slice. A TLS mock that returns 201 is not a kind/Kueue/Fake GPU Golden Path.
