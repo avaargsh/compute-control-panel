@@ -100,6 +100,14 @@ func (s *MemoryKueueJobBindingStore) PutCreatePin(namespace string, req Request,
 		}
 		return nil
 	}
+	// A Kubernetes namespace/Job name identifies at most one CREATE owner.
+	// Keep this check and insert under the same mutex: otherwise
+	// CreatePinUID's name lookup becomes order-dependent.
+	for _, prev := range s.pins {
+		if prev.Namespace == namespace && prev.Name == name {
+			return ErrOperationConflict
+		}
+	}
 	s.pins[key] = KueueCreatePin{Namespace: namespace, Name: name, UID: uid, Request: req}
 	return nil
 }
