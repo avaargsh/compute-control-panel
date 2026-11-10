@@ -18,6 +18,74 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
+
+func TestKueueJobBindingConcurrentNameOwnership(t *testing.T) {
+	// Exactly one operation can own a namespace/Job name. This is enforced
+	// atomically, not by checking the two operations in sequence.
+	for _, tc := range []struct {
+		name string
+		open func(*testing.T) KueueJobBindingStore
+	}{
+		{"memory", func(*testing.T) KueueJobBindingStore { return NewMemoryKueueJobBindingStore() }},
+		{"postgres", func(t *testing.T) KueueJobBindingStore {
+			db := openProviderPostgresDB(t)
+			store, err := NewPostgresKueueJobBindingStore(db)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return store
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := tc.open(t)
+			first := uniqueKueueRequest(t)
+			second := uniqueKueueRequest(t)
+			const namespace = "tenant-a"
+			name := "job-" + strings.TrimPrefix(first.OperationID, "op-")
+			type result struct {
+				err error
+				uid string
+			}
+			outcomes := make(chan result, 2)
+			start := make(chan struct{})
+			for _, item := range []struct {
+				req Request
+				uid string
+			}{
+				{first, "uid-first"},
+				{second, "uid-second"},
+			} {
+				item := item
+				go func() {
+					<-start
+					outcomes <- result{err: store.PutCreatePin(namespace, item.req, name, item.uid), uid: item.uid}
+				}()
+			}
+			close(start)
+			var winner string
+			for i := 0; i < 2; i++ {
+				got := <-outcomes
+				if got.err == nil {
+					if winner != "" {
+						t.Fatal("two independent CREATE operations claimed the same Job name")
+					}
+					winner = got.uid
+				} else if !errors.Is(got.err, ErrOperationConflict) {
+					t.Fatalf("name ownership did not fail closed: %v", got.err)
+				}
+			}
+			if winner == "" {
+				t.Fatal("no operation could claim an unused name")
+			}
+			uid, ok, err := store.CreatePinUID(namespace, name)
+			if err != nil || !ok || uid != winner {
+				t.Fatalf("UID name resolution is ambiguous: uid=%q winner=%q found=%v err=%v",
+					uid, winner, ok, err)
+			}
+		})
+	}
+}
+
 func uniqueKueueRequest(t *testing.T) Request {
 	t.Helper()
 	var buf [8]byte
