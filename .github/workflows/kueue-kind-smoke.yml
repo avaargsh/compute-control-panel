@@ -6,6 +6,7 @@ on:
       - '.github/workflows/kueue-kind-smoke.yml'
       - 'scripts/kueue_kind_smoke.sh'
       - 'cmd/kueue-observe/**'
+      - 'cmd/kueue-provider-smoke/**'
       - 'internal/provider/kueue_*.go'
   push:
     branches: [main]
@@ -13,6 +14,7 @@ on:
       - '.github/workflows/kueue-kind-smoke.yml'
       - 'scripts/kueue_kind_smoke.sh'
       - 'cmd/kueue-observe/**'
+      - 'cmd/kueue-provider-smoke/**'
       - 'internal/provider/kueue_*.go'
   workflow_dispatch:
 
