@@ -141,7 +141,7 @@ func (r *KubernetesObservationReader) ObserveDRAClaim(
 		return DRAClaimObservation{}, ErrInvalidDRAObservation
 	}
 	return DRAClaimObservation{
-		Claim: refFromKube(claim.Metadata),
+		Claim:  refFromKube(claim.Metadata),
 		PodUID: owner.UID,
 		Device: device,
 	}, nil
