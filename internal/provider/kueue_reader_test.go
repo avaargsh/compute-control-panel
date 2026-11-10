@@ -102,8 +102,8 @@ func TestKubernetesObservationReaderFailsClosedOnIdentityOrPartialLists(t *testi
 		status    int
 	}{
 		{"successor Job UID", strings.Replace(testKubeJob, "job-uid-a", "job-uid-b", 1), testKueueWorkloads, testKubePods, 0},
-		{"stale generation", strings.Replace(testKubeJob, `"desired-generation":"7"`, `"desired-generation":"6"`, 1), testKueueWorkloads, testKubePods, 0},
-		{"cross tenant Job", strings.Replace(testKubeJob, `"tenant-id":"tenant-a"`, `"tenant-id":"tenant-b"`, 1), testKueueWorkloads, testKubePods, 0},
+		{"stale generation", strings.Replace(testKubeJob, `"compute-control-panel.io/desired-generation":"7"`, `"compute-control-panel.io/desired-generation":"6"`, 1), testKueueWorkloads, testKubePods, 0},
+		{"cross tenant Job", strings.Replace(testKubeJob, `"compute-control-panel.io/tenant-id":"tenant-a"`, `"compute-control-panel.io/tenant-id":"tenant-b"`, 1), testKueueWorkloads, testKubePods, 0},
 		{"incomplete Kueue list", testKubeJob, strings.Replace(testKueueWorkloads, `"resourceVersion":"21"`, `"continue":"next","resourceVersion":"21"`, 1), testKubePods, 0},
 		{"foreign Pod owner", testKubeJob, testKueueWorkloads, strings.Replace(testKubePods, `"uid":"job-uid-a","controller"`, `"uid":"other-job","controller"`, 1), 0},
 		{"incomplete Pod list", testKubeJob, testKueueWorkloads, strings.Replace(testKubePods, `"resourceVersion":"31"`, `"continue":"next","resourceVersion":"31"`, 1), 0},
