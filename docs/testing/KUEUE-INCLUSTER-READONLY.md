@@ -125,3 +125,14 @@ rules:
 ```
 
 List Pods and Kueue Workloads are the same reads the observer already performs, so Inspect can classify a later admission without promoting readiness. No Kueue CR self-scheduling, DRA, cost ledger, or #39 billing-trust work is in this slice. A TLS mock that returns 201 or 200 is not a kind/Kueue/Fake GPU Golden Path.
+
+
+## Optional exact queue-identity proof (PR #87)
+
+The library method `KubernetesObservationReader.ObserveQueueBinding` is a separate **read-only, structurally attested** queue-mapping check, not part of the `kueue-observe` CLI or an Allocation lifecycle/finance write path. An authorized controller must supply a pinned `KueueQueueBindingQuery` with the Job scope and **expected LocalQueue and ClusterQueue names and UIDs** from a trusted policy or registry. A tenant-provided name/UID is not an authoritative QuotaBinding.
+
+The method first uses the existing Job/Workload/Pod observation and then GETs the exact Kueue Workload, namespaced LocalQueue and cluster-scoped ClusterQueue. It verifies `Workload.spec.queueName -> LocalQueue.spec.clusterQueue -> Workload.status.admission.clusterQueue` (when quota is reserved), and checks exact resource UIDs/resourceVersions. All three queue-path objects are re-read; the Job is read again, and a stale/missing/rewritten identity fails closed. The returned `ClusterQueue.Namespace` is intentionally empty because ClusterQueue is cluster-scoped.
+
+**Additional narrow RBAC required only by clients that invoke this optional library method:** extend that client's namespace Role with `get` on `workloads` and `localqueues` in `kueue.x-k8s.io`; separately grant `get` on `clusterqueues` through a cluster-scoped ClusterRole restricted to the expected `resourceNames` and bind it only to the observer's dedicated ServiceAccount. Do not grant mutating verbs or apply these permissions to other tenants indiscriminately. The existing `kueue-observe` command and its three-read Role remain unchanged.
+
+The method does **not** authenticate the cluster independently, resolve a server-owned Tenant/Project/Pool QuotaBinding, verify ResourceFlavor object identities, provide a single transactional Kubernetes snapshot, or attest DRA/device-plugin allocation or release. It cannot mark Allocation READY/RELEASED or UsageInterval FINAL. CI TLS-mock tests and disposable CPU-only kind tests do not constitute real GPU evidence.
