@@ -312,12 +312,12 @@ func TestKueueJobAdapterCreateIsIdempotentAndInspectsThroughReader(t *testing.T)
 		t.Fatal(err)
 	}
 	replay, err := restarted.Apply(ctx, req)
-	if err != nil || replay != ack || api.postCount() != 1 {
-		t.Fatalf("restarted adapter created a second Job: %+v posts=%d err=%v", replay, api.postCount(), err)
+	if !errors.Is(err, ErrAcknowledgementLost) || api.postCount() != 1 {
+		t.Fatalf("restarted adapter trusted unbound Job: %+v posts=%d err=%v", replay, api.postCount(), err)
 	}
 	reread, err := restarted.Inspect(ctx, req)
-	if err != nil || reread.ResourceUID != observed.ResourceUID || reread.Result != operation.ResourcePresent {
-		t.Fatalf("restarted inspect: %+v %v", reread, err)
+	if err != nil || reread.Result != operation.OperationInProgress || reread.ResourceUID != "" {
+		t.Fatalf("restarted Inspect claimed Job without durable UID: %+v %v", reread, err)
 	}
 
 	conflict := req
@@ -339,12 +339,13 @@ func TestKueueJobAdapterLostCreateACKIsInspectableWithoutASecondPost(t *testing.
 		t.Fatalf("posts=%d", api.postCount())
 	}
 	observed, err := adapter.Inspect(ctx, req)
-	if err != nil || observed.Result != operation.ResourcePresent || observed.ResourceUID != "job-uid-created" {
-		t.Fatalf("inspect after lost ACK: %+v %v", observed, err)
+	if err != nil || observed.Result != operation.OperationInProgress ||
+		observed.ResourceUID != "" || observed.ResourceID != "" {
+		t.Fatalf("inspect after lost ACK decided unbound Job: %+v %v", observed, err)
 	}
 	ack, err := adapter.Apply(ctx, req)
-	if err != nil || ack.OperationID != req.OperationID || api.postCount() != 1 {
-		t.Fatalf("replay after lost ACK: %+v posts=%d err=%v", ack, api.postCount(), err)
+	if !errors.Is(err, ErrAcknowledgementLost) || api.postCount() != 1 {
+		t.Fatalf("replay after lost ACK acknowledged unbound Job: %+v posts=%d err=%v", ack, api.postCount(), err)
 	}
 
 	now := time.Now()
@@ -372,8 +373,9 @@ func TestKueueJobAdapterLostCreateACKIsInspectableWithoutASecondPost(t *testing.
 	}
 	verified, err := reconciling.ApplyObservation(reconciling.Version, "worker-2", reconciling.FenceToken,
 		now.Add(time.Minute), req.DesiredGeneration, observed)
-	if err != nil || verified.Status != operation.Succeeded || verified.ProviderResourceUID != observed.ResourceUID {
-		t.Fatalf("lost-ACK observation did not record Job presence: %+v %v", verified, err)
+	if err != nil || verified.Status != operation.Unknown ||
+		verified.ProviderResourceUID != "" || verified.ProviderResourceID != "" {
+		t.Fatalf("lost-ACK without trusted UID incorrectly completed operation: %+v %v", verified, err)
 	}
 }
 
