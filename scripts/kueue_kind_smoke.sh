@@ -1046,3 +1046,8 @@ journal_successor_row="$(psql_at "SELECT status || '|' || coalesce(manual_review
 }
 echo "journal_delete_uid=$journal_uid journal_successor_uid=$journal_successor_uid"
 echo "PASS: disposable CPU-only Kueue quota-denial/QuotaReserved/Admitted, exact Workload/Pod/Job UID+RV and node binding, teardown observation, Postgres pin/tombstone SIGKILL recovery, and real kind + Postgres ComputeOperation UNKNOWN -> fenced Inspect-first CREATE SUCCEEDED and DELETE TARGET_ABSENT after process SIGKILL. TARGET_ABSENT is not Allocation RELEASED, Kueue quota release, or device release. This is NOT GPU/DRA device release, a production quota-release attestation, Provider retirement, Allocation RELEASED or cost finality."
+# Independent official DRA example-driver lane. This creates a simulated GPU
+# ResourceSlice/Claim/Pod *separate* from the queued CCP Job to keep authority
+# and attribution claims explicit; never promote Allocation READY/RELEASED.
+bash scripts/dra_example_kind_smoke.sh
+

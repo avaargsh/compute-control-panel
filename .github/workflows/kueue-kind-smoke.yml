@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/kueue-kind-smoke.yml'
       - 'scripts/kueue_kind_smoke.sh'
+      - 'scripts/dra_example_kind_smoke.sh'
       - 'cmd/kueue-observe/**'
       - 'cmd/kueue-provider-smoke/**'
       - 'internal/provider/kueue_*.go'
@@ -13,6 +14,7 @@ on:
     paths:
       - '.github/workflows/kueue-kind-smoke.yml'
       - 'scripts/kueue_kind_smoke.sh'
+      - 'scripts/dra_example_kind_smoke.sh'
       - 'cmd/kueue-observe/**'
       - 'cmd/kueue-provider-smoke/**'
       - 'internal/provider/kueue_*.go'
@@ -36,8 +38,10 @@ jobs:
           go install sigs.k8s.io/kind@v0.30.0
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - name: Check shell syntax before starting Docker
-        run: bash -n scripts/kueue_kind_smoke.sh
-      - name: Kubernetes 1.34 / Kueue v0.19.6 smoke and Postgres CREATE/DELETE SIGKILL recovery (disposable only)
+        run: |
+          bash -n scripts/kueue_kind_smoke.sh
+          bash -n scripts/dra_example_kind_smoke.sh
+      - name: Kubernetes 1.34 / Kueue v0.19.6 + simulated DRA v0.2.0 + PG16 (disposable)
         env:
           CCP_DISPOSABLE_KIND_SMOKE: '1'
         run: bash scripts/kueue_kind_smoke.sh
