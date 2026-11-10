@@ -45,22 +45,44 @@ func draSliceSpec(list map[string]any) map[string]any {
 	return draFirstSlice(list)["spec"].(map[string]any)
 }
 
+// appendCompleteSecondSlice models a driver pool spanning multiple nodes.
+// A successful read must see every slice of the highest generation.
+func appendCompleteSecondSlice(v map[string]any) {
+	draSliceSpec(v)["pool"].(map[string]any)["resourceSliceCount"] = float64(2)
+	v["items"] = append(v["items"].([]any), map[string]any{
+		"apiVersion": "resource.k8s.io/v1",
+		"kind":       "ResourceSlice",
+		"metadata":   map[string]any{"name": "gpu-slice-b", "uid": "slice-uid-b", "resourceVersion": "452"},
+		"spec": map[string]any{
+			"driver":   "gpu.example.com",
+			"nodeName": "gpu-node-b",
+			"pool":     map[string]any{"name": "pool-a", "generation": float64(4), "resourceSliceCount": float64(2)},
+			"devices":  []any{map[string]any{"name": "device-b"}},
+		},
+	})
+}
+
 func TestDRAPoolInventoryRequiresCompleteCurrentGeneration(t *testing.T) {
 	tests := []struct {
 		name   string
 		first  func(map[string]any)
 		second func(map[string]any)
 		status int
-		want   bool
+		want      bool
+		wantCount int
 	}{
 		{name: "complete single-node pool with exact allocated device", want: true},
+		{name: "complete two-slice pool with exact device and distinct nodes", first: appendCompleteSecondSlice, want: true, wantCount: 2},
+		{name: "incomplete second read of formerly complete pool", first: appendCompleteSecondSlice},
+		{name: "duplicate allocated device across same-generation slices", first: func(v map[string]any) {
+			appendCompleteSecondSlice(v)
+			v["items"].([]any)[1].(map[string]any)["spec"].(map[string]any)["devices"] = []any{map[string]any{"name": "device-a"}}
+		}},
 		{name: "missing allocated device in inventory", first: func(v map[string]any) { draSliceSpec(v)["devices"] = []any{map[string]any{"name": "other-device"}} }},
 		{name: "device published for wrong node", first: func(v map[string]any) { draSliceSpec(v)["nodeName"] = "other-node" }},
 		{name: "pool advertised two slices but only one seen", first: func(v map[string]any) { draSliceSpec(v)["pool"].(map[string]any)["resourceSliceCount"] = float64(2) }},
 		{name: "old generation selected device but latest lacks it", first: func(v map[string]any) {
-			first := draFirstSlice(v)
 			copy := map[string]any{"apiVersion": "resource.k8s.io/v1", "kind": "ResourceSlice", "metadata": map[string]any{"name": "gpu-slice-new", "uid": "new-uid", "resourceVersion": "451"}, "spec": map[string]any{"driver": "gpu.example.com", "nodeName": "gpu-node-a", "pool": map[string]any{"name": "pool-a", "generation": float64(5), "resourceSliceCount": float64(1)}, "devices": []any{map[string]any{"name": "other-device"}}}}
-			_ = first
 			v["items"] = append(v["items"].([]any), copy)
 		}},
 		{name: "duplicate device in same current generation", first: func(v map[string]any) {
@@ -125,7 +147,10 @@ func TestDRAPoolInventoryRequiresCompleteCurrentGeneration(t *testing.T) {
 			if tc.want {
 				if err != nil || got.PodClaim.Pod.UID != "pod-uid-a" || got.PodClaim.Claim.Claim.UID != "claim-uid-a" ||
 					got.Slice.UID != "slice-uid-a" || got.Slice.Name != "gpu-slice-a" ||
-					got.PoolGeneration != 4 || got.PoolResourceSliceCount != 1 ||
+					got.PoolGeneration != 4 || got.PoolResourceSliceCount != func() int {
+						if tc.wantCount > 0 { return tc.wantCount }
+						return 1
+					}() ||
 					podReads.Load() != 4 || claimReads.Load() != 4 || sliceReads.Load() != 2 {
 					t.Fatalf("no complete generation/UID-fenced inventory proof: %+v err=%v calls=%d/%d/%d", got, err, podReads.Load(), claimReads.Load(), sliceReads.Load())
 				}
