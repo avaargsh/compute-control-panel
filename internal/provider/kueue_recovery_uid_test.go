@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"errors"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/avaargsh/compute-control-panel/internal/operation"
