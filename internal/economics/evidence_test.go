@@ -195,6 +195,15 @@ func TestDeriveUsageIntervalFailsClosedForMissingAdmissionAndRelease(t *testing.
 			t.Fatalf("unexpected result=%+v err=%v", got, err)
 		}
 	})
+	t.Run("provider cost liability end missing", func(t *testing.T) {
+		evidence, policy := validAllocationUsageEvidence(t)
+		evidence.Provider.CostLiabilityEnd = nil
+		got, err := DeriveUsageInterval(evidence, policy)
+		if err != nil || got.Status != EvidenceStatusIncomplete ||
+			got.ReasonCode != ReasonReleaseUnconfirmed || got.UsageInterval != nil {
+			t.Fatalf("provider liability still open must not derive FINAL: result=%+v err=%v", got, err)
+		}
+	})
 	t.Run("release evidence missing", func(t *testing.T) {
 		evidence, policy := validAllocationUsageEvidence(t)
 		evidence.Device.Release = nil

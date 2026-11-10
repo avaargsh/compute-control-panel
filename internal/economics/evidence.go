@@ -277,9 +277,10 @@ func DeriveUsageInterval(evidence AllocationUsageEvidence, policy EvidencePolicy
 		return incomplete(ReasonDeviceAssignmentMissing)
 	}
 
-	// Both scheduler ownership and device assignment must have authoritative
-	// release evidence before a closed Workload interval can become FINAL.
-	if kueue.Release == nil || device.Release == nil {
+	// Finality requires all three release authorities: the exact Provider
+	// liability lease, Kueue quota reservation, and device assignment.
+	// Absence of any source must not silently close the costable interval.
+	if provider.CostLiabilityEnd == nil || kueue.Release == nil || device.Release == nil {
 		return incomplete(ReasonReleaseUnconfirmed)
 	}
 	if kueue.Release.NativeUID != kueue.WorkloadUID || device.Release.NativeUID != device.ResourceUID {
