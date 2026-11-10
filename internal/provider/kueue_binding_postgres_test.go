@@ -18,7 +18,6 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-
 func TestKueueJobBindingConcurrentNameOwnership(t *testing.T) {
 	// Exactly one operation can own a namespace/Job name. This is enforced
 	// atomically, not by checking the two operations in sequence.
