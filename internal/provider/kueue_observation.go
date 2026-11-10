@@ -38,9 +38,9 @@ type KueueJobEvidence struct {
 	JobWorkloadID        string
 	JobDesiredGeneration uint64
 
-	KueueWorkload  KubernetesResourceRef
+	KueueWorkload    KubernetesResourceRef
 	KueueOwnerJobUID string
-	KueueAdmitted bool
+	KueueAdmitted    bool
 
 	Pod            KubernetesResourceRef
 	PodOwnerJobUID string
@@ -53,8 +53,8 @@ type KueueJobEvidence struct {
 type KueueObservationStage string
 
 const (
-	KueueUnproven KueueObservationStage = "UNPROVEN"
-	KueueAdmitted KueueObservationStage = "KUEUE_ADMITTED"
+	KueueUnproven  KueueObservationStage = "UNPROVEN"
+	KueueAdmitted  KueueObservationStage = "KUEUE_ADMITTED"
 	KueuePodPlaced KueueObservationStage = "POD_PLACED"
 )
 
