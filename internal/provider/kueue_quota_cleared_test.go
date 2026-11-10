@@ -64,6 +64,12 @@ func TestKueueQuotaClearedFailsClosedOnPartialOrReusedObjects(t *testing.T) {
 		{name: "previous queue had no quota proof", change: func(p *KueueQueueBindingEvidence) { p.Job.KueueQuotaReserved = false }},
 		{name: "previous Workload UID absent", change: func(p *KueueQueueBindingEvidence) { p.Job.KueueWorkload.UID = "" }},
 		{name: "previous ClusterQueue scope forged", change: func(p *KueueQueueBindingEvidence) { p.ClusterQueue.Namespace = "tenant-a" }},
+		{name: "untrusted LocalQueue path", change: func(p *KueueQueueBindingEvidence) { p.LocalQueue.Name = "../sibling" }},
+		{name: "untrusted namespace path", change: func(p *KueueQueueBindingEvidence) {
+			p.Job.Job.Namespace = "../other"
+			p.Job.KueueWorkload.Namespace = "../other"
+			p.LocalQueue.Namespace = "../other"
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
