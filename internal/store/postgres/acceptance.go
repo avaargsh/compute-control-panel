@@ -137,7 +137,7 @@ func (r *Repository) AcceptWorkload(ctx context.Context, p AcceptWorkloadParams)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	const insertWorkload = "INSERT INTO compute_workloads (" +
+	const insertWorkload = "INSERT INTO public.compute_workloads (" +
 		"workload_id, tenant_id, project_id, owner_service, owner_resource_type, " +
 		"owner_resource_id, compute_profile_id, compute_profile_revision, " +
 		"normalized_request, request_digest, idempotency_key, desired_generation, " +
@@ -176,7 +176,7 @@ func (r *Repository) AcceptWorkload(ctx context.Context, p AcceptWorkloadParams)
 		return WorkloadAcceptance{}, false, err
 	}
 
-	insertAllocation := "INSERT INTO compute_allocations (" +
+	insertAllocation := "INSERT INTO public.compute_allocations (" +
 		"allocation_id, tenant_id, workload_id, provider_id, pool_id, " +
 		"desired_generation, phase, version" +
 		") VALUES ($1,$2,$3,$4,$5,1,'PENDING',1) RETURNING " + allocationColumns
@@ -187,7 +187,7 @@ func (r *Repository) AcceptWorkload(ctx context.Context, p AcceptWorkloadParams)
 		return WorkloadAcceptance{}, false, fmt.Errorf("insert initial Allocation: %w", err)
 	}
 
-	result, err := tx.ExecContext(ctx, "UPDATE compute_workloads "+
+	result, err := tx.ExecContext(ctx, "UPDATE public.compute_workloads "+
 		"SET latest_allocation_id=$1, updated_at=clock_timestamp() "+
 		"WHERE tenant_id=$2 AND workload_id=$3 AND desired_generation=1 "+
 		"AND latest_allocation_id IS NULL",
@@ -206,7 +206,7 @@ func (r *Repository) AcceptWorkload(ctx context.Context, p AcceptWorkloadParams)
 	workload.LatestAllocationID = sql.NullString{String: allocation.AllocationID, Valid: true}
 
 	o := p.Operation
-	insertOperation := "INSERT INTO compute_operations (" +
+	insertOperation := "INSERT INTO public.compute_operations (" +
 		"compute_operation_id, tenant_id, workload_id, allocation_id, provider_id, " +
 		"operation_kind, desired_generation, provider_request_digest, idempotency_key, " +
 		"version, fence_token, status, target_resource_id, target_resource_uid" +
@@ -243,7 +243,7 @@ func (r *Repository) AcceptWorkload(ctx context.Context, p AcceptWorkloadParams)
 		return WorkloadAcceptance{}, false, fmt.Errorf("marshal pending Operation event: %w", err)
 	}
 
-	const insertOutbox = "INSERT INTO compute_outbox_events (" +
+	const insertOutbox = "INSERT INTO public.compute_outbox_events (" +
 		"event_id, producer, event_type, schema_version, tenant_id, " +
 		"aggregate_type, aggregate_id, aggregate_version, occurred_at, " +
 		"correlation_id, causation_id, payload, delivery_state" +
@@ -356,7 +356,7 @@ func (r *Repository) readAcceptanceReplay(ctx context.Context, tx *sql.Tx, p Acc
 	const selectWorkload = "SELECT workload_id, tenant_id, project_id, request_digest, " +
 		"idempotency_key, desired_generation, version, desired_state, observed_phase, " +
 		"latest_allocation_id, created_at, updated_at " +
-		"FROM compute_workloads WHERE tenant_id=$1 AND idempotency_key=$2"
+		"FROM public.compute_workloads WHERE tenant_id=$1 AND idempotency_key=$2"
 	workload, err := scanWorkload(tx.QueryRowContext(ctx, selectWorkload,
 		p.Workload.TenantID, p.Workload.IdempotencyKey,
 	))
@@ -373,7 +373,7 @@ func (r *Repository) readAcceptanceReplay(ctx context.Context, tx *sql.Tx, p Acc
 		"AND owner_resource_id=$6 "+
 		"AND compute_profile_id IS NOT DISTINCT FROM $7::text "+
 		"AND compute_profile_revision IS NOT DISTINCT FROM $8::text "+
-		"FROM compute_workloads WHERE tenant_id=$1 AND idempotency_key=$2",
+		"FROM public.compute_workloads WHERE tenant_id=$1 AND idempotency_key=$2",
 		p.Workload.TenantID, p.Workload.IdempotencyKey, p.Workload.ProjectID,
 		p.Workload.OwnerService, p.Workload.OwnerResourceType, p.Workload.OwnerResourceID,
 		nullableString(p.Workload.ComputeProfileID), nullableString(p.Workload.ComputeProfileRevision),
@@ -385,7 +385,7 @@ func (r *Repository) readAcceptanceReplay(ctx context.Context, tx *sql.Tx, p Acc
 	}
 
 	allocation, err := scanAllocation(tx.QueryRowContext(ctx, "SELECT "+
-		allocationColumns+" FROM compute_allocations "+
+		allocationColumns+" FROM public.compute_allocations "+
 		"WHERE tenant_id=$1 AND workload_id=$2 AND desired_generation=1",
 		workload.TenantID, workload.WorkloadID,
 	))
@@ -396,7 +396,7 @@ func (r *Repository) readAcceptanceReplay(ctx context.Context, tx *sql.Tx, p Acc
 		return WorkloadAcceptance{}, fmt.Errorf("read accepted Allocation: %w", err)
 	}
 	o, err := scanOperation(tx.QueryRowContext(ctx,
-		"SELECT "+operationColumns+" FROM compute_operations WHERE tenant_id=$1 AND idempotency_key=$2",
+		"SELECT "+operationColumns+" FROM public.compute_operations WHERE tenant_id=$1 AND idempotency_key=$2",
 		workload.TenantID, p.Operation.IdempotencyKey,
 	))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -418,7 +418,7 @@ func (r *Repository) readAcceptanceReplay(ctx context.Context, tx *sql.Tx, p Acc
 
 	var workloadEventID, operationEventID string
 	var workloadPayload, operationPayload []byte
-	err = tx.QueryRowContext(ctx, "SELECT event_id, payload FROM compute_outbox_events "+
+	err = tx.QueryRowContext(ctx, "SELECT event_id, payload FROM public.compute_outbox_events "+
 		"WHERE tenant_id=$1 AND aggregate_type='compute_workload' AND aggregate_id=$2 "+
 		"AND aggregate_version=1 AND event_type=$3",
 		workload.TenantID, workload.WorkloadID, workloadAcceptedV1,
@@ -429,7 +429,7 @@ func (r *Repository) readAcceptanceReplay(ctx context.Context, tx *sql.Tx, p Acc
 	if err != nil {
 		return WorkloadAcceptance{}, fmt.Errorf("read accepted Workload event: %w", err)
 	}
-	err = tx.QueryRowContext(ctx, "SELECT event_id, payload FROM compute_outbox_events "+
+	err = tx.QueryRowContext(ctx, "SELECT event_id, payload FROM public.compute_outbox_events "+
 		"WHERE tenant_id=$1 AND aggregate_type='compute_operation' AND aggregate_id=$2 "+
 		"AND aggregate_version=1 AND event_type=$3",
 		workload.TenantID, o.ID, operationPendingV1,
