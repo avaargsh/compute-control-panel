@@ -27,15 +27,17 @@ type KueueDeleteTombstone struct {
 
 // KueueJobBindingStore is the trusted lineage for a CREATE pin and a DELETE
 // tombstone. A later KueueJobAdapter resumes those operations only when it
-// loads the same store. A missing record is not proof the Kubernetes call
+// loads the same records. A missing record is not proof the Kubernetes call
 // never happened, and a read error is not a missing record.
 //
-// NewMemoryKueueJobBindingStore is process-local. It outlives one adapter
-// value only when that same store is passed to NewKueueJobAdapterWithBindings.
-// A durable production backend is a follow-up. compute_operations is not that
-// backend: provider_resource_uid is recorded only after SUCCEEDED, and that
-// success already required this pin. Wiring the operation row would also
-// take on Allocation and Provider-registry constraints this slice does not own.
+// MemoryKueueJobBindingStore keeps the records in process memory. It outlives
+// one adapter value only when that same store is passed to
+// NewKueueJobAdapterWithBindings. PostgresKueueJobBindingStore keeps the same
+// records in PostgreSQL, so a later process can load them from a new
+// connection. That is the Job UID pin and the DELETE tombstone only. It is
+// not Allocation RELEASED, Kueue quota release, or a signed receipt.
+// compute_operations.provider_resource_uid is not this store: it is recorded
+// only after SUCCEEDED, and that success already required this pin.
 type KueueJobBindingStore interface {
 	GetCreatePin(namespace string, req Request) (KueueCreatePin, bool, error)
 	PutCreatePin(namespace string, req Request, name, uid string) error
