@@ -166,13 +166,12 @@ func TestDRAClaimInvalidQueryRejectedBeforeHTTPS(t *testing.T) {
 	}
 }
 
-
 func TestDRAClaimDetectsConcurrentReplacementAndResourceVersionDrift(t *testing.T) {
 	tests := []struct {
-		name       string
-		second     func(map[string]any)
-		status     int
-		wantValid  bool
+		name      string
+		second    func(map[string]any)
+		status    int
+		wantValid bool
 	}{
 		{name: "unchanged exact resource", wantValid: true},
 		{name: "same-name successor UID", second: func(v map[string]any) {
