@@ -231,7 +231,13 @@ func main() {
 	if len(os.Args) > 1 {
 		// Durable phases are separate processes. A --hold phase blocks until
 		// SIGKILL, so this path does not use the memory-smoke deadline.
-		if err := runDurable(os.Args[1:], os.Getenv, os.Stdout); err != nil {
+		var err error
+		if os.Args[1] == "journal" {
+			err = runJournal(os.Args[1:], os.Getenv, os.Stdout)
+		} else {
+			err = runDurable(os.Args[1:], os.Getenv, os.Stdout)
+		}
+		if err != nil {
 			fmt.Fprintln(os.Stderr, "kueue-provider-smoke:", err)
 			os.Exit(1)
 		}
