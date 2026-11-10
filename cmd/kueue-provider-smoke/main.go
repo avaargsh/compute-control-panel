@@ -43,10 +43,10 @@ func lifecycleCreateRequest() provider.Request {
 type lifecycleEvidence struct {
 	CreatedUID string `json:"created_uid"`
 	CreatedResult operation.ObservationResult `json:"created_result"`
-	AfterRestart operation.ObservationResult `json:"after_restart"`
+	AfterAdapterReinit operation.ObservationResult `json:"after_adapter_reinit"`
 	RejectedWrongUID bool `json:"rejected_wrong_uid"`
 	DeletedResult operation.ObservationResult `json:"deleted_result"`
-	AfterDeleteRestart operation.ObservationResult `json:"after_delete_restart"`
+	AfterDeleteReinit operation.ObservationResult `json:"after_delete_reinit"`
 	ReleaseAttested bool `json:"release_attested"`
 }
 
@@ -154,8 +154,8 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 	}
 	return json.NewEncoder(out).Encode(lifecycleEvidence{
 		CreatedUID: present.ResourceUID, CreatedResult: present.Result,
-		AfterRestart: unbound.Result, RejectedWrongUID: true,
-		DeletedResult: gone.Result, AfterDeleteRestart: unintended.Result,
+		AfterAdapterReinit: unbound.Result, RejectedWrongUID: true,
+		DeletedResult: gone.Result, AfterDeleteReinit: unintended.Result,
 		ReleaseAttested: false,
 	})
 }
