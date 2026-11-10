@@ -227,12 +227,55 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 	})
 }
 
+// runQueued exercises the *real* adapter writer under an in-cluster scoped
+// ServiceAccount. Only the disposable kind harness may call it. The output is
+// a UID-pinned Job receipt, never a claim of GPU allocation or release.
+func runQueued(ctx context.Context, getenv func(string) string, out io.Writer) error {
+	if err := requireDisposableSmoke(getenv); err != nil {
+		return err
+	}
+	apiURL, err := apiEndpoint(getenv)
+	if err != nil {
+		return err
+	}
+	adapter, err := provider.NewQueuedServiceAccountKueueJobAdapterWithBindings(
+		apiURL, serviceAccountFiles+"/ca.crt", serviceAccountFiles+"/token",
+		smokeNamespace, "ccp-smoke", provider.NewMemoryKueueJobBindingStore(),
+	)
+	if err != nil {
+		return err
+	}
+	create := lifecycleCreateRequest()
+	create.OperationID = "ccp-kind-queued-create"
+	create.IdempotencyKey = "ccp-kind-queued-key"
+	create.RequestDigest = "sha256:" + strings.Repeat("cd", 32)
+	if _, err := adapter.Apply(ctx, create); err != nil {
+		return fmt.Errorf("queued Job CREATE: %w", err)
+	}
+	present, err := stableJobObservation(ctx, func(ctx context.Context) (operation.Observation, error) {
+		return adapter.Inspect(ctx, create)
+	})
+	if err != nil || present.Result != operation.ResourcePresent || present.ResourceUID == "" || present.ResourceID == "" {
+		return fmt.Errorf("queued Job Inspect not UID pinned: %+v: %w", present, err)
+	}
+	return json.NewEncoder(out).Encode(struct {
+		ResourceID  string `json:"resource_id"`
+		ResourceUID string `json:"resource_uid"`
+		AttestedGPU bool   `json:"attested_gpu"`
+		Released    bool   `json:"released"`
+	}{present.ResourceID, present.ResourceUID, false, false})
+}
+
 func main() {
 	if len(os.Args) > 1 {
 		// Durable phases are separate processes. A --hold phase blocks until
 		// SIGKILL, so this path does not use the memory-smoke deadline.
 		var err error
-		if os.Args[1] == "journal" {
+		if os.Args[1] == "queued" {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			err = runQueued(ctx, os.Getenv, os.Stdout)
+		} else if os.Args[1] == "journal" {
 			err = runJournal(os.Args[1:], os.Getenv, os.Stdout)
 		} else {
 			err = runDurable(os.Args[1:], os.Getenv, os.Stdout)
