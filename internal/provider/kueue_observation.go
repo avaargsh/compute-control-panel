@@ -5,6 +5,7 @@ package provider
 import (
 	"errors"
 	"strings"
+	"time"
 )
 
 // ErrInvalidKueueObservation means the supplied snapshot contradicts the
@@ -19,6 +20,17 @@ type KubernetesResourceRef struct {
 	Name            string
 	UID             string
 	ResourceVersion string
+}
+
+// KueueConditionEvidence retains a native Kueue condition, including the
+// distinction between an absent condition (MISSING), False and Unknown.
+// It is an observation, not an authorization or scheduling decision.
+type KueueConditionEvidence struct {
+	Status             string
+	Reason             string
+	Message            string
+	LastTransitionTime string
+	ObservedGeneration int64
 }
 
 // KueueJobEvidence contains read-only facts collected for the built-in Kueue
@@ -40,9 +52,15 @@ type KueueJobEvidence struct {
 
 	KueueWorkload      KubernetesResourceRef
 	KueueOwnerJobUID   string
-	KueueQuotaReserved bool
-	KueueClusterQueue  string
-	KueueAdmitted      bool
+	KueueQuotaReserved        bool
+	KueueClusterQueue         string
+	KueueAdmitted             bool
+	KueueQuotaCondition       KueueConditionEvidence
+	KueueAdmissionCondition   KueueConditionEvidence
+	// Canonical JSON of the native status.admission.podSetAssignments list.
+	// Keep immutable text here so KueueJobEvidence remains a value snapshot;
+	// these quantities are quota reservations, not device or billing usage.
+	KueuePodSetAssignmentsJSON string
 
 	Pod            KubernetesResourceRef
 	PodOwnerJobUID string
@@ -73,6 +91,21 @@ func validKubernetesRef(ref KubernetesResourceRef) bool {
 	return true
 }
 
+func validKueueCondition(c KueueConditionEvidence) bool {
+	switch c.Status {
+	case "MISSING":
+		return c.Reason == "" && c.Message == "" && c.LastTransitionTime == "" && c.ObservedGeneration == 0
+	case "True", "False", "Unknown":
+		if c.ObservedGeneration < 0 { return false }
+		if c.LastTransitionTime != "" {
+			if _, err := time.Parse(time.RFC3339Nano, c.LastTransitionTime); err != nil { return false }
+		}
+		return true
+	default:
+		return false
+	}
+}
+
 // AssessKueueJobObservation conservatively classifies a single Job/Pod
 // snapshot. It cannot mark a Compute Allocation READY, establish multi-Pod
 // readiness, validate real device allocation, or finalize a deletion. On an
@@ -90,7 +123,10 @@ func AssessKueueJobObservation(e KueueJobEvidence) (KueueObservationStage, error
 	if !presentKubernetesRef(e.Job) {
 		if e.JobTenantID != "" || e.JobWorkloadID != "" || e.JobDesiredGeneration != 0 ||
 			presentKubernetesRef(e.KueueWorkload) || e.KueueOwnerJobUID != "" ||
-			e.KueueAdmitted || e.KueueQuotaReserved || e.KueueClusterQueue != "" || presentKubernetesRef(e.Pod) ||
+			e.KueueAdmitted || e.KueueQuotaReserved || e.KueueClusterQueue != "" ||
+			e.KueueQuotaCondition != (KueueConditionEvidence{}) ||
+			e.KueueAdmissionCondition != (KueueConditionEvidence{}) ||
+			e.KueuePodSetAssignmentsJSON != "" || presentKubernetesRef(e.Pod) ||
 			e.PodOwnerJobUID != "" || e.PodScheduled || e.PodNodeName != "" {
 			return reject()
 		}
@@ -103,6 +139,8 @@ func AssessKueueJobObservation(e KueueJobEvidence) (KueueObservationStage, error
 
 	if !presentKubernetesRef(e.KueueWorkload) {
 		if e.KueueOwnerJobUID != "" || e.KueueAdmitted || e.KueueQuotaReserved || e.KueueClusterQueue != "" ||
+			e.KueueQuotaCondition != (KueueConditionEvidence{}) ||
+			e.KueueAdmissionCondition != (KueueConditionEvidence{}) || e.KueuePodSetAssignmentsJSON != "" ||
 			presentKubernetesRef(e.Pod) || e.PodOwnerJobUID != "" ||
 			e.PodScheduled || e.PodNodeName != "" {
 			return reject()
@@ -114,12 +152,18 @@ func AssessKueueJobObservation(e KueueJobEvidence) (KueueObservationStage, error
 		e.KueueOwnerJobUID != e.Job.UID {
 		return reject()
 	}
+	if !validKueueCondition(e.KueueQuotaCondition) ||
+		!validKueueCondition(e.KueueAdmissionCondition) ||
+		e.KueueQuotaReserved != (e.KueueQuotaCondition.Status == "True") ||
+		e.KueueAdmitted != (e.KueueAdmissionCondition.Status == "True") {
+		return reject()
+	}
 	if e.KueueQuotaReserved {
 		if e.KueueClusterQueue == "" || e.KueueClusterQueue != strings.TrimSpace(e.KueueClusterQueue) ||
-			strings.ContainsRune(e.KueueClusterQueue, 0) {
+			strings.ContainsRune(e.KueueClusterQueue, 0) || e.KueuePodSetAssignmentsJSON == "" {
 			return reject()
 		}
-	} else if e.KueueClusterQueue != "" || e.KueueAdmitted {
+	} else if e.KueueClusterQueue != "" || e.KueueAdmitted || e.KueuePodSetAssignmentsJSON != "" {
 		return reject()
 	}
 	if !e.KueueAdmitted {
