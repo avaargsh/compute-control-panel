@@ -1,6 +1,9 @@
 // kueue-provider-smoke is a disposable-kind-only executable that invokes
 // the actual KueueJobAdapter against kube-apiserver with a scoped ServiceAccount.
-// It must never be used to infer production GPU readiness or release.
+// With no arguments it uses a private in-memory binding store. The durable
+// phases use PostgresKueueJobBindingStore when CCP_KUEUE_BINDING_DSN is set,
+// as separate processes. This must never be used to infer production GPU
+// readiness, quota release, or Allocation RELEASED.
 package main
 
 import (
@@ -87,8 +90,8 @@ func stableJobObservation(
 }
 
 func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
-	if !disposableAllowed(getenv) || getenv("POD_NAMESPACE") != smokeNamespace {
-		return errors.New("requires disposable kind opt-in and isolated smoke namespace")
+	if err := requireDisposableSmoke(getenv); err != nil {
+		return err
 	}
 	apiURL, err := apiEndpoint(getenv)
 	if err != nil {
@@ -225,6 +228,15 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 }
 
 func main() {
+	if len(os.Args) > 1 {
+		// Durable phases are separate processes. A --hold phase blocks until
+		// SIGKILL, so this path does not use the memory-smoke deadline.
+		if err := runDurable(os.Args[1:], os.Getenv, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "kueue-provider-smoke:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	bounded, cancel := context.WithTimeout(ctx, 90*time.Second)
