@@ -128,6 +128,12 @@ spec:
 YAML
 
 kubectl -n "$ns" rollout status daemonset/dra-example-driver-kubeletplugin --timeout=240s
+# Record the *actual* runtime image digest, not only the mutable v0.2.0 tag.
+driver_image_id="$(kubectl -n "$ns" get pods -l app.kubernetes.io/name=dra-example-driver -o json |
+  jq -er '[.items[].status.containerStatuses[]? | select(.name == "plugin") | .imageID] |
+    if length == 1 then .[0] else empty end')"
+[[ "$driver_image_id" == *"sha256:"* ]] || { echo "driver runtime digest not attested" >&2; exit 1; }
+echo "simulated_dra_driver_image_id=$driver_image_id"
 slice_json=""
 for _ in $(seq 1 90); do
   slice_json="$(kubectl get resourceslices -o json | jq -ce '
@@ -199,7 +205,7 @@ container_log="$(kubectl -n "$ns" logs "$pod" -c consumer)"
 printf '%s\n' "$container_log" | grep -Eq '^GPU_DEVICE_[0-9]+=' || {
   echo "DRA allocation exists but simulated kubelet/CDI device injection is unproven" >&2; exit 1
 }
-echo "simulated_dra_assigned=$(jq -cn --arg pod "$pod_uid" --arg claim "$claim_uid" --arg slice "$slice_uid" --arg device "$device_id" '{podUID:$pod,claimUID:$claim,resourceSliceUID:$slice,deviceID:$device,driver:"gpu.example.com",physicalGPU:false,kueueQuotaLinked:false,allocationReady:false}')"
+echo "simulated_dra_assigned=$(jq -cn --arg pod "$pod_uid" --arg claim "$claim_uid" --arg slice "$slice_uid" --arg device "$device_id" --arg image "$driver_image_id" '{podUID:$pod,claimUID:$claim,resourceSliceUID:$slice,deviceID:$device,driver:"gpu.example.com",driverImageID:$image,physicalGPU:false,kueueQuotaLinked:false,allocationReady:false}')"
 
 # Deleting the Pod/Claim is fixture teardown; API absence does NOT prove the
 # driver independently reported physical deallocation or authorize RELEASED.
