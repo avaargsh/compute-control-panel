@@ -17,13 +17,13 @@ const clearedClusterQueue = `{"metadata":{"name":"cq-a","uid":"cluster-uid-a","r
 func previousReservedQueue() KueueQueueBindingEvidence {
 	return KueueQueueBindingEvidence{
 		Job: KueueJobEvidence{
-			Job: KubernetesResourceRef{Namespace: "tenant-a", Name: "job-a", UID: "job-uid-a", ResourceVersion: "11"},
-			KueueWorkload: KubernetesResourceRef{Namespace: "tenant-a", Name: "kueue-a", UID: "kueue-uid-a", ResourceVersion: "22"},
+			Job:              KubernetesResourceRef{Namespace: "tenant-a", Name: "job-a", UID: "job-uid-a", ResourceVersion: "11"},
+			KueueWorkload:    KubernetesResourceRef{Namespace: "tenant-a", Name: "kueue-a", UID: "kueue-uid-a", ResourceVersion: "22"},
 			KueueOwnerJobUID: "job-uid-a", KueueClusterQueue: "cq-a", KueueQuotaReserved: true,
 			KueueQuotaCondition: KueueConditionEvidence{Status: "True"},
 		},
-		Stage: KueueAdmitted,
-		LocalQueue: KubernetesResourceRef{Namespace: "tenant-a", Name: "lq-a", UID: "local-uid-a", ResourceVersion: "51"},
+		Stage:        KueueAdmitted,
+		LocalQueue:   KubernetesResourceRef{Namespace: "tenant-a", Name: "lq-a", UID: "local-uid-a", ResourceVersion: "51"},
 		ClusterQueue: KubernetesResourceRef{Name: "cq-a", UID: "cluster-uid-a", ResourceVersion: "61"},
 	}
 }
@@ -76,12 +76,24 @@ func TestKueueQuotaClearedFailsClosedOnPartialOrReusedObjects(t *testing.T) {
 			firstWL, secondWL := clearedWorkloadList, clearedWorkloadList
 			firstLQ, secondLQ := queueLocalJSON, queueLocalJSON
 			firstCQ, secondCQ := clearedClusterQueue, clearedClusterQueue
-			if tc.firstWL != "" { firstWL = tc.firstWL }
-			if tc.secondWL != "" { secondWL = tc.secondWL }
-			if tc.firstLQ != "" { firstLQ = tc.firstLQ }
-			if tc.secondLQ != "" { secondLQ = tc.secondLQ }
-			if tc.firstCQ != "" { firstCQ = tc.firstCQ }
-			if tc.secondCQ != "" { secondCQ = tc.secondCQ }
+			if tc.firstWL != "" {
+				firstWL = tc.firstWL
+			}
+			if tc.secondWL != "" {
+				secondWL = tc.secondWL
+			}
+			if tc.firstLQ != "" {
+				firstLQ = tc.firstLQ
+			}
+			if tc.secondLQ != "" {
+				secondLQ = tc.secondLQ
+			}
+			if tc.firstCQ != "" {
+				firstCQ = tc.firstCQ
+			}
+			if tc.secondCQ != "" {
+				secondCQ = tc.secondCQ
+			}
 			var wlReads, lqReads, cqReads, writes atomic.Int32
 			api := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != http.MethodGet {
@@ -92,12 +104,27 @@ func TestKueueQuotaClearedFailsClosedOnPartialOrReusedObjects(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				switch r.URL.RequestURI() {
 				case "/apis/kueue.x-k8s.io/v1beta1/namespaces/tenant-a/workloads":
-					if wlReads.Add(1) == 1 { fmt.Fprint(w, firstWL) } else { fmt.Fprint(w, secondWL) }
+					if wlReads.Add(1) == 1 {
+						fmt.Fprint(w, firstWL)
+					} else {
+						fmt.Fprint(w, secondWL)
+					}
 				case "/apis/kueue.x-k8s.io/v1beta1/namespaces/tenant-a/localqueues/lq-a":
-					if lqReads.Add(1) == 1 { fmt.Fprint(w, firstLQ) } else { fmt.Fprint(w, secondLQ) }
+					if lqReads.Add(1) == 1 {
+						fmt.Fprint(w, firstLQ)
+					} else {
+						fmt.Fprint(w, secondLQ)
+					}
 				case "/apis/kueue.x-k8s.io/v1beta1/clusterqueues/cq-a":
-					if tc.status != 0 { http.Error(w, "denied", tc.status); return }
-					if cqReads.Add(1) == 1 { fmt.Fprint(w, firstCQ) } else { fmt.Fprint(w, secondCQ) }
+					if tc.status != 0 {
+						http.Error(w, "denied", tc.status)
+						return
+					}
+					if cqReads.Add(1) == 1 {
+						fmt.Fprint(w, firstCQ)
+					} else {
+						fmt.Fprint(w, secondCQ)
+					}
 				default:
 					t.Errorf("unexpected Kubernetes API %s %s", r.Method, r.URL)
 					http.NotFound(w, r)
@@ -107,9 +134,13 @@ func TestKueueQuotaClearedFailsClosedOnPartialOrReusedObjects(t *testing.T) {
 			client := api.Client()
 			client.Timeout = 3 * time.Second
 			reader, err := NewKubernetesObservationReader(api.URL, client)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			prior := previousReservedQueue()
-			if tc.change != nil { tc.change(&prior) }
+			if tc.change != nil {
+				tc.change(&prior)
+			}
 			got, err := reader.ObserveKueueQuotaCleared(context.Background(), prior)
 			if tc.valid {
 				if err != nil || got.PreviousWorkload != prior.Job.KueueWorkload ||
@@ -122,7 +153,9 @@ func TestKueueQuotaClearedFailsClosedOnPartialOrReusedObjects(t *testing.T) {
 			} else if err == nil || got != (KueueQuotaClearedObservation{}) {
 				t.Fatalf("untrusted quota clear promoted: %+v err=%v", got, err)
 			}
-			if writes.Load() != 0 { t.Fatal("observer mutated Kubernetes") }
+			if writes.Load() != 0 {
+				t.Fatal("observer mutated Kubernetes")
+			}
 			if tc.change != nil && wlReads.Load()+lqReads.Load()+cqReads.Load() != 0 {
 				t.Fatal("invalid previous evidence caused API reads")
 			}
