@@ -79,6 +79,9 @@ func (a *Agent) Run(ctx context.Context) error {
 			updated, err := a.client.Heartbeat(requestCtx, a.heartbeat)
 			cancel()
 			if err != nil {
+				if errors.Is(err, ErrUnauthorized) || errors.Is(err, ErrInvalid) {
+					return err
+				}
 				if waitContext(ctx, a.config.PollInterval) != nil {
 					return nil
 				}
