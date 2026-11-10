@@ -63,6 +63,29 @@ func apiEndpoint(getenv func(string) string) (string, error) {
 	return "https://" + net.JoinHostPort(host, port), nil
 }
 
+// stableJobObservation retries only a temporarily inconsistent Job/Kueue/Pod
+// read during initial controller convergence. Every iteration performs fresh
+// UID-pinned API reads. Identity conflicts, unauthorized API responses and
+// changed Job specs are terminal; this never promotes an unproven snapshot.
+func stableJobObservation(
+	ctx context.Context, observe func(context.Context) (operation.Observation, error),
+) (operation.Observation, error) {
+	bounded, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	for {
+		snapshot, err := observe(bounded)
+		if err != nil || snapshot.Result != operation.ObservationConflict ||
+			snapshot.ReasonCode != "KUEUE_OBSERVATION_UNPROVEN" {
+			return snapshot, err
+		}
+		select {
+		case <-bounded.Done():
+			return snapshot, fmt.Errorf("UID-pinned Kubernetes snapshot did not stabilize: %w", bounded.Err())
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
 func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 	if !disposableAllowed(getenv) || getenv("POD_NAMESPACE") != smokeNamespace {
 		return errors.New("requires disposable kind opt-in and isolated smoke namespace")
@@ -82,7 +105,9 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 	if _, err := adapter.Apply(ctx, create); err != nil {
 		return fmt.Errorf("real create: %w", err)
 	}
-	present, err := adapter.Inspect(ctx, create)
+	present, err := stableJobObservation(ctx, func(ctx context.Context) (operation.Observation, error) {
+		return adapter.Inspect(ctx, create)
+	})
 	if err != nil || present.Result != operation.ResourcePresent || present.ResourceUID == "" {
 		return fmt.Errorf("created Job not pinned: %+v: %w", present, err)
 	}
@@ -114,7 +139,9 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 	if _, err := bound.Apply(ctx, create); err != nil {
 		return fmt.Errorf("trusted pin replay failed: %w", err)
 	}
-	boundPresent, err := bound.Inspect(ctx, create)
+	boundPresent, err := stableJobObservation(ctx, func(ctx context.Context) (operation.Observation, error) {
+		return bound.Inspect(ctx, create)
+	})
 	if err != nil || boundPresent.Result != operation.ResourcePresent ||
 		boundPresent.ResourceUID != present.ResourceUID {
 		return fmt.Errorf("bound adapter adopted wrong UID: %+v: %w", boundPresent, err)
@@ -132,7 +159,9 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 	if _, err := adapter.Apply(ctx, wrong); !errors.Is(err, provider.ErrOperationConflict) {
 		return fmt.Errorf("wrong UID delete was not rejected: %v", err)
 	}
-	unchanged, err := adapter.Inspect(ctx, create)
+	unchanged, err := stableJobObservation(ctx, func(ctx context.Context) (operation.Observation, error) {
+		return adapter.Inspect(ctx, create)
+	})
 	if err != nil || unchanged.Result != operation.ResourcePresent ||
 		unchanged.ResourceUID != present.ResourceUID {
 		return fmt.Errorf("wrong UID altered Job: %+v: %w", unchanged, err)
