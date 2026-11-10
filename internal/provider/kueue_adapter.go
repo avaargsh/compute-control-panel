@@ -56,6 +56,9 @@ type KueueJobAdapter struct {
 	client    http.Client
 	reader    *KubernetesObservationReader
 	bindings  KueueJobBindingStore
+	// Empty means the original inert suspended Job mode. A non-empty LocalQueue
+	// explicitly opts into Kueue-controlled suspend/unsuspend and Pod creation.
+	queueName string
 }
 
 // NewKueueJobAdapter binds CREATE and Inspect to one namespace and an HTTPS
@@ -84,6 +87,43 @@ func NewKueueJobAdapterWithBindings(apiURL, namespace string, client *http.Clien
 		reader:    reader,
 		bindings:  bindings,
 	}, nil
+}
+
+// NewQueuedKueueJobAdapterWithBindings opts into submitting a Job to the
+// specified LocalQueue. Kueue, not CCP, owns its suspend/unsuspend transitions.
+// A persistent binding store and authenticated client remain caller requirements.
+func NewQueuedKueueJobAdapterWithBindings(
+	apiURL, namespace, localQueue string, client *http.Client, bindings KueueJobBindingStore,
+) (*KueueJobAdapter, error) {
+	if !validKubeName(localQueue) {
+		return nil, ErrInvalidKueueObservation
+	}
+	adapter, err := NewKueueJobAdapterWithBindings(apiURL, namespace, client, bindings)
+	if err != nil {
+		return nil, err
+	}
+	adapter.queueName = localQueue
+	return adapter, nil
+}
+
+// NewQueuedServiceAccountKueueJobAdapterWithBindings is the authenticated
+// scoped writer for the opt-in queued mode; no patch/update rights are needed.
+func NewQueuedServiceAccountKueueJobAdapterWithBindings(
+	apiURL, caPath, tokenPath, namespace, localQueue string, bindings KueueJobBindingStore,
+) (*KueueJobAdapter, error) {
+	if !validKubeName(localQueue) || !validKubeName(namespace) || bindings == nil {
+		return nil, ErrInvalidKueueObservation
+	}
+	client, closeIdle, err := newServiceAccountHTTPClient(caPath, tokenPath)
+	if err != nil {
+		return nil, err
+	}
+	adapter, err := NewQueuedKueueJobAdapterWithBindings(apiURL, namespace, localQueue, client, bindings)
+	if err != nil {
+		closeIdle()
+		return nil, err
+	}
+	return adapter, nil
 }
 
 // NewServiceAccountKueueJobAdapter uses the same pinned ServiceAccount HTTPS
@@ -281,6 +321,27 @@ func exactSuspendedJobSpec(job kubeObject) bool {
 	return container.Name == "ccp-suspended" && container.Image == kueueSuspendedJobImage
 }
 
+// exactJobSpec preserves the immutable submitted shape while allowing the
+// Kueue controller to change only suspend. Admission is never assumed here.
+func (a *KueueJobAdapter) exactJobSpec(job kubeObject) bool {
+	if a.queueName == "" {
+		return exactSuspendedJobSpec(job)
+	}
+	if job.Metadata.Labels["kueue.x-k8s.io/queue-name"] != a.queueName ||
+		job.Spec.Parallelism == nil || *job.Spec.Parallelism != 1 ||
+		job.Spec.Completions == nil || *job.Spec.Completions != 1 ||
+		job.Spec.Template.Spec.RestartPolicy != "Never" ||
+		len(job.Spec.Template.Spec.Containers) != 1 {
+		return false
+	}
+	container := job.Spec.Template.Spec.Containers[0]
+	return container.Name == "ccp-queued" && container.Image == kueueSuspendedJobImage &&
+		len(container.Command) == 0 && len(container.Args) == 0 &&
+		container.Resources != nil && len(container.Resources.Requests) == 2 &&
+		len(container.Resources.Limits) == 0 &&
+		container.Resources.Requests["cpu"] == "100m" && container.Resources.Requests["memory"] == "32Mi"
+}
+
 func (a *KueueJobAdapter) getJob(ctx context.Context, name string) (kubeMeta, int, error) {
 	status, body, err := a.exchange(ctx, http.MethodGet, a.jobPath(name), nil)
 	if err != nil {
@@ -293,7 +354,7 @@ func (a *KueueJobAdapter) getJob(ctx context.Context, name string) (kubeMeta, in
 	if json.Unmarshal(body, &obj) != nil {
 		return kubeMeta{}, 0, ErrInvalidKueueObservation
 	}
-	if !exactSuspendedJobSpec(obj) {
+	if !a.exactJobSpec(obj) {
 		return kubeMeta{}, 0, fmt.Errorf("%w: JOB_SPEC_MISMATCH", ErrOperationConflict)
 	}
 	return obj.Metadata, status, nil
@@ -310,6 +371,7 @@ type kueueBatchJobMeta struct {
 	Name        string            `json:"name"`
 	Namespace   string            `json:"namespace"`
 	Annotations map[string]string `json:"annotations"`
+	Labels      map[string]string `json:"labels,omitempty"`
 }
 
 type kueueBatchJobSpec struct {
@@ -329,8 +391,16 @@ type kueueBatchPodSpec struct {
 }
 
 type kueueBatchContainer struct {
-	Name  string `json:"name"`
-	Image string `json:"image"`
+	Name      string               `json:"name"`
+	Image     string               `json:"image"`
+	Command   []string             `json:"command,omitempty"`
+	Args      []string             `json:"args,omitempty"`
+	Resources *kueueBatchResources `json:"resources,omitempty"`
+}
+
+type kueueBatchResources struct {
+	Requests map[string]string `json:"requests,omitempty"`
+	Limits   map[string]string `json:"limits,omitempty"`
 }
 
 func (a *KueueJobAdapter) jobBody(req Request, name string) ([]byte, error) {
@@ -355,6 +425,14 @@ func (a *KueueJobAdapter) jobBody(req Request, name string) ([]byte, error) {
 			}},
 		},
 	}
+	if a.queueName != "" {
+		payload.Metadata.Labels = map[string]string{"kueue.x-k8s.io/queue-name": a.queueName}
+		payload.Spec.Suspend = false // Kueue's mutating webhook may immediately suspend it.
+		payload.Spec.Template.Spec.Containers[0] = kueueBatchContainer{
+			Name: "ccp-queued", Image: kueueSuspendedJobImage,
+			Resources: &kueueBatchResources{Requests: map[string]string{"cpu": "100m", "memory": "32Mi"}},
+		}
+	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, ErrInvalidRequest
@@ -377,7 +455,7 @@ func (a *KueueJobAdapter) postJob(ctx context.Context, req Request, name string)
 		if json.Unmarshal(raw, &obj) != nil || !acceptableJobUID(obj.Metadata.UID) ||
 			obj.Metadata.Name != name || obj.Metadata.Namespace != a.namespace ||
 			!validKubernetesRef(refFromKube(obj.Metadata)) ||
-			!exactSuspendedJobSpec(obj) {
+			!a.exactJobSpec(obj) {
 			return kubeMeta{}, ErrAcknowledgementLost
 		}
 		reason, bad, err := a.jobConflictReason(req, name, obj.Metadata)
