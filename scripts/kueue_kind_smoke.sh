@@ -547,8 +547,10 @@ queued_workload_uid="$(workloads_json | jq -er --arg id "$queued_uid" \
 echo "ccp_queued_admission_placement=$(jq -cn --arg job "$queued_uid" --arg pod "$queued_pod_uid" --arg workload "$queued_workload_uid" \
   '{jobUID:$job,podUID:$pod,workloadUID:$workload,deviceAssignment:"UNPROVEN",release:"UNPROVEN"}')"
 kubectl -n "$ns" delete job "$queued_job" --cascade=background --wait=true
-wait_for 'queued Job original UID absent' bash -c \
-  'kubectl -n "$1" get jobs -o json | jq -e --arg uid "$2" "all(.items[]; .metadata.uid != \\$uid)" >/dev/null' _ "$ns" "$queued_uid"
+queued_job_absent() {
+  kubectl -n "$ns" get jobs -o json | jq -e --arg uid "$queued_uid" 'all(.items[]; .metadata.uid != $uid)' >/dev/null
+}
+wait_for 'queued Job original UID absent' queued_job_absent
 
 # Separate OS processes, one disposable Postgres. SIGKILL after the pin or
 # tombstone is durable. This is not Allocation RELEASED or quota release.
