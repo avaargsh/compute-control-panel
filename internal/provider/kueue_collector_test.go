@@ -59,6 +59,9 @@ func TestFakeCollectorReturnsEvidenceAndProvenance(t *testing.T) {
 				e.KueueQuotaReserved = false
 				e.KueueClusterQueue = ""
 				e.KueueAdmitted = false
+				e.KueueQuotaCondition = KueueConditionEvidence{}
+				e.KueueAdmissionCondition = KueueConditionEvidence{}
+				e.KueuePodSetAssignmentsJSON = ""
 				e.Pod = KubernetesResourceRef{}
 				e.PodOwnerJobUID = ""
 				e.PodScheduled = false
