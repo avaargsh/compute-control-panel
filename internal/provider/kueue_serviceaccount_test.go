@@ -2,9 +2,13 @@ package provider
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/x509"
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +16,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func serviceAccountTestServer(t *testing.T) (*httptest.Server, *atomic.Value, *atomic.Int32) {
@@ -153,15 +158,39 @@ func TestServiceAccountReaderRejectsTokenLossAndIncorrectRootWithoutLeakingToken
 		t.Fatalf("unauthorized token trusted or leaked: %+v err=%v", got, err)
 	}
 
-	other := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		t.Error("request should be rejected by CA pin")
-	}))
-	defer other.Close()
-	otherReader, err := NewServiceAccountKubernetesObservationReader(other.URL, ca, tokenFile)
+	// httptest.NewTLSServer reuses a built-in certificate. Generate an
+	// independent, valid CA to test real TLS trust rejection rather than an
+	// unrelated HTTP 403 from the test server.
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := otherReader.Collect(context.Background(), observedJobQuery()); err == nil {
-		t.Fatal("TLS peer signed by unknown CA was accepted")
+	now := time.Now()
+	certificate := &x509.Certificate{
+		SerialNumber: big.NewInt(42),
+		NotBefore: now.Add(-time.Minute),
+		NotAfter: now.Add(time.Hour),
+		IsCA: true,
+		BasicConstraintsValid: true,
+		KeyUsage: x509.KeyUsageCertSign,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, certificate, certificate, publicKey, privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongCA := filepath.Join(t.TempDir(), "unrelated-ca.crt")
+	if err := os.WriteFile(wrongCA, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tokenFile, []byte("test-token-a"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	wrongRootReader, err := NewServiceAccountKubernetesObservationReader(srv.URL, wrongCA, tokenFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err = wrongRootReader.Collect(context.Background(), observedJobQuery())
+	if err == nil || got.Stage != KueueUnproven || got.Evidence != (KueueJobEvidence{}) {
+		t.Fatalf("TLS endpoint not rejected by independent CA pin: stage=%s err=%v", got.Stage, err)
 	}
 }
