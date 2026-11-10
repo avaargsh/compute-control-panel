@@ -19,6 +19,7 @@ cleanup() {
   status=$?
   if [[ "$status" -ne 0 ]] && [[ "$created" == true ]]; then
     kubectl --request-timeout=10s -n "$ns" get jobs,workloads,pods -o wide || true
+    kubectl --request-timeout=10s -n "$ns" logs ccp-provider-lifecycle --tail=50 || true
     kubectl --request-timeout=10s -n kueue-system logs deploy/kueue-controller-manager --tail=80 || true
   fi
   if [[ "$created" == true ]]; then kind delete cluster --name "$name" || true; fi
@@ -342,10 +343,19 @@ spec:
       runAsNonRoot: true
       readOnlyRootFilesystem: true
 YAML
-provider_lifecycle_succeeded() {
-  [[ "$(kubectl -n "$ns" get pod ccp-provider-lifecycle -o jsonpath='{.status.phase}')" == Succeeded ]]
-}
-wait_for 'actual provider adapter lifecycle smoke' provider_lifecycle_succeeded
+# A failed lifecycle Pod is a hard failure, not a three-minute timeout.
+lifecycle_phase=''
+for _ in $(seq 1 60); do
+  lifecycle_phase="$(kubectl -n "$ns" get pod ccp-provider-lifecycle -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+  [[ "$lifecycle_phase" == Succeeded ]] && break
+  if [[ "$lifecycle_phase" == Failed ]]; then
+    kubectl -n "$ns" logs ccp-provider-lifecycle >&2 || true
+    echo "provider lifecycle Pod failed" >&2
+    exit 1
+  fi
+  sleep 2
+done
+[[ "$lifecycle_phase" == Succeeded ]] || { echo "timed out: provider lifecycle Pod" >&2; exit 1; }
 kubectl -n "$ns" logs ccp-provider-lifecycle > "$dir/lifecycle.json"
 jq -e '.created_uid != "" and
   .created_result == "RESOURCE_PRESENT" and
