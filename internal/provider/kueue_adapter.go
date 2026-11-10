@@ -13,7 +13,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/avaargsh/compute-control-panel/internal/operation"
@@ -38,51 +37,40 @@ var errKueueJobAlreadyExists = errors.New("kubernetes job already exists")
 
 // KueueJobAdapter is a first-cut batch/v1 Job writer. Apply accepts CREATE
 // and DELETE. CREATE posts one suspended Job and pins the returned UID in
-// memory. DELETE GETs that name and deletes only the pinned target UID.
-// CREATE Inspect reads that UID back through KubernetesObservationReader.Collect.
+// the binding store. DELETE GETs that name and deletes only the requested
+// target UID. CREATE Inspect reads that UID back through
+// KubernetesObservationReader.Collect.
 //
 // Structural stages UNPROVEN, KUEUE_ADMITTED and POD_PLACED all mean only that
 // the pinned Job object was observed. POD_PLACED is not Allocation READY.
-// DELETE absence is process-local intent plus a UID-fenced 404. It is not
-// Allocation cleanup, quota release, or a durable tombstone: after a process
-// restart a bare 404 is still ambiguous. The in-memory delete map is not a
-// trusted UID binding. A process-local CREATE pin is lost on restart and
-// MUST NOT be reconstructed from Job name or annotations alone. Without a
-// durable trusted UID binding, CREATE Inspect remains inconclusive.
+// DELETE TARGET_ABSENT is a stored tombstone for that UID plus a UID-fenced
+// 404. It is not Allocation cleanup, Kueue quota release, or device or claim
+// deallocation. A 404 with no stored CREATE pin and no stored DELETE tombstone
+// stays ambiguous. NewKueueJobAdapter keeps a private in-memory store, so a
+// later adapter that cannot load the same store still fails closed and MUST
+// NOT reconstruct a pin from the Job name or annotations.
 // This type does not admit, schedule, claim devices, or mount an HTTP handler.
 type KueueJobAdapter struct {
 	namespace string
 	apiURL    string
 	client    http.Client
 	reader    *KubernetesObservationReader
-
-	mu      sync.Mutex
-	pins    map[string]kueuePinnedJob
-	deletes map[string]kueueDeleteIntent
-}
-
-type kueuePinnedJob struct {
-	name    string
-	uid     string
-	request Request
-}
-
-// kueueDeleteIntent records that this process issued a UID-fenced DELETE.
-// Acknowledged means the API accepted that exact UID or then reported it gone.
-// An unacknowledged intent is a lost response: later calls must re-GET and
-// must not delete a different UID. This map is not durable across restarts.
-type kueueDeleteIntent struct {
-	name         string
-	uid          string
-	request      Request
-	acknowledged bool
+	bindings  KueueJobBindingStore
 }
 
 // NewKueueJobAdapter binds CREATE and Inspect to one namespace and an HTTPS
 // client the caller has already authenticated. The client is shared with the
-// read-only reader. No cluster credential is built here.
+// read-only reader. No cluster credential is built here. The adapter keeps a
+// private in-memory binding store, so a later adapter cannot see its pins.
 func NewKueueJobAdapter(apiURL, namespace string, client *http.Client) (*KueueJobAdapter, error) {
-	if !validKubeName(namespace) {
+	return NewKueueJobAdapterWithBindings(apiURL, namespace, client, NewMemoryKueueJobBindingStore())
+}
+
+// NewKueueJobAdapterWithBindings is NewKueueJobAdapter with a caller-supplied
+// binding store. Pass the same store to a later adapter to resume CREATE pins
+// and DELETE tombstones. A nil store is rejected.
+func NewKueueJobAdapterWithBindings(apiURL, namespace string, client *http.Client, bindings KueueJobBindingStore) (*KueueJobAdapter, error) {
+	if !validKubeName(namespace) || bindings == nil {
 		return nil, ErrInvalidKueueObservation
 	}
 	reader, err := NewKubernetesObservationReader(apiURL, client)
@@ -94,8 +82,7 @@ func NewKueueJobAdapter(apiURL, namespace string, client *http.Client) (*KueueJo
 		apiURL:    reader.apiURL,
 		client:    reader.client,
 		reader:    reader,
-		pins:      make(map[string]kueuePinnedJob),
-		deletes:   make(map[string]kueueDeleteIntent),
+		bindings:  bindings,
 	}, nil
 }
 
@@ -105,14 +92,26 @@ func NewKueueJobAdapter(apiURL, namespace string, client *http.Client) (*KueueJo
 // update, patch, or cluster-admin, and do not add create or delete to the
 // observer Role. Provenance from Inspect stays unattested.
 func NewServiceAccountKueueJobAdapter(apiURL, caPath, tokenPath, namespace string) (*KueueJobAdapter, error) {
-	if !validKubeName(namespace) {
+	return NewServiceAccountKueueJobAdapterWithBindings(
+		apiURL, caPath, tokenPath, namespace, NewMemoryKueueJobBindingStore(),
+	)
+}
+
+// NewServiceAccountKueueJobAdapterWithBindings reuses the authenticated,
+// CA-pinned ServiceAccount transport while accepting an explicit trusted
+// binding store. The supplied in-memory store supports only adapter-object
+// reinitialization; it is NOT durable after process termination.
+func NewServiceAccountKueueJobAdapterWithBindings(
+	apiURL, caPath, tokenPath, namespace string, bindings KueueJobBindingStore,
+) (*KueueJobAdapter, error) {
+	if !validKubeName(namespace) || bindings == nil {
 		return nil, ErrInvalidKueueObservation
 	}
 	client, closeIdle, err := newServiceAccountHTTPClient(caPath, tokenPath)
 	if err != nil {
 		return nil, err
 	}
-	adapter, err := NewKueueJobAdapter(apiURL, namespace, client)
+	adapter, err := NewKueueJobAdapterWithBindings(apiURL, namespace, client, bindings)
 	if err != nil {
 		closeIdle()
 		return nil, err
@@ -123,10 +122,6 @@ func NewServiceAccountKueueJobAdapter(apiURL, caPath, tokenPath, namespace strin
 func kueueCreateJobName(tenantID, operationID string) string {
 	sum := sha256.Sum256([]byte(tenantID + "\n" + operationID))
 	return "ccp-" + hex.EncodeToString(sum[:16])
-}
-
-func kueuePinKey(req Request) string {
-	return req.TenantID + "\x00" + req.OperationID
 }
 
 func acceptableJobUID(uid string) bool {
@@ -146,96 +141,79 @@ func kueueJobAnnotations(req Request) map[string]string {
 	}
 }
 
-func (a *KueueJobAdapter) lookupPin(req Request) (kueuePinnedJob, bool) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	pin, ok := a.pins[kueuePinKey(req)]
-	return pin, ok
+func (a *KueueJobAdapter) lookupPin(req Request) (KueueCreatePin, bool, error) {
+	if a == nil || a.bindings == nil {
+		return KueueCreatePin{}, false, ErrInvalidKueueObservation
+	}
+	return a.bindings.GetCreatePin(a.namespace, req)
 }
 
 func (a *KueueJobAdapter) pin(req Request, name, uid string) error {
-	if !validKubeName(name) || !acceptableJobUID(uid) {
+	if a == nil || a.bindings == nil {
 		return ErrInvalidKueueObservation
 	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	key := kueuePinKey(req)
-	if prev, ok := a.pins[key]; ok {
-		if prev.uid != uid || prev.name != name || !sameRequest(prev.request, req) {
-			return ErrOperationConflict
-		}
-		return nil
-	}
-	a.pins[key] = kueuePinnedJob{name: name, uid: uid, request: req}
-	return nil
+	return a.bindings.PutCreatePin(a.namespace, req, name, uid)
 }
 
-func (a *KueueJobAdapter) lookupDelete(req Request) (kueueDeleteIntent, bool) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	intent, ok := a.deletes[kueuePinKey(req)]
-	return intent, ok
+func (a *KueueJobAdapter) lookupDelete(req Request) (KueueDeleteTombstone, bool, error) {
+	if a == nil || a.bindings == nil {
+		return KueueDeleteTombstone{}, false, ErrInvalidKueueObservation
+	}
+	return a.bindings.GetDeleteTombstone(a.namespace, req)
 }
 
 func (a *KueueJobAdapter) recordDelete(req Request, name, uid string, acknowledged bool) error {
-	if !validKubeName(name) || !acceptableJobUID(uid) {
+	if a == nil || a.bindings == nil {
 		return ErrInvalidKueueObservation
 	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	key := kueuePinKey(req)
-	if prev, ok := a.deletes[key]; ok {
-		if prev.uid != uid || prev.name != name || !sameRequest(prev.request, req) {
-			return ErrOperationConflict
-		}
-		if prev.acknowledged {
-			acknowledged = true
-		}
-	}
-	a.deletes[key] = kueueDeleteIntent{
-		name: name, uid: uid, request: req, acknowledged: acknowledged,
-	}
-	return nil
+	return a.bindings.PutDeleteTombstone(a.namespace, req, name, uid, acknowledged)
 }
 
-func (a *KueueJobAdapter) pinnedUIDForName(name string) (string, bool) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	for _, pin := range a.pins {
-		if pin.name == name {
-			return pin.uid, true
-		}
+func (a *KueueJobAdapter) pinnedUIDForName(name string) (string, bool, error) {
+	if a == nil || a.bindings == nil {
+		return "", false, ErrInvalidKueueObservation
 	}
-	return "", false
+	return a.bindings.CreatePinUID(a.namespace, name)
 }
 
 // jobConflictReason reports why this Job must not be adopted. A pinned UID is
 // never moved onto a successor object that reused the name.
-func (a *KueueJobAdapter) jobConflictReason(req Request, name string, meta kubeMeta) (string, bool) {
+func (a *KueueJobAdapter) jobConflictReason(req Request, name string, meta kubeMeta) (string, bool, error) {
 	if meta.Name != name || meta.Namespace != a.namespace || !validKubernetesRef(refFromKube(meta)) ||
 		!acceptableJobUID(meta.UID) {
-		return "JOB_IDENTITY_MISMATCH", true
+		return "JOB_IDENTITY_MISMATCH", true, nil
 	}
 	got := meta.Annotations
 	switch {
 	case got[kueueAnnotationDesiredGeneration] != strconv.FormatUint(req.DesiredGeneration, 10):
-		return "RESOURCE_GENERATION_SUPERSEDED", true
+		return "RESOURCE_GENERATION_SUPERSEDED", true, nil
 	case got[kueueAnnotationTenantID] != req.TenantID ||
 		got[kueueAnnotationWorkloadID] != req.WorkloadID ||
 		got[kueueAnnotationProviderID] != req.ProviderID ||
 		got[kueueAnnotationOperationID] != req.OperationID ||
 		got[kueueAnnotationRequestDigest] != req.RequestDigest ||
 		got[kueueAnnotationIdempotencyKey] != req.IdempotencyKey:
-		return "JOB_IDENTITY_MISMATCH", true
+		return "JOB_IDENTITY_MISMATCH", true, nil
 	}
-	if pin, ok := a.lookupPin(req); ok && (pin.uid != meta.UID || pin.name != name || !sameRequest(pin.request, req)) {
-		return "JOB_UID_REPLACED", true
+	pin, ok, err := a.lookupPin(req)
+	if err != nil {
+		return "", false, err
 	}
-	return "", false
+	if ok && (pin.UID != meta.UID || pin.Name != name || !sameRequest(pin.Request, req)) {
+		return "JOB_UID_REPLACED", true, nil
+	}
+	return "", false, nil
 }
 
 func (a *KueueJobAdapter) jobsPath() string {
 	return "/apis/batch/v1/namespaces/" + url.PathEscape(a.namespace) + "/jobs"
+}
+
+// Binding failures after an external side effect must preserve the UNKNOWN
+// outcome: Kubernetes may already have applied the operation while the
+// authoritative UID receipt or DELETE intent could not be committed.
+func uncommittedKueueBinding(kind string, cause error) error {
+	return fmt.Errorf("%w: %s binding not committed after Kubernetes side effect: %w", ErrAcknowledgementLost, kind, cause)
 }
 
 func (a *KueueJobAdapter) jobPath(name string) string {
@@ -400,7 +378,13 @@ func (a *KueueJobAdapter) postJob(ctx context.Context, req Request, name string)
 			!exactSuspendedJobSpec(obj) {
 			return kubeMeta{}, ErrAcknowledgementLost
 		}
-		if reason, bad := a.jobConflictReason(req, name, obj.Metadata); bad {
+		reason, bad, err := a.jobConflictReason(req, name, obj.Metadata)
+		if err != nil {
+			// The API has already accepted CREATE. A failed binding lookup
+			// is UNKNOWN, not evidence that no Job was created.
+			return kubeMeta{}, uncommittedKueueBinding("CREATE", err)
+		}
+		if bad {
 			return kubeMeta{}, fmt.Errorf("%w: %s", ErrOperationConflict, reason)
 		}
 		return obj.Metadata, nil
@@ -424,10 +408,16 @@ func (a *KueueJobAdapter) acknowledgeExisting(ctx context.Context, req Request, 
 		}
 		return Acknowledgement{}, ErrAcknowledgementLost
 	}
-	if reason, bad := a.jobConflictReason(req, name, meta); bad {
+	reason, bad, err := a.jobConflictReason(req, name, meta)
+	if err != nil {
+		return Acknowledgement{}, err
+	}
+	if bad {
 		return Acknowledgement{}, fmt.Errorf("%w: %s", ErrOperationConflict, reason)
 	}
-	if _, pinned := a.lookupPin(req); !pinned {
+	if _, pinned, err := a.lookupPin(req); err != nil {
+		return Acknowledgement{}, err
+	} else if !pinned {
 		// A 409 after a lost response is NOT proof this is the original Job.
 		return Acknowledgement{}, ErrAcknowledgementLost
 	}
@@ -440,7 +430,8 @@ func (a *KueueJobAdapter) acknowledgeExisting(ctx context.Context, req Request, 
 // Apply creates one suspended batch/v1 Job for a CREATE operation and pins its
 // UID, or deletes that exact UID for a DELETE operation. An identical replay
 // does not post again and, once DELETE is acknowledged, does not delete again.
-// UPDATE is rejected. A lost or unreadable create or delete response returns
+// A later adapter with the same binding store can make that replay. UPDATE is
+// rejected. A lost or unreadable create or delete response returns
 // ErrAcknowledgementLost after the side effect may already have happened.
 func (a *KueueJobAdapter) Apply(ctx context.Context, req Request) (Acknowledgement, error) {
 	if err := ctx.Err(); err != nil {
@@ -459,7 +450,11 @@ func (a *KueueJobAdapter) Apply(ctx context.Context, req Request) (Acknowledgeme
 		return Acknowledgement{}, ErrInvalidRequest
 	}
 	name := kueueCreateJobName(req.TenantID, req.OperationID)
-	if pin, pinned := a.lookupPin(req); pinned && !sameRequest(pin.request, req) {
+	pin, pinned, err := a.lookupPin(req)
+	if err != nil {
+		return Acknowledgement{}, err
+	}
+	if pinned && !sameRequest(pin.Request, req) {
 		return Acknowledgement{}, ErrOperationConflict
 	}
 	meta, status, err := a.getJob(ctx, name)
@@ -468,11 +463,17 @@ func (a *KueueJobAdapter) Apply(ctx context.Context, req Request) (Acknowledgeme
 	}
 	switch status {
 	case http.StatusOK:
-		if reason, bad := a.jobConflictReason(req, name, meta); bad {
+		reason, bad, err := a.jobConflictReason(req, name, meta)
+		if err != nil {
+			return Acknowledgement{}, err
+		}
+		if bad {
 			return Acknowledgement{}, fmt.Errorf("%w: %s", ErrOperationConflict, reason)
 		}
-		if _, pinned := a.lookupPin(req); !pinned {
-			// After restart, matching annotations alone cannot prove original UID.
+		if _, pinned, err := a.lookupPin(req); err != nil {
+			return Acknowledgement{}, err
+		} else if !pinned {
+			// Matching annotations alone cannot prove the original UID.
 			return Acknowledgement{}, ErrAcknowledgementLost
 		}
 		if err := a.pin(req, name, meta.UID); err != nil {
@@ -480,7 +481,9 @@ func (a *KueueJobAdapter) Apply(ctx context.Context, req Request) (Acknowledgeme
 		}
 		return Acknowledgement{OperationID: req.OperationID, RequestDigest: req.RequestDigest}, nil
 	case http.StatusNotFound:
-		if _, pinned := a.lookupPin(req); pinned {
+		if _, pinned, err := a.lookupPin(req); err != nil {
+			return Acknowledgement{}, err
+		} else if pinned {
 			return Acknowledgement{}, fmt.Errorf("%w: pinned job is absent", ErrOperationConflict)
 		}
 	default:
@@ -494,7 +497,7 @@ func (a *KueueJobAdapter) Apply(ctx context.Context, req Request) (Acknowledgeme
 		return Acknowledgement{}, err
 	}
 	if err := a.pin(req, name, created.UID); err != nil {
-		return Acknowledgement{}, err
+		return Acknowledgement{}, uncommittedKueueBinding("CREATE", err)
 	}
 	return Acknowledgement{OperationID: req.OperationID, RequestDigest: req.RequestDigest}, nil
 }
@@ -510,30 +513,37 @@ func (a *KueueJobAdapter) deleteJobName(req Request) (string, error) {
 
 // deleteConflictReason refuses a same-name object that is not the exact UID
 // and desired generation this DELETE named. The successor is left in place.
-func (a *KueueJobAdapter) deleteConflictReason(req Request, name string, meta kubeMeta) (string, bool) {
+func (a *KueueJobAdapter) deleteConflictReason(req Request, name string, meta kubeMeta) (string, bool, error) {
 	if meta.Name != name || meta.Namespace != a.namespace || !acceptableJobUID(meta.UID) {
-		return "JOB_IDENTITY_MISMATCH", true
+		return "JOB_IDENTITY_MISMATCH", true, nil
 	}
 	if meta.UID != req.TargetResourceUID {
-		return "JOB_UID_REPLACED", true
+		return "JOB_UID_REPLACED", true, nil
 	}
 	got := meta.Annotations
 	if got[kueueAnnotationDesiredGeneration] != strconv.FormatUint(req.DesiredGeneration, 10) {
-		return "RESOURCE_GENERATION_SUPERSEDED", true
+		return "RESOURCE_GENERATION_SUPERSEDED", true, nil
 	}
 	if got[kueueAnnotationTenantID] != req.TenantID ||
 		got[kueueAnnotationWorkloadID] != req.WorkloadID ||
 		got[kueueAnnotationProviderID] != req.ProviderID {
-		return "JOB_IDENTITY_MISMATCH", true
+		return "JOB_IDENTITY_MISMATCH", true, nil
 	}
-	if pinUID, ok := a.pinnedUIDForName(name); ok && pinUID != req.TargetResourceUID {
-		return "JOB_UID_REPLACED", true
+	pinUID, pinned, err := a.pinnedUIDForName(name)
+	if err != nil {
+		return "", false, err
 	}
-	if intent, ok := a.lookupDelete(req); ok &&
-		(intent.uid != req.TargetResourceUID || intent.name != name || !sameRequest(intent.request, req)) {
-		return "JOB_UID_REPLACED", true
+	if pinned && pinUID != req.TargetResourceUID {
+		return "JOB_UID_REPLACED", true, nil
 	}
-	return "", false
+	intent, ok, err := a.lookupDelete(req)
+	if err != nil {
+		return "", false, err
+	}
+	if ok && (intent.UID != req.TargetResourceUID || intent.Name != name || !sameRequest(intent.Request, req)) {
+		return "JOB_UID_REPLACED", true, nil
+	}
+	return "", false, nil
 }
 
 type kueueDeleteOptions struct {
@@ -582,7 +592,7 @@ func (a *KueueJobAdapter) deleteJob(ctx context.Context, req Request, name, uid 
 	status, raw, err := a.exchange(ctx, http.MethodDelete, a.jobPath(name), body)
 	if err != nil {
 		if recErr := a.recordDelete(req, name, uid, false); recErr != nil {
-			return Acknowledgement{}, recErr
+			return Acknowledgement{}, uncommittedKueueBinding("DELETE", recErr)
 		}
 		return Acknowledgement{}, err
 	}
@@ -595,14 +605,14 @@ func (a *KueueJobAdapter) deleteJob(ctx context.Context, req Request, name, uid 
 			return Acknowledgement{}, fmt.Errorf("%w: job delete response unreadable", ErrAcknowledgementLost)
 		}
 		if err := a.recordDelete(req, name, uid, true); err != nil {
-			return Acknowledgement{}, err
+			return Acknowledgement{}, uncommittedKueueBinding("DELETE", err)
 		}
 		return Acknowledgement{OperationID: req.OperationID, RequestDigest: req.RequestDigest}, nil
 	case http.StatusNotFound:
 		// The fenced name is already gone. A successor at this name would be a
 		// different UID and a precondition conflict, not a 404.
 		if err := a.recordDelete(req, name, uid, true); err != nil {
-			return Acknowledgement{}, err
+			return Acknowledgement{}, uncommittedKueueBinding("DELETE", err)
 		}
 		return Acknowledgement{OperationID: req.OperationID, RequestDigest: req.RequestDigest}, nil
 	case http.StatusConflict:
@@ -612,7 +622,7 @@ func (a *KueueJobAdapter) deleteJob(ctx context.Context, req Request, name, uid 
 		return Acknowledgement{}, fmt.Errorf("%w: job delete rejected with HTTP %d", ErrInvalidRequest, status)
 	default:
 		if recErr := a.recordDelete(req, name, uid, false); recErr != nil {
-			return Acknowledgement{}, recErr
+			return Acknowledgement{}, uncommittedKueueBinding("DELETE", recErr)
 		}
 		return Acknowledgement{}, fmt.Errorf("%w: job delete returned HTTP %d", ErrAcknowledgementLost, status)
 	}
@@ -620,13 +630,20 @@ func (a *KueueJobAdapter) deleteJob(ctx context.Context, req Request, name, uid 
 
 // applyDelete removes one Job only when its UID is the request target UID.
 // A replay after acknowledgement re-reads the name and does not DELETE again,
-// so a successor that reused the name cannot be removed by this operation.
+// including when a new adapter loaded that acknowledgement from the binding
+// store, so a successor that reused the name cannot be removed by this
+// operation. An unacknowledged tombstone must re-GET and must not delete a
+// different UID.
 func (a *KueueJobAdapter) applyDelete(ctx context.Context, req Request) (Acknowledgement, error) {
 	name, err := a.deleteJobName(req)
 	if err != nil {
 		return Acknowledgement{}, err
 	}
-	if intent, ok := a.lookupDelete(req); ok && !sameRequest(intent.request, req) {
+	intent, ok, err := a.lookupDelete(req)
+	if err != nil {
+		return Acknowledgement{}, err
+	}
+	if ok && !sameRequest(intent.Request, req) {
 		return Acknowledgement{}, ErrOperationConflict
 	}
 	meta, status, err := a.getJob(ctx, name)
@@ -635,19 +652,32 @@ func (a *KueueJobAdapter) applyDelete(ctx context.Context, req Request) (Acknowl
 	}
 	switch status {
 	case http.StatusNotFound:
-		intent, ok := a.lookupDelete(req)
-		if !ok || intent.uid != req.TargetResourceUID || intent.name != name {
+		intent, ok, err = a.lookupDelete(req)
+		if err != nil {
+			return Acknowledgement{}, err
+		}
+		if !ok || intent.UID != req.TargetResourceUID || intent.Name != name {
 			return Acknowledgement{}, fmt.Errorf("%w: delete target is absent", ErrOperationConflict)
 		}
-		if err := a.recordDelete(req, name, req.TargetResourceUID, true); err != nil {
-			return Acknowledgement{}, err
+		if err = a.recordDelete(req, name, req.TargetResourceUID, true); err != nil {
+			return Acknowledgement{}, uncommittedKueueBinding("DELETE", err)
 		}
 		return Acknowledgement{OperationID: req.OperationID, RequestDigest: req.RequestDigest}, nil
 	case http.StatusOK:
-		if reason, bad := a.deleteConflictReason(req, name, meta); bad {
+		var reason string
+		var bad bool
+		reason, bad, err = a.deleteConflictReason(req, name, meta)
+		if err != nil {
+			return Acknowledgement{}, err
+		}
+		if bad {
 			return Acknowledgement{}, fmt.Errorf("%w: %s", ErrOperationConflict, reason)
 		}
-		if intent, ok := a.lookupDelete(req); ok && intent.acknowledged {
+		intent, ok, err = a.lookupDelete(req)
+		if err != nil {
+			return Acknowledgement{}, err
+		}
+		if ok && intent.Acknowledged {
 			return Acknowledgement{OperationID: req.OperationID, RequestDigest: req.RequestDigest}, nil
 		}
 		return a.deleteJob(ctx, req, name, meta.UID)
@@ -701,7 +731,9 @@ func absentObservation(req Request) operation.Observation {
 // CREATE. A missing Job on CREATE is a conflict, not authoritative proof that
 // CREATE never happened. Every successful stage, including POD_PLACED, becomes
 // ResourcePresent for the Job object only. DELETE absence is reported only
-// after this process recorded an intended delete of that exact UID.
+// when the binding store has a tombstone for that exact UID. A tombstone is
+// not Allocation cleanup or quota release. Without that tombstone, a 404
+// stays a conflict.
 func (a *KueueJobAdapter) Inspect(ctx context.Context, req Request) (operation.Observation, error) {
 	if err := ctx.Err(); err != nil {
 		return operation.Observation{}, err
@@ -732,10 +764,14 @@ func (a *KueueJobAdapter) Inspect(ctx context.Context, req Request) (operation.O
 	if status != http.StatusOK {
 		return operation.Observation{}, fmt.Errorf("%w: job lookup returned HTTP %d", ErrInvalidKueueObservation, status)
 	}
-	if reason, bad := a.jobConflictReason(req, name, meta); bad {
+	if reason, bad, err := a.jobConflictReason(req, name, meta); err != nil {
+		return operation.Observation{}, err
+	} else if bad {
 		uid := meta.UID
-		if pin, ok := a.lookupPin(req); ok && acceptableJobUID(pin.uid) {
-			uid = pin.uid
+		if pin, ok, err := a.lookupPin(req); err != nil {
+			return operation.Observation{}, err
+		} else if ok && acceptableJobUID(pin.UID) {
+			uid = pin.UID
 		}
 		// Ask the existing reader as well. A local fence failure still wins,
 		// including when the reader would accept a looser annotation match.
@@ -746,9 +782,12 @@ func (a *KueueJobAdapter) Inspect(ctx context.Context, req Request) (operation.O
 		}
 		return conflictObservation(req, reason), nil
 	}
-	if _, pinned := a.lookupPin(req); !pinned {
-		// A matching live Job is not proof of the original CREATE after restart.
-		// Keep persisted UNKNOWN; never return a successor UID as ResourcePresent.
+	if _, pinned, err := a.lookupPin(req); err != nil {
+		return operation.Observation{}, err
+	} else if !pinned {
+		// A matching live Job is not proof of the original CREATE without a
+		// stored pin. Keep persisted UNKNOWN; never return that UID as
+		// ResourcePresent.
 		return unboundKueueJobObservation(req), nil
 	}
 	collected, err := a.reader.Collect(ctx, a.observationQuery(req, name, meta.UID))
@@ -781,9 +820,10 @@ func (a *KueueJobAdapter) Inspect(ctx context.Context, req Request) (operation.O
 	}, nil
 }
 
-// inspectDelete reports TARGET_ABSENT only when this process intended to
-// delete that UID and the name is now authoritatively gone. A 404 with no
-// such intent stays a conflict. The live successor is not adopted.
+// inspectDelete reports TARGET_ABSENT only when the binding store has a
+// tombstone for that UID and the name is now authoritatively gone. A 404
+// with no tombstone stays a conflict. The live successor is not adopted.
+// TARGET_ABSENT is not Allocation cleanup, quota release, or device release.
 func (a *KueueJobAdapter) inspectDelete(ctx context.Context, req Request) (operation.Observation, error) {
 	name, err := a.deleteJobName(req)
 	if err != nil {
@@ -793,8 +833,11 @@ func (a *KueueJobAdapter) inspectDelete(ctx context.Context, req Request) (opera
 	if err != nil {
 		return operation.Observation{}, err
 	}
-	intent, intended := a.lookupDelete(req)
-	if intended && (!sameRequest(intent.request, req) || intent.name != name || intent.uid != req.TargetResourceUID) {
+	intent, intended, err := a.lookupDelete(req)
+	if err != nil {
+		return operation.Observation{}, err
+	}
+	if intended && (!sameRequest(intent.Request, req) || intent.Name != name || intent.UID != req.TargetResourceUID) {
 		return conflictObservation(req, "OPERATION_FINGERPRINT_MISMATCH"), nil
 	}
 	switch status {
@@ -804,7 +847,11 @@ func (a *KueueJobAdapter) inspectDelete(ctx context.Context, req Request) (opera
 		}
 		return absentObservation(req), nil
 	case http.StatusOK:
-		if reason, bad := a.deleteConflictReason(req, name, meta); bad {
+		reason, bad, err := a.deleteConflictReason(req, name, meta)
+		if err != nil {
+			return operation.Observation{}, err
+		}
+		if bad {
 			return conflictObservation(req, reason), nil
 		}
 		if intended {

@@ -316,6 +316,11 @@ func (a *kueueAPI) pods(w http.ResponseWriter, selector string) {
 
 func newKueueAdapterFixture(t *testing.T, api *kueueAPI) (*KueueJobAdapter, *kueueAPI, *httptest.Server) {
 	t.Helper()
+	return newKueueAdapterFixtureWithStore(t, api, NewMemoryKueueJobBindingStore())
+}
+
+func newKueueAdapterFixtureWithStore(t *testing.T, api *kueueAPI, store KueueJobBindingStore) (*KueueJobAdapter, *kueueAPI, *httptest.Server) {
+	t.Helper()
 	api.t = t
 	if api.jobs == nil {
 		api.jobs = make(map[string]kubeObject)
@@ -323,12 +328,23 @@ func newKueueAdapterFixture(t *testing.T, api *kueueAPI) (*KueueJobAdapter, *kue
 	server := httptest.NewTLSServer(http.HandlerFunc(api.serve))
 	client := server.Client()
 	client.Timeout = 3 * time.Second
-	adapter, err := NewKueueJobAdapter(server.URL, "tenant-a", client)
+	adapter, err := NewKueueJobAdapterWithBindings(server.URL, "tenant-a", client, store)
 	if err != nil {
 		server.Close()
 		t.Fatalf("adapter: %v", err)
 	}
 	return adapter, api, server
+}
+
+func reopenKueueAdapter(t *testing.T, server *httptest.Server, store KueueJobBindingStore) *KueueJobAdapter {
+	t.Helper()
+	client := server.Client()
+	client.Timeout = 3 * time.Second
+	adapter, err := NewKueueJobAdapterWithBindings(server.URL, "tenant-a", client, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return adapter
 }
 
 func assertSuspendedCreate(t *testing.T, api *kueueAPI, req Request) {
