@@ -140,6 +140,22 @@ func (r *KubernetesObservationReader) ObserveDRAClaim(
 		device.ShareID != q.ShareID {
 		return DRAClaimObservation{}, ErrInvalidDRAObservation
 	}
+
+	// A single GET can race with Claim deallocation or same-name recreation.
+	// Re-read the same identity after checking its reservation/device tuple.
+	// Compare resourceVersion as an opaque string: it is only meaningful for
+	// this exact Claim, and is not an ordering or GPU preparation guarantee.
+	var current draClaimV1
+	if err := r.read(ctx, path, &current); err != nil {
+		return DRAClaimObservation{}, fmt.Errorf("%w: final Claim read: %v", ErrInvalidDRAObservation, err)
+	}
+	if current.APIVersion != claim.APIVersion || current.Kind != claim.Kind ||
+		current.Metadata.Namespace != claim.Metadata.Namespace ||
+		current.Metadata.Name != claim.Metadata.Name ||
+		current.Metadata.UID != claim.Metadata.UID ||
+		current.Metadata.ResourceVersion != claim.Metadata.ResourceVersion {
+		return DRAClaimObservation{}, ErrInvalidDRAObservation
+	}
 	return DRAClaimObservation{
 		Claim:  refFromKube(claim.Metadata),
 		PodUID: owner.UID,

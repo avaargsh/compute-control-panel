@@ -114,8 +114,12 @@ func TestDRAClaimReadOnlyUIDBoundObservation(t *testing.T) {
 			} else if err == nil || observed != (DRAClaimObservation{}) {
 				t.Fatalf("unsafe DRA claim promoted: %+v err=%v", observed, err)
 			}
-			if calls.Load() != 1 {
-				t.Fatalf("expected one read-only request, got %d", calls.Load())
+			wantReads := int32(1)
+			if tc.valid {
+				wantReads = 2 // read back UID/resourceVersion before trusting the snapshot
+			}
+			if calls.Load() != wantReads {
+				t.Fatalf("expected %d read-only requests, got %d", wantReads, calls.Load())
 			}
 		})
 	}
@@ -159,5 +163,71 @@ func TestDRAClaimInvalidQueryRejectedBeforeHTTPS(t *testing.T) {
 	}
 	if calls.Load() != 0 {
 		t.Fatalf("invalid queries reached Kubernetes: %d", calls.Load())
+	}
+}
+
+func TestDRAClaimDetectsConcurrentReplacementAndResourceVersionDrift(t *testing.T) {
+	tests := []struct {
+		name      string
+		second    func(map[string]any)
+		status    int
+		wantValid bool
+	}{
+		{name: "unchanged exact resource", wantValid: true},
+		{name: "same-name successor UID", second: func(v map[string]any) {
+			v["metadata"].(map[string]any)["uid"] = "claim-successor-uid"
+		}},
+		{name: "new resourceVersion with same UID", second: func(v map[string]any) {
+			v["metadata"].(map[string]any)["resourceVersion"] = "151"
+		}},
+		{name: "claim removed after first GET", status: http.StatusNotFound},
+		{name: "permissions revoked after first GET", status: http.StatusForbidden},
+		{name: "missing UID on second GET", second: func(v map[string]any) {
+			v["metadata"].(map[string]any)["uid"] = ""
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			secondBody := draModifiedFixture(t, tc.second)
+			var calls atomic.Int32
+			ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				count := calls.Add(1)
+				if r.Method != http.MethodGet ||
+					r.URL.RequestURI() != "/apis/resource.k8s.io/v1/namespaces/tenant-a/resourceclaims/gpu-claim-a" {
+					t.Errorf("unexpected mutation/path %s %s", r.Method, r.URL.RequestURI())
+					http.Error(w, "forbidden", http.StatusMethodNotAllowed)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if count == 1 {
+					_, _ = fmt.Fprint(w, draClaimFixture)
+					return
+				}
+				if tc.status != 0 {
+					w.WriteHeader(tc.status)
+					return
+				}
+				_, _ = fmt.Fprint(w, secondBody)
+			}))
+			defer ts.Close()
+			client := ts.Client()
+			client.Timeout = 3 * time.Second
+			reader, err := NewKubernetesObservationReader(ts.URL, client)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := reader.ObserveDRAClaim(context.Background(), draTestQuery())
+			if tc.wantValid {
+				if err != nil || got.Claim.UID != "claim-uid-a" ||
+					got.Claim.ResourceVersion != "150" || got.PodUID != "pod-uid-a" {
+					t.Fatalf("stable claim not observed: %+v err=%v", got, err)
+				}
+			} else if err == nil || got != (DRAClaimObservation{}) {
+				t.Fatalf("changed or unavailable Claim accepted: %+v err=%v", got, err)
+			}
+			if calls.Load() != 2 {
+				t.Fatalf("Claim double read was not performed: calls=%d", calls.Load())
+			}
+		})
 	}
 }
