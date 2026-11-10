@@ -342,7 +342,10 @@ spec:
       runAsNonRoot: true
       readOnlyRootFilesystem: true
 YAML
-wait_for 'actual provider adapter lifecycle smoke' observer_succeeded provider-lifecycle
+provider_lifecycle_succeeded() {
+  [[ "$(kubectl -n "$ns" get pod ccp-provider-lifecycle -o jsonpath='{.status.phase}')" == Succeeded ]]
+}
+wait_for 'actual provider adapter lifecycle smoke' provider_lifecycle_succeeded
 kubectl -n "$ns" logs ccp-provider-lifecycle > "$dir/lifecycle.json"
 jq -e '.created_uid != "" and
   .created_result == "RESOURCE_PRESENT" and
