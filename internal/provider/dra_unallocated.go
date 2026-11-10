@@ -44,9 +44,9 @@ type draUnallocatedClaimState struct {
 
 func (c draUnallocatedClaimState) claimRef() KubernetesResourceRef {
 	return KubernetesResourceRef{
-		Namespace: c.Metadata.Namespace,
-		Name: c.Metadata.Name,
-		UID: c.Metadata.UID,
+		Namespace:       c.Metadata.Namespace,
+		Name:            c.Metadata.Name,
+		UID:             c.Metadata.UID,
 		ResourceVersion: c.Metadata.ResourceVersion,
 	}
 }
@@ -115,8 +115,8 @@ func (r *KubernetesObservationReader) ObserveDRAClaimUnallocated(
 		return reject()
 	}
 	return DRAClaimUnallocatedObservation{
-		PreviousClaim: prior.Claim,
-		CurrentClaim: first.claimRef(),
+		PreviousClaim:  prior.Claim,
+		CurrentClaim:   first.claimRef(),
 		PreviousPodUID: prior.PodUID,
 		PreviousDevice: prior.Device,
 	}, nil
