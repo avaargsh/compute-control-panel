@@ -35,6 +35,9 @@ func validPreviousKueueReservation(prior KueueQueueBindingEvidence) bool {
 		!old.KueueQuotaReserved || old.KueueQuotaCondition.Status != "True" ||
 		!validKubernetesRef(old.Job) || !validKubernetesRef(old.KueueWorkload) ||
 		!validKubernetesRef(prior.LocalQueue) ||
+		!validKubeName(old.Job.Namespace) || !validKubeName(old.Job.Name) ||
+		!validKubeName(old.KueueWorkload.Name) ||
+		!validKubeName(prior.LocalQueue.Name) ||
 		!validPinnedQueueUID(old.Job.UID) ||
 		!validPinnedQueueUID(old.KueueWorkload.UID) ||
 		!validPinnedQueueUID(prior.LocalQueue.UID) ||
@@ -54,7 +57,8 @@ func validPreviousKueueReservation(prior KueueQueueBindingEvidence) bool {
 
 func kueueWorkloadUIDAbsent(list kubeObjectList, prior KueueQueueBindingEvidence) bool {
 	if list.Metadata.Continue != "" || list.Metadata.ResourceVersion == "" ||
-		list.Metadata.ResourceVersion != strings.TrimSpace(list.Metadata.ResourceVersion) {
+		list.Metadata.ResourceVersion != strings.TrimSpace(list.Metadata.ResourceVersion) ||
+		strings.ContainsRune(list.Metadata.ResourceVersion, 0) {
 		return false
 	}
 	old := prior.Job
@@ -78,6 +82,7 @@ func kueueQueueCleared(local, cluster kueueQuotaQueueObject, prior KueueQueueBin
 		cq.Namespace != "" || cq.Name != prior.ClusterQueue.Name ||
 		cq.UID != prior.ClusterQueue.UID || !validPinnedQueueUID(cq.UID) ||
 		cq.ResourceVersion == "" || cq.ResourceVersion != strings.TrimSpace(cq.ResourceVersion) ||
+		strings.ContainsRune(cq.ResourceVersion, 0) ||
 		cluster.Status.ReservingWorkloads == nil || cluster.Status.AdmittedWorkloads == nil {
 		return false
 	}
