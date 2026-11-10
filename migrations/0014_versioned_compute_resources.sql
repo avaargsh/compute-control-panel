@@ -119,8 +119,8 @@ CREATE TABLE public.compute_accelerator_revisions (
     spec JSONB NOT NULL CHECK (
         jsonb_typeof(spec)='object'
         AND spec->>'schema_version'='1'
-        AND jsonb_typeof(spec->>'vendor')='string'
-        AND jsonb_typeof(spec->>'model')='string'
+        AND length(btrim(spec->>'vendor')) > 0
+        AND length(btrim(spec->>'model')) > 0
         AND jsonb_typeof(spec->'capabilities')='object'
     ),
     spec_digest TEXT NOT NULL CHECK (
@@ -178,6 +178,25 @@ CREATE TABLE public.compute_pool_accelerator_revision_refs (
 );
 CREATE INDEX compute_pool_accelerator_refs_accelerator
     ON public.compute_pool_accelerator_revision_refs (tenant_id, accelerator_id, accelerator_revision);
+
+-- A revision's resolved edges are immutable too. The referenced revision
+-- rows remain independently addressable even after current pointers advance.
+CREATE OR REPLACE FUNCTION public.compute_versioned_resource_ref_immutable()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $ref_immutable$
+BEGIN
+    RAISE EXCEPTION 'versioned resource revision references are immutable'
+        USING ERRCODE = '55000';
+END;
+$ref_immutable$;
+CREATE TRIGGER compute_project_pool_revision_refs_immutable
+BEFORE UPDATE OR DELETE ON public.compute_project_pool_revision_refs
+FOR EACH ROW EXECUTE FUNCTION public.compute_versioned_resource_ref_immutable();
+CREATE TRIGGER compute_pool_accelerator_revision_refs_immutable
+BEFORE UPDATE OR DELETE ON public.compute_pool_accelerator_revision_refs
+FOR EACH ROW EXECUTE FUNCTION public.compute_versioned_resource_ref_immutable();
 
 CREATE TABLE public.compute_resource_lifecycle_audit (
     event_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
