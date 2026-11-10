@@ -9,57 +9,23 @@ import (
 	"github.com/avaargsh/compute-control-panel/internal/operation"
 )
 
-func TestMemoryKueueJobBindingStoreKeepsPinAndAcknowledgedTombstone(t *testing.T) {
-	store := NewMemoryKueueJobBindingStore()
-	req := kueueAdapterRequest()
-	if err := store.PutCreatePin("tenant-a", req, "ccp-job", "uid-1"); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.PutCreatePin("tenant-a", req, "ccp-job", "uid-1"); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.PutCreatePin("tenant-a", req, "ccp-job", "uid-2"); !errors.Is(err, ErrOperationConflict) {
-		t.Fatalf("pin rewrite: %v", err)
-	}
-	got, ok, err := store.GetCreatePin("tenant-a", req)
-	if err != nil || !ok || got.UID != "uid-1" || got.Name != "ccp-job" || got.Namespace != "tenant-a" {
-		t.Fatalf("pin %+v ok=%v err=%v", got, ok, err)
-	}
-	if _, ok, err := store.GetCreatePin("other-ns", req); err != nil || ok {
-		t.Fatalf("pin crossed namespace: ok=%v err=%v", ok, err)
-	}
-	uid, ok, err := store.CreatePinUID("tenant-a", "ccp-job")
-	if err != nil || !ok || uid != "uid-1" {
-		t.Fatalf("pin uid %q ok=%v err=%v", uid, ok, err)
-	}
-	if _, ok, err := store.CreatePinUID("other-ns", "ccp-job"); err != nil || ok {
-		t.Fatalf("name scan crossed namespace: ok=%v err=%v", ok, err)
-	}
-
-	remove := req
-	remove.Kind = operation.Delete
-	remove.OperationID = "op-delete-1"
-	remove.IdempotencyKey = "idem-delete-1"
-	remove.TargetResourceID = "tenant-a/ccp-job"
-	remove.TargetResourceUID = "uid-1"
-	if err := store.PutDeleteTombstone("tenant-a", remove, "ccp-job", "uid-1", false); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.PutDeleteTombstone("tenant-a", remove, "ccp-job", "uid-1", true); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.PutDeleteTombstone("tenant-a", remove, "ccp-job", "uid-1", false); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.PutDeleteTombstone("tenant-a", remove, "ccp-job", "uid-2", true); !errors.Is(err, ErrOperationConflict) {
-		t.Fatalf("tombstone rewrite: %v", err)
-	}
-	tomb, ok, err := store.GetDeleteTombstone("tenant-a", remove)
-	if err != nil || !ok || !tomb.Acknowledged || tomb.UID != "uid-1" {
-		t.Fatalf("tombstone %+v ok=%v err=%v", tomb, ok, err)
-	}
+func TestKueueJobBindingStoreConformance(t *testing.T) {
+	t.Run("memory", func(t *testing.T) {
+		assertKueueJobBindingStoreConformance(t, NewMemoryKueueJobBindingStore())
+	})
+	t.Run("postgres", func(t *testing.T) {
+		db := openProviderPostgresDB(t)
+		store, err := NewPostgresKueueJobBindingStore(db)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertKueueJobBindingStoreConformance(t, store)
+	})
 	if _, err := NewKueueJobAdapterWithBindings("https://kubernetes.default.svc", "tenant-a", nil, nil); !errors.Is(err, ErrInvalidKueueObservation) {
 		t.Fatalf("nil store: %v", err)
+	}
+	if _, err := NewPostgresKueueJobBindingStore(nil); !errors.Is(err, ErrInvalidKueueObservation) {
+		t.Fatalf("nil database: %v", err)
 	}
 }
 

@@ -98,9 +98,11 @@ func NewServiceAccountKueueJobAdapter(apiURL, caPath, tokenPath, namespace strin
 }
 
 // NewServiceAccountKueueJobAdapterWithBindings reuses the authenticated,
-// CA-pinned ServiceAccount transport while accepting an explicit trusted
-// binding store. The supplied in-memory store supports only adapter-object
-// reinitialization; it is NOT durable after process termination.
+// CA-pinned ServiceAccount transport and an explicit binding store.
+// NewServiceAccountKueueJobAdapter still passes a private memory store, which
+// dies with the process. A PostgresKueueJobBindingStore keeps the pin and
+// tombstone across a new database connection. Neither constructor mounts an
+// HTTP handler.
 func NewServiceAccountKueueJobAdapterWithBindings(
 	apiURL, caPath, tokenPath, namespace string, bindings KueueJobBindingStore,
 ) (*KueueJobAdapter, error) {
