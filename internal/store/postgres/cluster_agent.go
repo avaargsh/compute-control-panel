@@ -122,29 +122,30 @@ type clusterAgentCommandScanner interface {
 
 const clusterAgentCommandColumns = `command_id, schema_version, command_action,
 	agent_id, cluster_scope, provider_id, operation_id, tenant_id, workload_id,
-	desired_generation, request_digest, request, lease_owner_instance_id,
+	desired_generation, command_sequence, request_digest, request, lease_owner_instance_id,
 	lease_epoch, command_fence, lease_expires_at`
 
 func scanClusterAgentCommand(row clusterAgentCommandScanner) (clusteragent.Command, error) {
 	var command clusteragent.Command
 	var schemaVersion, action string
-	var generation, epoch, fence int64
+	var generation, sequence, epoch, fence int64
 	var requestBody []byte
 	if err := row.Scan(
 		&command.CommandID, &schemaVersion, &action,
 		&command.AgentID, &command.ClusterScope, &command.ProviderID,
 		&command.OperationID, &command.TenantID, &command.WorkloadID,
-		&generation, &command.RequestDigest, &requestBody,
+		&generation, &sequence, &command.RequestDigest, &requestBody,
 		&command.InstanceID, &epoch, &fence, &command.LeaseExpiresAt,
 	); err != nil {
 		return clusteragent.Command{}, err
 	}
-	if generation <= 0 || epoch <= 0 || fence <= 0 {
+	if generation <= 0 || sequence <= 0 || epoch <= 0 || fence <= 0 {
 		return clusteragent.Command{}, clusteragent.ErrInvalid
 	}
 	command.SchemaVersion = schemaVersion
 	command.Action = clusteragent.CommandAction(action)
 	command.DesiredGeneration = uint64(generation)
+	command.CommandSequence = uint64(sequence)
 	command.LeaseEpoch = uint64(epoch)
 	command.CommandFence = uint64(fence)
 	if err := json.Unmarshal(requestBody, &command.Request); err != nil {
