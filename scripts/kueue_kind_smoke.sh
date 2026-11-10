@@ -783,8 +783,9 @@ if kubectl -n "$ns" get job "$journal_name" >/dev/null 2>&1; then
   echo "UID-fenced DELETE left the original Job in place" >&2
   exit 1
 fi
-[[ "$(psql_at "SELECT status || '|' || coalesce(target_resource_uid,'') || '|' || (provider_resource_uid IS NULL) FROM public.compute_operations WHERE tenant_id='tenant-a' AND compute_operation_id='ccp-kind-journal-delete'")" == "UNKNOWN|${journal_uid}|t" ]] || {
-  echo "DELETE ComputeOperation was not UNKNOWN for the exact target UID" >&2
+journal_delete_row="$(psql_at "SELECT status || '|' || coalesce(target_resource_uid,'') || '|' || (provider_resource_uid IS NULL)::text FROM public.compute_operations WHERE tenant_id='tenant-a' AND compute_operation_id='ccp-kind-journal-delete'")"
+[[ "$journal_delete_row" == "UNKNOWN|${journal_uid}|true" ]] || {
+  echo "DELETE ComputeOperation was not UNKNOWN for the exact target UID: ${journal_delete_row:-<empty>}" >&2
   exit 1
 }
 [[ "$(psql_at "SELECT job_uid FROM public.kueue_job_delete_tombstones WHERE namespace='ccp-kueue-smoke' AND tenant_id='tenant-a' AND operation_id='ccp-kind-journal-delete' AND acknowledged")" == "$journal_uid" ]] || {
@@ -837,8 +838,9 @@ jq -e --arg uid "$journal_uid" --argjson previous "$journal_delete_fence" \
    .observation == "TARGET_ABSENT" and .observation_rows == 1 and
    .outbox_events == 2 and .release_attested == false' \
   "$dir/journal-recover-delete.json" >/dev/null
-[[ "$(psql_at "SELECT status || '|' || coalesce(target_resource_uid,'') || '|' || (provider_resource_uid IS NULL) FROM public.compute_operations WHERE tenant_id='tenant-a' AND compute_operation_id='ccp-kind-journal-delete'")" == "SUCCEEDED|${journal_uid}|t" ]] || {
-  echo "DELETE finality wrote provider_resource_uid or lost the target UID" >&2
+journal_delete_final="$(psql_at "SELECT status || '|' || coalesce(target_resource_uid,'') || '|' || (provider_resource_uid IS NULL)::text FROM public.compute_operations WHERE tenant_id='tenant-a' AND compute_operation_id='ccp-kind-journal-delete'")"
+[[ "$journal_delete_final" == "SUCCEEDED|${journal_uid}|true" ]] || {
+  echo "DELETE finality wrote provider_resource_uid or lost the target UID: ${journal_delete_final:-<empty>}" >&2
   exit 1
 }
 [[ "$(psql_at "SELECT operation_result || '|' || coalesce(details->>'TargetResourceUID','') || '|' || coalesce(provider_resource_uid,'') FROM public.compute_resource_observations WHERE tenant_id='tenant-a' AND compute_operation_id='ccp-kind-journal-delete'")" == "TARGET_ABSENT|${journal_uid}|" ]] || {
@@ -912,8 +914,9 @@ jq -e --arg uid "$journal_uid" --argjson previous "$journal_successor_fence" \
    .uid == "" and .target_uid == $uid and .fence_token > $previous and
    .observation_rows == 1 and .outbox_events == 2 and .release_attested == false' \
   "$dir/journal-recover-successor.json" >/dev/null
-[[ "$(psql_at "SELECT status || '|' || coalesce(manual_review_code,'') || '|' || coalesce(target_resource_uid,'') || '|' || (provider_resource_uid IS NULL) FROM public.compute_operations WHERE tenant_id='tenant-a' AND compute_operation_id='ccp-kind-journal-delete-successor'")" == "MANUAL_REVIEW|JOB_UID_REPLACED|${journal_uid}|t" ]] || {
-  echo "successor recovery did not stay MANUAL_REVIEW for the original UID" >&2
+journal_successor_row="$(psql_at "SELECT status || '|' || coalesce(manual_review_code,'') || '|' || coalesce(target_resource_uid,'') || '|' || (provider_resource_uid IS NULL)::text FROM public.compute_operations WHERE tenant_id='tenant-a' AND compute_operation_id='ccp-kind-journal-delete-successor'")"
+[[ "$journal_successor_row" == "MANUAL_REVIEW|JOB_UID_REPLACED|${journal_uid}|true" ]] || {
+  echo "successor recovery did not stay MANUAL_REVIEW for the original UID: ${journal_successor_row:-<empty>}" >&2
   exit 1
 }
 [[ "$(kubectl -n "$ns" get job "$journal_name" -o jsonpath='{.metadata.uid}')" == "$journal_successor_uid" &&
