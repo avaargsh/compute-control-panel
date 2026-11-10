@@ -380,7 +380,9 @@ func (a *KueueJobAdapter) postJob(ctx context.Context, req Request, name string)
 		}
 		reason, bad, err := a.jobConflictReason(req, name, obj.Metadata)
 		if err != nil {
-			return kubeMeta{}, err
+			// The API has already accepted CREATE. A failed binding lookup
+			// is UNKNOWN, not evidence that no Job was created.
+			return kubeMeta{}, uncommittedKueueBinding("CREATE", err)
 		}
 		if bad {
 			return kubeMeta{}, fmt.Errorf("%w: %s", ErrOperationConflict, reason)
