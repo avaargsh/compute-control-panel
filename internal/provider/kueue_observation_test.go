@@ -16,6 +16,9 @@ func kueueEvidenceFixture() KueueJobEvidence {
 			Namespace: "tenant-a", Name: "kueue-workload-a", UID: "kueue-uid-a", ResourceVersion: "102",
 		},
 		KueueOwnerJobUID: "job-uid-a", KueueQuotaReserved: true, KueueClusterQueue: "cq-a", KueueAdmitted: true,
+		KueueQuotaCondition: KueueConditionEvidence{Status: "True"},
+		KueueAdmissionCondition: KueueConditionEvidence{Status: "True"},
+		KueuePodSetAssignmentsJSON: `[{"name":"main","resourceUsage":{"cpu":"2","memory":"2Gi"}}]`,
 		Pod: KubernetesResourceRef{
 			Namespace: "tenant-a", Name: "pod-a", UID: "pod-uid-a", ResourceVersion: "103",
 		},
@@ -37,6 +40,9 @@ func TestKueueObservationSeparatesAdmissionFromPlacement(t *testing.T) {
 				e.KueueQuotaReserved = false
 				e.KueueClusterQueue = ""
 				e.KueueAdmitted = false
+				e.KueueQuotaCondition = KueueConditionEvidence{}
+				e.KueueAdmissionCondition = KueueConditionEvidence{}
+				e.KueuePodSetAssignmentsJSON = ""
 				e.Pod = KubernetesResourceRef{}
 				e.PodOwnerJobUID = ""
 				e.PodScheduled = false
@@ -48,6 +54,7 @@ func TestKueueObservationSeparatesAdmissionFromPlacement(t *testing.T) {
 			name: "kueue workload exists but admission absent",
 			change: func(e *KueueJobEvidence) {
 				e.KueueAdmitted = false
+				e.KueueAdmissionCondition.Status = "False"
 				e.Pod = KubernetesResourceRef{}
 				e.PodOwnerJobUID = ""
 				e.PodScheduled = false
