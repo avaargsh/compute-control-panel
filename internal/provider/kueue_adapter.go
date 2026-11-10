@@ -45,9 +45,11 @@ var errKueueJobAlreadyExists = errors.New("kubernetes job already exists")
 // the pinned Job object was observed. POD_PLACED is not Allocation READY.
 // DELETE absence is process-local intent plus a UID-fenced 404. It is not
 // Allocation cleanup, quota release, or a durable tombstone: after a process
-// restart a bare 404 is still ambiguous. This type does not admit, schedule,
-// claim devices, or mount an HTTP handler. Process-local pins are recovered
-// from Job annotations after a lost create response; they are not a second database.
+// restart a bare 404 is still ambiguous. The in-memory delete map is not a
+// trusted UID binding. A process-local CREATE pin is lost on restart and
+// MUST NOT be reconstructed from Job name or annotations alone. Without a
+// durable trusted UID binding, CREATE Inspect remains inconclusive.
+// This type does not admit, schedule, claim devices, or mount an HTTP handler.
 type KueueJobAdapter struct {
 	namespace string
 	apiURL    string
@@ -283,6 +285,22 @@ func (a *KueueJobAdapter) exchange(ctx context.Context, method, path string, pay
 	return resp.StatusCode, read, nil
 }
 
+// exactSuspendedJobSpec requires the inert, single-container Job this adapter
+// actually creates. A name and matching annotations alone do not authorize
+// adoption of a changed executable or a separately queued Job.
+func exactSuspendedJobSpec(job kubeObject) bool {
+	if job.Spec.Suspend == nil || !*job.Spec.Suspend ||
+		job.Spec.Parallelism == nil || *job.Spec.Parallelism != 1 ||
+		job.Spec.Completions == nil || *job.Spec.Completions != 1 ||
+		job.Metadata.Labels["kueue.x-k8s.io/queue-name"] != "" ||
+		job.Spec.Template.Spec.RestartPolicy != "Never" ||
+		len(job.Spec.Template.Spec.Containers) != 1 {
+		return false
+	}
+	container := job.Spec.Template.Spec.Containers[0]
+	return container.Name == "ccp-suspended" && container.Image == kueueSuspendedJobImage
+}
+
 func (a *KueueJobAdapter) getJob(ctx context.Context, name string) (kubeMeta, int, error) {
 	status, body, err := a.exchange(ctx, http.MethodGet, a.jobPath(name), nil)
 	if err != nil {
@@ -294,6 +312,9 @@ func (a *KueueJobAdapter) getJob(ctx context.Context, name string) (kubeMeta, in
 	var obj kubeObject
 	if json.Unmarshal(body, &obj) != nil {
 		return kubeMeta{}, 0, ErrInvalidKueueObservation
+	}
+	if !exactSuspendedJobSpec(obj) {
+		return kubeMeta{}, 0, fmt.Errorf("%w: JOB_SPEC_MISMATCH", ErrOperationConflict)
 	}
 	return obj.Metadata, status, nil
 }
@@ -375,7 +396,8 @@ func (a *KueueJobAdapter) postJob(ctx context.Context, req Request, name string)
 		var obj kubeObject
 		if json.Unmarshal(raw, &obj) != nil || !acceptableJobUID(obj.Metadata.UID) ||
 			obj.Metadata.Name != name || obj.Metadata.Namespace != a.namespace ||
-			!validKubernetesRef(refFromKube(obj.Metadata)) {
+			!validKubernetesRef(refFromKube(obj.Metadata)) ||
+			!exactSuspendedJobSpec(obj) {
 			return kubeMeta{}, ErrAcknowledgementLost
 		}
 		if reason, bad := a.jobConflictReason(req, name, obj.Metadata); bad {
@@ -393,6 +415,9 @@ func (a *KueueJobAdapter) postJob(ctx context.Context, req Request, name string)
 
 func (a *KueueJobAdapter) acknowledgeExisting(ctx context.Context, req Request, name string) (Acknowledgement, error) {
 	meta, status, err := a.getJob(ctx, name)
+	if errors.Is(err, ErrOperationConflict) {
+		return Acknowledgement{}, err
+	}
 	if err != nil || status != http.StatusOK {
 		if err != nil && ctx.Err() != nil {
 			return Acknowledgement{}, fmt.Errorf("%w: %w", ErrAcknowledgementLost, ctx.Err())
@@ -401,6 +426,10 @@ func (a *KueueJobAdapter) acknowledgeExisting(ctx context.Context, req Request, 
 	}
 	if reason, bad := a.jobConflictReason(req, name, meta); bad {
 		return Acknowledgement{}, fmt.Errorf("%w: %s", ErrOperationConflict, reason)
+	}
+	if _, pinned := a.lookupPin(req); !pinned {
+		// A 409 after a lost response is NOT proof this is the original Job.
+		return Acknowledgement{}, ErrAcknowledgementLost
 	}
 	if err := a.pin(req, name, meta.UID); err != nil {
 		return Acknowledgement{}, err
@@ -441,6 +470,10 @@ func (a *KueueJobAdapter) Apply(ctx context.Context, req Request) (Acknowledgeme
 	case http.StatusOK:
 		if reason, bad := a.jobConflictReason(req, name, meta); bad {
 			return Acknowledgement{}, fmt.Errorf("%w: %s", ErrOperationConflict, reason)
+		}
+		if _, pinned := a.lookupPin(req); !pinned {
+			// After restart, matching annotations alone cannot prove original UID.
+			return Acknowledgement{}, ErrAcknowledgementLost
 		}
 		if err := a.pin(req, name, meta.UID); err != nil {
 			return Acknowledgement{}, err
@@ -631,6 +664,17 @@ func (a *KueueJobAdapter) observationQuery(req Request, name, uid string) Kubern
 	}
 }
 
+func unboundKueueJobObservation(req Request) operation.Observation {
+	return operation.Observation{
+		OperationID: req.OperationID, TenantID: req.TenantID,
+		WorkloadID: req.WorkloadID, ProviderID: req.ProviderID,
+		DesiredGeneration: req.DesiredGeneration,
+		ObservedAt:        time.Now().UTC(),
+		ResourceVersion:   "kubernetes-job/uid-unbound",
+		Result:            operation.OperationInProgress,
+	}
+}
+
 func conflictObservation(req Request, reason string) operation.Observation {
 	return operation.Observation{
 		OperationID: req.OperationID, TenantID: req.TenantID,
@@ -676,6 +720,9 @@ func (a *KueueJobAdapter) Inspect(ctx context.Context, req Request) (operation.O
 	}
 	name := kueueCreateJobName(req.TenantID, req.OperationID)
 	meta, status, err := a.getJob(ctx, name)
+	if errors.Is(err, ErrOperationConflict) {
+		return conflictObservation(req, "JOB_SPEC_MISMATCH"), nil
+	}
 	if err != nil {
 		return operation.Observation{}, err
 	}
@@ -698,6 +745,11 @@ func (a *KueueJobAdapter) Inspect(ctx context.Context, req Request) (operation.O
 			return operation.Observation{}, err
 		}
 		return conflictObservation(req, reason), nil
+	}
+	if _, pinned := a.lookupPin(req); !pinned {
+		// A matching live Job is not proof of the original CREATE after restart.
+		// Keep persisted UNKNOWN; never return a successor UID as ResourcePresent.
+		return unboundKueueJobObservation(req), nil
 	}
 	collected, err := a.reader.Collect(ctx, a.observationQuery(req, name, meta.UID))
 	if err != nil {

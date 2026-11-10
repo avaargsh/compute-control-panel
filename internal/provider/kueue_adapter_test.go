@@ -105,6 +105,17 @@ func (a *kueueAPI) plantJob(name, uid string) {
 	obj.Metadata.Namespace = "tenant-a"
 	obj.Metadata.UID = uid
 	obj.Metadata.ResourceVersion = "99"
+	suspend := true
+	parallelism := 1
+	completions := 1
+	obj.Spec.Suspend = &suspend
+	obj.Spec.Parallelism = &parallelism
+	obj.Spec.Completions = &completions
+	obj.Spec.Template.Spec.RestartPolicy = "Never"
+	obj.Spec.Template.Spec.Containers = []kueueBatchContainer{{
+		Name:  "ccp-suspended",
+		Image: kueueSuspendedJobImage,
+	}}
 	a.jobs[name] = obj
 }
 
@@ -182,6 +193,13 @@ func (a *kueueAPI) create(w http.ResponseWriter, body []byte) {
 	obj.Metadata.UID = "job-uid-created"
 	obj.Metadata.ResourceVersion = "11"
 	obj.Metadata.Annotations = posted.Metadata.Annotations
+	suspend := posted.Spec.Suspend
+	parallelism := posted.Spec.Parallelism
+	completions := posted.Spec.Completions
+	obj.Spec.Suspend = &suspend
+	obj.Spec.Parallelism = &parallelism
+	obj.Spec.Completions = &completions
+	obj.Spec.Template = posted.Spec.Template
 	a.jobs[posted.Metadata.Name] = obj
 	if a.loseCreateBody {
 		w.WriteHeader(http.StatusCreated)
@@ -391,12 +409,12 @@ func TestKueueJobAdapterCreateIsIdempotentAndInspectsThroughReader(t *testing.T)
 		t.Fatal(err)
 	}
 	replay, err := restarted.Apply(ctx, req)
-	if err != nil || replay != ack || api.postCount() != 1 {
-		t.Fatalf("restarted adapter created a second Job: %+v posts=%d err=%v", replay, api.postCount(), err)
+	if !errors.Is(err, ErrAcknowledgementLost) || api.postCount() != 1 {
+		t.Fatalf("restarted adapter trusted unbound Job: %+v posts=%d err=%v", replay, api.postCount(), err)
 	}
 	reread, err := restarted.Inspect(ctx, req)
-	if err != nil || reread.ResourceUID != observed.ResourceUID || reread.Result != operation.ResourcePresent {
-		t.Fatalf("restarted inspect: %+v %v", reread, err)
+	if err != nil || reread.Result != operation.OperationInProgress || reread.ResourceUID != "" {
+		t.Fatalf("restarted Inspect claimed Job without durable UID: %+v %v", reread, err)
 	}
 
 	conflict := req
@@ -418,12 +436,13 @@ func TestKueueJobAdapterLostCreateACKIsInspectableWithoutASecondPost(t *testing.
 		t.Fatalf("posts=%d", api.postCount())
 	}
 	observed, err := adapter.Inspect(ctx, req)
-	if err != nil || observed.Result != operation.ResourcePresent || observed.ResourceUID != "job-uid-created" {
-		t.Fatalf("inspect after lost ACK: %+v %v", observed, err)
+	if err != nil || observed.Result != operation.OperationInProgress ||
+		observed.ResourceUID != "" || observed.ResourceID != "" {
+		t.Fatalf("inspect after lost ACK decided unbound Job: %+v %v", observed, err)
 	}
 	ack, err := adapter.Apply(ctx, req)
-	if err != nil || ack.OperationID != req.OperationID || api.postCount() != 1 {
-		t.Fatalf("replay after lost ACK: %+v posts=%d err=%v", ack, api.postCount(), err)
+	if !errors.Is(err, ErrAcknowledgementLost) || api.postCount() != 1 {
+		t.Fatalf("replay after lost ACK acknowledged unbound Job: %+v posts=%d err=%v", ack, api.postCount(), err)
 	}
 
 	now := time.Now()
@@ -451,8 +470,9 @@ func TestKueueJobAdapterLostCreateACKIsInspectableWithoutASecondPost(t *testing.
 	}
 	verified, err := reconciling.ApplyObservation(reconciling.Version, "worker-2", reconciling.FenceToken,
 		now.Add(time.Minute), req.DesiredGeneration, observed)
-	if err != nil || verified.Status != operation.Succeeded || verified.ProviderResourceUID != observed.ResourceUID {
-		t.Fatalf("lost-ACK observation did not record Job presence: %+v %v", verified, err)
+	if err != nil || verified.Status != operation.Unknown ||
+		verified.ProviderResourceUID != "" || verified.ProviderResourceID != "" {
+		t.Fatalf("lost-ACK without trusted UID incorrectly completed operation: %+v %v", verified, err)
 	}
 }
 
@@ -635,6 +655,62 @@ func TestKueueCreateJobNameIsStableDNSLabel(t *testing.T) {
 		name == kueueCreateJobName(req.TenantID, req.OperationID+"-other") ||
 		name == kueueCreateJobName("other-tenant", req.OperationID) {
 		t.Fatalf("job name %s", name)
+	}
+}
+
+func TestKueueJobAdapterRejectsReplayedJobWithUnsafeChangedSpec(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*kubeObject)
+	}{
+		{
+			name: "job was unsuspended",
+			mutate: func(job *kubeObject) {
+				suspended := false
+				job.Spec.Suspend = &suspended
+			},
+		},
+		{
+			name: "job image changed",
+			mutate: func(job *kubeObject) {
+				job.Spec.Template.Spec.Containers[0].Image = "busybox:1.36"
+			},
+		},
+		{
+			name: "job parallelism changed",
+			mutate: func(job *kubeObject) {
+				parallelism := 2
+				job.Spec.Parallelism = &parallelism
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			adapter, api, server := newKueueAdapterFixture(t, &kueueAPI{})
+			defer server.Close()
+			req := kueueAdapterRequest()
+			if _, err := adapter.Apply(context.Background(), req); err != nil {
+				t.Fatal(err)
+			}
+			name := kueueCreateJobName(req.TenantID, req.OperationID)
+			api.mu.Lock()
+			obj := api.jobs[name]
+			tc.mutate(&obj)
+			api.jobs[name] = obj
+			api.mu.Unlock()
+
+			if _, err := adapter.Apply(context.Background(), req); !errors.Is(err, ErrOperationConflict) {
+				t.Fatalf("replay accepted changed job spec: %v", err)
+			}
+			got, err := adapter.Inspect(context.Background(), req)
+			if err != nil || got.Result != operation.ObservationConflict ||
+				got.ReasonCode != "JOB_SPEC_MISMATCH" || got.ResourceUID != "" {
+				t.Fatalf("unsafe Job treated as authorized: %+v err=%v", got, err)
+			}
+			if api.postCount() != 1 {
+				t.Fatalf("replay created a second job: %d posts", api.postCount())
+			}
+		})
 	}
 }
 

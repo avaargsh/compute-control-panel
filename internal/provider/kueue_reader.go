@@ -100,7 +100,11 @@ type kubeCondition struct {
 type kubeObject struct {
 	Metadata kubeMeta `json:"metadata"`
 	Spec     struct {
-		NodeName string `json:"nodeName"`
+		NodeName    string                `json:"nodeName"`
+		Suspend     *bool                 `json:"suspend"`
+		Parallelism *int                  `json:"parallelism"`
+		Completions *int                  `json:"completions"`
+		Template    kueueBatchPodTemplate `json:"template"`
 	} `json:"spec"`
 	Status struct {
 		Conditions []kubeCondition `json:"conditions"`
