@@ -107,16 +107,16 @@ Detailed historical PR lists live in the commit history and linked issues. Older
 
 `gpu-compute-platform` is retired. All new Compute implementation, adapters, economics and release evidence belong here. See [migration matrix](docs/migration/GPU-COMPUTE-PLATFORM-CONSOLIDATION.md).
 
-## Architecture and contract references
+## Documentation
+
+Start with the [documentation index](docs/README.md) for a map of architecture, contracts, operations and testing docs.
+
+Key entry points:
 
 - [Architecture baseline](docs/architecture/BASELINE.md)
-- [Domain ownership and Kubernetes/Kueue boundary](docs/architecture/DOMAIN-OWNERSHIP.md)
-- [Workload and Provider operation contract v1](docs/architecture/WORKLOAD-OPERATION-V1.md)
-- [Compute Workload API and event contract v1](docs/contracts/COMPUTE-WORKLOAD-V1.md)
-- [OpenAPI 3.1 + JSON Schemas](docs/contracts/openapi.json)
+- [Domain ownership](docs/architecture/DOMAIN-OWNERSHIP.md)
 - [Cross-repository ownership ADR](docs/adr/ADR-001-CROSS-REPO-OWNERSHIP.md)
-- [Reliability acceptance matrix](docs/testing/RELIABILITY-ACCEPTANCE.md)
-- [Implementation plan](tasks/plan.md)
-- [Tracked tasks](tasks/todo.md)
+- [OpenAPI + schemas](docs/contracts/openapi.json)
+- [Reliability acceptance](docs/testing/RELIABILITY-ACCEPTANCE.md)
 
 These are design contracts; external acceptance (live Provider/Kueue/DRA, production tenant isolation) remains open.
