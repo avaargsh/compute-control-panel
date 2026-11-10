@@ -1,9 +1,11 @@
 // kueue-provider-smoke is a disposable-kind-only executable that invokes
 // the actual KueueJobAdapter against kube-apiserver with a scoped ServiceAccount.
-// With no arguments it uses a private in-memory binding store. The durable
+// With no arguments it uses an explicit private in-memory binding store.
+// That store is the test fake, not the in-cluster constructor. The durable
 // phases use PostgresKueueJobBindingStore when CCP_KUEUE_BINDING_DSN is set,
-// as separate processes. This must never be used to infer production GPU
-// readiness, quota release, or Allocation RELEASED.
+// as separate processes. The disposable database login is still a superuser;
+// NewServiceAccountKueueJobAdapter would refuse it. This must never be used
+// to infer production GPU readiness, quota release, or Allocation RELEASED.
 package main
 
 import (
@@ -114,10 +116,12 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 	if err != nil || present.Result != operation.ResourcePresent || present.ResourceUID == "" {
 		return fmt.Errorf("created Job not pinned: %+v: %w", present, err)
 	}
-	// A newly started adapter has no persisted UID receipt. The matching Job
-	// MUST remain unresolved, not be adopted from its annotations.
-	restarted, err := provider.NewServiceAccountKueueJobAdapter(
+	// A new adapter with an explicit private memory store has no persisted UID
+	// receipt. The matching Job MUST remain unresolved, not be adopted from
+	// its annotations. This is not the in-cluster constructor.
+	restarted, err := provider.NewServiceAccountKueueJobAdapterWithBindings(
 		apiURL, serviceAccountFiles+"/ca.crt", serviceAccountFiles+"/token", smokeNamespace,
+		provider.NewMemoryKueueJobBindingStore(),
 	)
 	if err != nil {
 		return err
@@ -207,8 +211,9 @@ func run(ctx context.Context, getenv func(string) string, out io.Writer) error {
 	if _, err := boundAgain.Apply(ctx, remove); err != nil {
 		return fmt.Errorf("bound delete replay was not idempotent: %w", err)
 	}
-	postRestart, err := provider.NewServiceAccountKueueJobAdapter(
+	postRestart, err := provider.NewServiceAccountKueueJobAdapterWithBindings(
 		apiURL, serviceAccountFiles+"/ca.crt", serviceAccountFiles+"/token", smokeNamespace,
+		provider.NewMemoryKueueJobBindingStore(),
 	)
 	if err != nil {
 		return err

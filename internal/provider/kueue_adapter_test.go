@@ -634,14 +634,17 @@ func TestKueueJobAdapterServiceAccountClientCreatesThenObserves(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(api.serve))
 	defer server.Close()
 	ca, tokenFile := serviceAccountTestFiles(t, server)
-	if _, err := NewServiceAccountKueueJobAdapter(server.URL, ca, tokenFile, "Not_A_Namespace"); !errors.Is(err, ErrInvalidKueueObservation) {
+	offline := "postgres://ccp_kueue_job_binding@127.0.0.1:1/postgres?sslmode=disable&connect_timeout=1"
+	if _, err := NewServiceAccountKueueJobAdapter(server.URL, ca, tokenFile, "Not_A_Namespace", offline); !errors.Is(err, ErrInvalidKueueObservation) {
 		t.Fatalf("invalid namespace accepted: %v", err)
 	}
 	plain := strings.Replace(server.URL, "https://", "http://", 1)
-	if _, err := NewServiceAccountKueueJobAdapter(plain, ca, tokenFile, "tenant-a"); !errors.Is(err, ErrInvalidKueueObservation) {
+	if _, err := NewServiceAccountKueueJobAdapter(plain, ca, tokenFile, "tenant-a", offline); !errors.Is(err, ErrInvalidKueueObservation) {
 		t.Fatalf("plaintext API accepted: %v", err)
 	}
-	adapter, err := NewServiceAccountKueueJobAdapter(server.URL, ca, tokenFile, "tenant-a")
+	adapter, err := NewServiceAccountKueueJobAdapterWithBindings(
+		server.URL, ca, tokenFile, "tenant-a", NewMemoryKueueJobBindingStore(),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

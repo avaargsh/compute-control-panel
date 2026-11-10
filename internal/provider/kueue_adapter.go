@@ -46,9 +46,12 @@ var errKueueJobAlreadyExists = errors.New("kubernetes job already exists")
 // DELETE TARGET_ABSENT is a stored tombstone for that UID plus a UID-fenced
 // 404. It is not Allocation cleanup, Kueue quota release, or device or claim
 // deallocation. A 404 with no stored CREATE pin and no stored DELETE tombstone
-// stays ambiguous. NewKueueJobAdapter keeps a private in-memory store, so a
-// later adapter that cannot load the same store still fails closed and MUST
-// NOT reconstruct a pin from the Job name or annotations.
+// stays ambiguous. NewKueueJobAdapter is the explicit in-memory constructor
+// for tests and fakes. An in-cluster ServiceAccount process uses
+// NewServiceAccountKueueJobAdapter, which requires a durable Postgres store
+// and never substitutes memory. A later adapter that cannot load the same
+// store still fails closed and MUST NOT reconstruct a pin from the Job name
+// or annotations.
 // This type does not admit, schedule, claim devices, or mount an HTTP handler.
 type KueueJobAdapter struct {
 	namespace string
@@ -60,8 +63,11 @@ type KueueJobAdapter struct {
 
 // NewKueueJobAdapter binds CREATE and Inspect to one namespace and an HTTPS
 // client the caller has already authenticated. The client is shared with the
-// read-only reader. No cluster credential is built here. The adapter keeps a
-// private in-memory binding store, so a later adapter cannot see its pins.
+// read-only reader. No cluster credential is built here. This is the explicit
+// in-memory constructor for tests and fakes: the adapter keeps a private
+// memory store, so a later adapter cannot see its pins. In-cluster deployment
+// must not call it. Use NewServiceAccountKueueJobAdapter, which refuses to
+// start without a durable Postgres binding store.
 func NewKueueJobAdapter(apiURL, namespace string, client *http.Client) (*KueueJobAdapter, error) {
 	return NewKueueJobAdapterWithBindings(apiURL, namespace, client, NewMemoryKueueJobBindingStore())
 }
@@ -86,23 +92,53 @@ func NewKueueJobAdapterWithBindings(apiURL, namespace string, client *http.Clien
 	}, nil
 }
 
-// NewServiceAccountKueueJobAdapter uses the same pinned ServiceAccount HTTPS
-// client as the read-only observer. Bind a separate Role: create, delete, and
-// get batch/v1 Jobs, plus list Pods and Kueue Workloads for Inspect. Do not add
-// update, patch, or cluster-admin, and do not add create or delete to the
-// observer Role. Provenance from Inspect stays unattested.
-func NewServiceAccountKueueJobAdapter(apiURL, caPath, tokenPath, namespace string) (*KueueJobAdapter, error) {
-	return NewServiceAccountKueueJobAdapterWithBindings(
-		apiURL, caPath, tokenPath, namespace, NewMemoryKueueJobBindingStore(),
-	)
+// NewServiceAccountKueueJobAdapter is the in-cluster constructor. It uses the
+// same pinned ServiceAccount HTTPS client as the read-only observer and opens
+// a PostgresKueueJobBindingStore from bindingDSN. Bind a separate Kubernetes
+// Role: create, delete, and get batch/v1 Jobs, plus list Pods and Kueue
+// Workloads for Inspect. Do not add update, patch, or cluster-admin, and do
+// not add create or delete to the observer Role. Provenance from Inspect
+// stays unattested.
+//
+// An empty DSN, an unreachable database, a missing binding schema, or a
+// connected role with broader privileges than the binding DML returns an
+// error before an adapter exists. This constructor never uses an in-memory
+// store. Tests that need a private memory store call
+// NewServiceAccountKueueJobAdapterWithBindings with
+// NewMemoryKueueJobBindingStore. Neither constructor mounts an HTTP handler.
+func NewServiceAccountKueueJobAdapter(apiURL, caPath, tokenPath, namespace, bindingDSN string) (*KueueJobAdapter, error) {
+	if !validKubeName(namespace) {
+		return nil, ErrInvalidKueueObservation
+	}
+	// Reject a bad API URL before opening the database so a plaintext or
+	// malformed endpoint cannot be paired with a live binding login.
+	if _, err := NewKubernetesObservationReader(apiURL, &http.Client{Timeout: 15 * time.Second}); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(caPath) == "" || strings.TrimSpace(tokenPath) == "" {
+		return nil, ErrInvalidKueueObservation
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	store, db, err := OpenDurablePostgresKueueJobBindingStore(ctx, bindingDSN)
+	if err != nil {
+		return nil, err
+	}
+	adapter, err := NewServiceAccountKueueJobAdapterWithBindings(apiURL, caPath, tokenPath, namespace, store)
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return adapter, nil
 }
 
 // NewServiceAccountKueueJobAdapterWithBindings reuses the authenticated,
-// CA-pinned ServiceAccount transport and an explicit binding store.
-// NewServiceAccountKueueJobAdapter still passes a private memory store, which
-// dies with the process. A PostgresKueueJobBindingStore keeps the pin and
-// tombstone across a new database connection. Neither constructor mounts an
-// HTTP handler.
+// CA-pinned ServiceAccount transport and an explicit binding store. Tests
+// and the disposable kind smoke pass either a memory store or a database
+// they already opened. In-cluster deployment uses NewServiceAccountKueueJobAdapter,
+// which opens the durable store itself and fail-closes. A
+// PostgresKueueJobBindingStore keeps the pin and tombstone across a new
+// database connection. This constructor does not mount an HTTP handler.
 func NewServiceAccountKueueJobAdapterWithBindings(
 	apiURL, caPath, tokenPath, namespace string, bindings KueueJobBindingStore,
 ) (*KueueJobAdapter, error) {
