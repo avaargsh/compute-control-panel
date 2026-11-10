@@ -518,14 +518,32 @@ spec:
     env:
     - name: CCP_DISPOSABLE_KIND_SMOKE
       value: '1'
+    - name: POD_NAMESPACE
+      valueFrom:
+        fieldRef: {fieldPath: metadata.namespace}
     securityContext:
       allowPrivilegeEscalation: false
       capabilities: {drop: [ALL]}
       runAsNonRoot: true
       readOnlyRootFilesystem: true
 YAML
-wait_for 'queued writer Pod completed' bash -c \
-  '[[ "$(kubectl -n "$1" get pod ccp-queued-submit -o jsonpath="{.status.phase}")" == Succeeded ]]' _ "$ns"
+queued_writer_completed() {
+  phase="$(kubectl -n "$ns" get pod ccp-queued-submit -o jsonpath='{.status.phase}')"
+  if [[ "$phase" == Failed ]]; then
+    kubectl -n "$ns" logs ccp-queued-submit >&2 || true
+    kubectl -n "$ns" describe pod ccp-queued-submit >&2 || true
+    echo "queued writer Pod failed" >&2
+    return 2
+  fi
+  [[ "$phase" == Succeeded ]]
+}
+# A FAILED Pod is terminal, not a three-minute Succeeded timeout.
+for _ in $(seq 1 90); do
+  if queued_writer_completed; then break; fi
+  if [[ "$phase" == Failed ]]; then exit 1; fi
+  sleep 2
+done
+[[ "$phase" == Succeeded ]] || { echo "timed out: queued writer Pod" >&2; exit 1; }
 kubectl -n "$ns" logs ccp-queued-submit > "$dir/queued.json"
 jq -e '.resource_id != "" and .resource_uid != "" and .attested_gpu == false and .released == false' "$dir/queued.json" >/dev/null
 queued_ref="$(jq -r .resource_id "$dir/queued.json")"
