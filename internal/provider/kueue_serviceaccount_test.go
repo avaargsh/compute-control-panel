@@ -167,12 +167,12 @@ func TestServiceAccountReaderRejectsTokenLossAndIncorrectRootWithoutLeakingToken
 	}
 	now := time.Now()
 	certificate := &x509.Certificate{
-		SerialNumber: big.NewInt(42),
-		NotBefore: now.Add(-time.Minute),
-		NotAfter: now.Add(time.Hour),
-		IsCA: true,
+		SerialNumber:          big.NewInt(42),
+		NotBefore:             now.Add(-time.Minute),
+		NotAfter:              now.Add(time.Hour),
+		IsCA:                  true,
 		BasicConstraintsValid: true,
-		KeyUsage: x509.KeyUsageCertSign,
+		KeyUsage:              x509.KeyUsageCertSign,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, certificate, certificate, publicKey, privateKey)
 	if err != nil {
