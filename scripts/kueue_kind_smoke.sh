@@ -79,6 +79,44 @@ for verb in create update patch delete; do
   [[ "$answer" == no ]] || { echo "observer has unauthorized $verb permission" >&2; exit 1; }
 done
 
+# The writer is a separate identity; the read-only observer Role stays GET/LIST.
+kubectl apply -f - <<YAML
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: ccp-kueue-lifecycle, namespace: $ns}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: ccp-kueue-lifecycle, namespace: $ns}
+rules:
+- apiGroups: [batch]
+  resources: [jobs]
+  verbs: [create, get, delete]
+- apiGroups: ['']
+  resources: [pods]
+  verbs: [list]
+- apiGroups: [kueue.x-k8s.io]
+  resources: [workloads]
+  verbs: [list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: ccp-kueue-lifecycle, namespace: $ns}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: ccp-kueue-lifecycle}
+subjects:
+- kind: ServiceAccount
+  name: ccp-kueue-lifecycle
+  namespace: $ns
+YAML
+for verb in create get delete; do
+  answer="$(kubectl auth can-i "$verb" jobs.batch --as="system:serviceaccount:$ns:ccp-kueue-lifecycle" -n "$ns" || true)"
+  [[ "$answer" == yes ]] || { echo "writer missing required $verb permission" >&2; exit 1; }
+done
+for verb in update patch; do
+  answer="$(kubectl auth can-i "$verb" jobs.batch --as="system:serviceaccount:$ns:ccp-kueue-lifecycle" -n "$ns" || true)"
+  [[ "$answer" == no ]] || { echo "writer has forbidden $verb permission" >&2; exit 1; }
+done
+
 # Zero CPU/memory quota gives a real unadmitted Kueue Workload.
 # Keep this manifest stable so transient webhook startup failures can be retried.
 cat > "$dir/kueue-queues.yaml" <<YAML
@@ -129,9 +167,11 @@ kubectl get clusterqueue ccp-smoke -o name
 kubectl -n "$ns" get localqueue ccp-smoke -o name
 
 CGO_ENABLED=0 go build -trimpath -o "$dir/kueue-observe" ./cmd/kueue-observe
+CGO_ENABLED=0 go build -trimpath -o "$dir/kueue-provider-smoke" ./cmd/kueue-provider-smoke
 cat > "$dir/Dockerfile" <<'DOCKER'
 FROM scratch
 COPY kueue-observe /kueue-observe
+COPY kueue-provider-smoke /kueue-provider-smoke
 USER 65532:65532
 ENTRYPOINT ["/kueue-observe"]
 DOCKER
@@ -275,4 +315,43 @@ if printf '%s\n' "$stale_logs" | jq -e '.Stage or .Evidence' >/dev/null 2>&1; th
   echo "stale UID emitted successful observation JSON" >&2; exit 1
 fi
 kubectl -n "$ns" delete job "$job" --cascade=background --wait=true
-echo "PASS: real Kueue queue/admission/placement, quota cleanup and stale UID rejection. NO GPU/DRA readiness or release attestation."
+
+# This extra smoke invokes CCP's actual provider.Adapter CREATE/Inspect/DELETE
+# against the same real API. It is NOT a broker/PG worker restart test.
+kubectl apply -f - <<YAML
+apiVersion: v1
+kind: Pod
+metadata: {name: ccp-provider-lifecycle, namespace: $ns}
+spec:
+  serviceAccountName: ccp-kueue-lifecycle
+  restartPolicy: Never
+  containers:
+  - name: lifecycle
+    image: ccp-kueue-observe:smoke
+    imagePullPolicy: Never
+    command: ["/kueue-provider-smoke"]
+    env:
+    - name: CCP_DISPOSABLE_KIND_SMOKE
+      value: '1'
+    - name: POD_NAMESPACE
+      valueFrom:
+        fieldRef: {fieldPath: metadata.namespace}
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities: {drop: [ALL]}
+      runAsNonRoot: true
+      readOnlyRootFilesystem: true
+YAML
+wait_for 'actual provider adapter lifecycle smoke' observer_succeeded provider-lifecycle
+kubectl -n "$ns" logs ccp-provider-lifecycle > "$dir/lifecycle.json"
+jq -e '.created_uid != "" and
+  .created_result == "RESOURCE_PRESENT" and
+  .after_adapter_reinit == "OPERATION_IN_PROGRESS" and
+  .rejected_wrong_uid == true and
+  .deleted_result == "TARGET_ABSENT" and
+  .after_delete_reinit == "CONFLICT" and
+  .release_attested == false' "$dir/lifecycle.json" >/dev/null
+kubectl -n "$ns" get jobs -o json | jq -e '
+  all(.items[]; .metadata.annotations["compute-control-panel.io/operation-id"] != "ccp-kind-lifecycle-create")' >/dev/null
+echo "provider_lifecycle=$(jq -c '.' "$dir/lifecycle.json")"
+echo "PASS: real Kueue queue/admission/placement, quota cleanup, stale UID rejection and real adapter CREATE/DELETE. NO GPU/DRA readiness or release attestation."
