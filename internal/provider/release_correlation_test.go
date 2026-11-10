@@ -85,7 +85,11 @@ func TestReleaseEvidenceCorrelationRejectsCrossAllocationSplicing(t *testing.T) 
 		{name: "CREATE missing durable Allocation ID", mutate: func(e *ReleaseEvidenceCandidate) { e.Create.AllocationID = "" }},
 		{name: "CREATE belongs to different Allocation", mutate: func(e *ReleaseEvidenceCandidate) { e.Create.AllocationID = "allocation-b" }},
 		{name: "CREATE belongs to different Provider", mutate: func(e *ReleaseEvidenceCandidate) { e.Create.ProviderID = "provider-b" }},
-		{name: "CREATE not confirmed", mutate: func(e *ReleaseEvidenceCandidate) { e.Create.Status = operation.Unknown; e.Create.ProviderResourceID = ""; e.Create.ProviderResourceUID = "" }},
+		{name: "CREATE not confirmed", mutate: func(e *ReleaseEvidenceCandidate) {
+			e.Create.Status = operation.Unknown
+			e.Create.ProviderResourceID = ""
+			e.Create.ProviderResourceUID = ""
+		}},
 		{name: "CREATE Job UID differs", mutate: func(e *ReleaseEvidenceCandidate) { e.Create.ProviderResourceUID = "other-job-uid" }},
 		{name: "CREATE Job name differs", mutate: func(e *ReleaseEvidenceCandidate) { e.Create.ProviderResourceID = "tenant-a/job-b" }},
 		{name: "CREATE generation mismatches Kueue pin", mutate: func(e *ReleaseEvidenceCandidate) { e.Create.Generation = 9 }},
