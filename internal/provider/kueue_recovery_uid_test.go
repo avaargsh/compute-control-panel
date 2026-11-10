@@ -13,8 +13,8 @@ import (
 // the original Job from a successor that copied the same annotations.
 func TestKueueJobRestartDoesNotAdoptUnpinnedSameNameJob(t *testing.T) {
 	for _, tc := range []struct {
-		name         string
-		replacement  string
+		name        string
+		replacement string
 	}{
 		{name: "original job still exists"},
 		{name: "successor copied original annotations", replacement: "job-uid-successor"},
