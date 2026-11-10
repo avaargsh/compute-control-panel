@@ -31,6 +31,14 @@ type KubernetesJobQuery struct {
 	ExpectedJobUID    string
 }
 
+// Annotation keys the read-only Job reader treats as immutable identity.
+// The Job adapter writes the same keys; a mismatch fails closed as UNPROVEN.
+const (
+	kueueAnnotationTenantID          = "compute-control-panel.io/tenant-id"
+	kueueAnnotationWorkloadID        = "compute-control-panel.io/workload-id"
+	kueueAnnotationDesiredGeneration = "compute-control-panel.io/desired-generation"
+)
+
 var kubeDNSLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
 func validKubeName(s string) bool {
@@ -190,9 +198,9 @@ func (r *KubernetesObservationReader) ObserveJob(
 	jobRef := refFromKube(job.Metadata)
 	if !validKubernetesRef(jobRef) || jobRef.Namespace != q.Namespace ||
 		jobRef.Name != q.JobName || jobRef.UID != q.ExpectedJobUID ||
-		job.Metadata.Annotations["compute-control-panel.io/tenant-id"] != q.TenantID ||
-		job.Metadata.Annotations["compute-control-panel.io/workload-id"] != q.WorkloadID ||
-		job.Metadata.Annotations["compute-control-panel.io/desired-generation"] != strconv.FormatUint(q.DesiredGeneration, 10) {
+		job.Metadata.Annotations[kueueAnnotationTenantID] != q.TenantID ||
+		job.Metadata.Annotations[kueueAnnotationWorkloadID] != q.WorkloadID ||
+		job.Metadata.Annotations[kueueAnnotationDesiredGeneration] != strconv.FormatUint(q.DesiredGeneration, 10) {
 		return reject(ErrInvalidKueueObservation)
 	}
 	e := KueueJobEvidence{

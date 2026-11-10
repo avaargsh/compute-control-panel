@@ -46,33 +46,26 @@ func (t *serviceAccountTransport) RoundTrip(req *http.Request) (*http.Response, 
 	return t.transport.RoundTrip(copyRequest)
 }
 
-// NewServiceAccountKubernetesObservationReader uses a dedicated HTTPS client,
-// explicitly pinned to the supplied Kubernetes ServiceAccount CA bundle.
-// Mounted tokens are re-read on every API GET; proxies and redirects are
-// disabled to prevent credential forwarding. The caller must obtain the HTTPS
-// API URL and mounted file paths from a trusted Pod configuration, and grant
-// only GET Jobs / LIST Pods and Kueue Workloads in its namespace.
-//
-// This connection proves only a successful TLS/API read at the configured
-// endpoint, not independent provider attestation, device allocation, resource
-// cleanup finality or trusted production evidence. The Collector provenance
-// remains marked UNATTESTED.
-func NewServiceAccountKubernetesObservationReader(
-	apiURL, caPath, tokenPath string,
-) (*KubernetesObservationReader, error) {
+// newServiceAccountHTTPClient builds the pinned HTTPS client shared by the
+// read-only observer and the Job create adapter. The returned closer releases
+// idle connections when a later constructor rejects the API URL or namespace.
+// Proxies and redirects stay disabled, and the projected token is re-read on
+// every request. This does not choose RBAC; callers must bind the narrower Role
+// for the verbs they actually use.
+func newServiceAccountHTTPClient(caPath, tokenPath string) (*http.Client, func(), error) {
 	if strings.TrimSpace(caPath) == "" || strings.TrimSpace(tokenPath) == "" {
-		return nil, ErrInvalidKueueObservation
+		return nil, nil, ErrInvalidKueueObservation
 	}
 	if _, err := readServiceAccountToken(tokenPath); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	caPEM, err := os.ReadFile(caPath)
 	if err != nil || len(caPEM) == 0 || len(caPEM) > 1<<20 {
-		return nil, fmt.Errorf("%w: Kubernetes CA bundle unavailable or invalid", ErrInvalidKueueObservation)
+		return nil, nil, fmt.Errorf("%w: Kubernetes CA bundle unavailable or invalid", ErrInvalidKueueObservation)
 	}
 	roots := x509.NewCertPool()
 	if !roots.AppendCertsFromPEM(caPEM) {
-		return nil, fmt.Errorf("%w: Kubernetes CA bundle contains no usable certificates", ErrInvalidKueueObservation)
+		return nil, nil, fmt.Errorf("%w: Kubernetes CA bundle contains no usable certificates", ErrInvalidKueueObservation)
 	}
 
 	transport := &http.Transport{
@@ -89,9 +82,30 @@ func NewServiceAccountKubernetesObservationReader(
 			transport: transport,
 		},
 	}
+	return client, transport.CloseIdleConnections, nil
+}
+
+// NewServiceAccountKubernetesObservationReader uses a dedicated HTTPS client,
+// explicitly pinned to the supplied Kubernetes ServiceAccount CA bundle.
+// Mounted tokens are re-read on every API GET; proxies and redirects are
+// disabled to prevent credential forwarding. The caller must obtain the HTTPS
+// API URL and mounted file paths from a trusted Pod configuration, and grant
+// only GET Jobs / LIST Pods and Kueue Workloads in its namespace.
+//
+// This connection proves only a successful TLS/API read at the configured
+// endpoint, not independent provider attestation, device allocation, resource
+// cleanup finality or trusted production evidence. The Collector provenance
+// remains marked UNATTESTED.
+func NewServiceAccountKubernetesObservationReader(
+	apiURL, caPath, tokenPath string,
+) (*KubernetesObservationReader, error) {
+	client, closeIdle, err := newServiceAccountHTTPClient(caPath, tokenPath)
+	if err != nil {
+		return nil, err
+	}
 	reader, err := NewKubernetesObservationReader(apiURL, client)
 	if err != nil {
-		transport.CloseIdleConnections()
+		closeIdle()
 		return nil, err
 	}
 	return reader, nil
