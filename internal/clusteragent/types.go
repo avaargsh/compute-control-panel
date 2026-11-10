@@ -82,6 +82,7 @@ func (r ProviderRequest) Validate() error {
 
 type Command struct {
 	CommandID       string          `json:"command_id"`
+	CommandSequence uint64          `json:"command_sequence"`
 	SchemaVersion   string          `json:"schema_version"`
 	Action          CommandAction   `json:"action"`
 	AgentID         string          `json:"agent_id"`
@@ -106,7 +107,7 @@ func (c Command) Validate() error {
 			return ErrInvalid
 		}
 	}
-	if c.SchemaVersion != ProtocolVersion ||
+	if c.SchemaVersion != ProtocolVersion || c.CommandSequence == 0 ||
 		(c.Action != ActionApply && c.Action != ActionInspect) ||
 		c.DesiredGeneration == 0 || c.LeaseEpoch == 0 || c.CommandFence == 0 ||
 		c.LeaseExpiresAt.IsZero() || c.RequestDigest == "" ||
