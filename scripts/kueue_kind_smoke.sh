@@ -366,7 +366,7 @@ observer queued "$uid" UNPROVEN
 kubectl patch clusterqueue ccp-smoke --type=json -p='[{"op":"replace","path":"/spec/resourceGroups/0/flavors/0/resources/0/nominalQuota","value":"2"},{"op":"replace","path":"/spec/resourceGroups/0/flavors/0/resources/1/nominalQuota","value":"2Gi"}]'
 wait_for 'Kueue reserved quota and admitted Job' workload_admitted "$uid"
 wait_for 'ClusterQueue tracks exact quota reservation' quota_reserved_in_clusterqueue
-if [[ "$(pods_json "$uid" | jq '[.items[] | select(.spec.nodeName != "")] | length')" != 0 ]]; then
+if [[ "$(pods_json "$uid" | jq '[.items[] | select((.spec.nodeName // "") != "")] | length')" != 0 ]]; then
   echo "Pod bound before node opt-in" >&2; exit 1
 fi
 echo "kueue_reserved_evidence=$(workloads_json | jq -c --arg id "$uid" '.items[] | select(any(.metadata.ownerReferences[]?; .kind == "Job" and .uid == $id)) | {uid:.metadata.uid,rv:.metadata.resourceVersion,conditions:.status.conditions,admission:.status.admission}')"
