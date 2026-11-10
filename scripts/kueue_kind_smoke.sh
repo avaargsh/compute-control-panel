@@ -366,6 +366,36 @@ observer queued "$uid" UNPROVEN
 kubectl patch clusterqueue ccp-smoke --type=json -p='[{"op":"replace","path":"/spec/resourceGroups/0/flavors/0/resources/0/nominalQuota","value":"2"},{"op":"replace","path":"/spec/resourceGroups/0/flavors/0/resources/1/nominalQuota","value":"2Gi"}]'
 wait_for 'Kueue reserved quota and admitted Job' workload_admitted "$uid"
 wait_for 'ClusterQueue tracks exact quota reservation' quota_reserved_in_clusterqueue
+
+# Actual disposable Kueue API object identities: not Provider, GPU or DRA
+# evidence. Join by the original Job UID; never infer queue ownership by name
+# alone or treat an empty UID/RV as a verified reservation.
+wl_queue_json="$(workloads_json | jq -ce --arg id "$uid" '
+  [.items[] | select(any(.metadata.ownerReferences[]?; .kind == "Job" and .uid == $id))]
+  | if length == 1 then .[0] else empty end')"
+lq_queue_json="$(kubectl -n "$ns" get localqueue ccp-smoke -o json)"
+cq_queue_json="$(kubectl get clusterqueue ccp-smoke -o json)"
+jq -nce --argjson w "$wl_queue_json" --argjson l "$lq_queue_json" --argjson c "$cq_queue_json" '
+  if (
+    $w.spec.queueName == "ccp-smoke"
+    and $w.metadata.namespace == $l.metadata.namespace
+    and $l.metadata.name == "ccp-smoke"
+    and $l.spec.clusterQueue == $c.metadata.name
+    and $c.metadata.name == "ccp-smoke"
+    and $w.status.admission.clusterQueue == $c.metadata.name
+    and ([ $w.metadata.uid, $w.metadata.resourceVersion,
+           $l.metadata.uid, $l.metadata.resourceVersion,
+           $c.metadata.uid, $c.metadata.resourceVersion ]
+         | all(.[]; type == "string" and length > 0))
+  ) then {
+    workload: {uid:$w.metadata.uid, rv:$w.metadata.resourceVersion, queueName:$w.spec.queueName},
+    localQueue: {uid:$l.metadata.uid, rv:$l.metadata.resourceVersion, namespace:$l.metadata.namespace, name:$l.metadata.name, clusterQueue:$l.spec.clusterQueue},
+    clusterQueue: {uid:$c.metadata.uid, rv:$c.metadata.resourceVersion, name:$c.metadata.name},
+    podSetAssignments: $w.status.admission.podSetAssignments
+  } else empty end' > "$dir/kueue-queue-binding.json" || {
+  echo "Kueue queue UID / ownership chain could not be proven" >&2; exit 1
+}
+echo "kueue_queue_binding_evidence=$(cat "$dir/kueue-queue-binding.json")"
 if [[ "$(pods_json "$uid" | jq '[.items[] | select((.spec.nodeName // "") != "")] | length')" != 0 ]]; then
   echo "Pod bound before node opt-in" >&2; exit 1
 fi
