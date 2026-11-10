@@ -25,9 +25,9 @@ func kueueEvidenceFixture() KueueJobEvidence {
 
 func TestKueueObservationSeparatesAdmissionFromPlacement(t *testing.T) {
 	tests := []struct {
-		name string
+		name   string
 		change func(*KueueJobEvidence)
-		want KueueObservationStage
+		want   KueueObservationStage
 	}{
 		{
 			name: "job exists but queue evidence absent",
@@ -72,9 +72,9 @@ func TestKueueObservationSeparatesAdmissionFromPlacement(t *testing.T) {
 			want: KueueAdmitted,
 		},
 		{
-			name: "pod scheduled without device proof is placement only",
+			name:   "pod scheduled without device proof is placement only",
 			change: func(e *KueueJobEvidence) {},
-			want: KueuePodPlaced,
+			want:   KueuePodPlaced,
 		},
 	}
 	for _, tc := range tests {
