@@ -30,7 +30,9 @@ func TestDisposableLifecycleGuardRequiresExactOptIn(t *testing.T) {
 		}
 	}
 	if !disposableAllowed(func(k string) string {
-		if k == "CCP_DISPOSABLE_KIND_SMOKE" { return "1" }
+		if k == "CCP_DISPOSABLE_KIND_SMOKE" {
+			return "1"
+		}
 		return ""
 	}) {
 		t.Fatal("explicit disposable test opt-in rejected")
