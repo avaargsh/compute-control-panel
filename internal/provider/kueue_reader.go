@@ -235,11 +235,23 @@ func (r *KubernetesObservationReader) ObserveJob(
 		if err != nil {
 			return reject(err)
 		}
-		if admitted && (workload.Status.Admission == nil || workload.Status.Admission.ClusterQueue == "") {
+		reserved, err := conditionIsTrue(workload.Status.Conditions, "QuotaReserved")
+		if err != nil {
+			return reject(err)
+		}
+		// Kueue quota reservation is a separate authority fact from
+		// admission. A stale Admitted=True alone cannot promote placement.
+		if admitted && !reserved {
 			return reject(ErrInvalidKueueObservation)
 		}
-		e.KueueAdmitted = admitted && workload.Status.Admission != nil &&
-			workload.Status.Admission.ClusterQueue != ""
+		if reserved {
+			if workload.Status.Admission == nil || workload.Status.Admission.ClusterQueue == "" {
+				return reject(ErrInvalidKueueObservation)
+			}
+			e.KueueClusterQueue = workload.Status.Admission.ClusterQueue
+		}
+		e.KueueQuotaReserved = reserved
+		e.KueueAdmitted = admitted && reserved
 	}
 	if e.KueueAdmitted {
 		var pods kubeObjectList

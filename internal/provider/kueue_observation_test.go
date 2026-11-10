@@ -15,7 +15,7 @@ func kueueEvidenceFixture() KueueJobEvidence {
 		KueueWorkload: KubernetesResourceRef{
 			Namespace: "tenant-a", Name: "kueue-workload-a", UID: "kueue-uid-a", ResourceVersion: "102",
 		},
-		KueueOwnerJobUID: "job-uid-a", KueueAdmitted: true,
+		KueueOwnerJobUID: "job-uid-a", KueueQuotaReserved: true, KueueClusterQueue: "cq-a", KueueAdmitted: true,
 		Pod: KubernetesResourceRef{
 			Namespace: "tenant-a", Name: "pod-a", UID: "pod-uid-a", ResourceVersion: "103",
 		},
@@ -34,6 +34,8 @@ func TestKueueObservationSeparatesAdmissionFromPlacement(t *testing.T) {
 			change: func(e *KueueJobEvidence) {
 				e.KueueWorkload = KubernetesResourceRef{}
 				e.KueueOwnerJobUID = ""
+				e.KueueQuotaReserved = false
+				e.KueueClusterQueue = ""
 				e.KueueAdmitted = false
 				e.Pod = KubernetesResourceRef{}
 				e.PodOwnerJobUID = ""
@@ -102,6 +104,8 @@ func TestKueueObservationRejectsContradictoryOrCrossScopeEvidence(t *testing.T) 
 		{"missing job UID", func(e *KueueJobEvidence) { e.Job.UID = "" }},
 		{"missing kueue resource version", func(e *KueueJobEvidence) { e.KueueWorkload.ResourceVersion = "" }},
 		{"foreign kueue namespace", func(e *KueueJobEvidence) { e.KueueWorkload.Namespace = "tenant-b" }},
+		{"admitted with quota explicitly missing", func(e *KueueJobEvidence) { e.KueueQuotaReserved = false }},
+		{"reserved quota without ClusterQueue", func(e *KueueJobEvidence) { e.KueueClusterQueue = "" }},
 		{"foreign kueue job owner", func(e *KueueJobEvidence) { e.KueueOwnerJobUID = "other-job-uid" }},
 		{"foreign pod namespace", func(e *KueueJobEvidence) { e.Pod.Namespace = "tenant-b" }},
 		{"foreign pod job owner", func(e *KueueJobEvidence) { e.PodOwnerJobUID = "other-job-uid" }},

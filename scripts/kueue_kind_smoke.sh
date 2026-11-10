@@ -276,6 +276,9 @@ pods_json() { kubectl -n "$ns" get pods -l "batch.kubernetes.io/controller-uid=$
 workloads_json() { kubectl -n "$ns" get workloads -o json; }
 observer_succeeded() { [[ "$(kubectl -n "$ns" get pod "ccp-observe-$1" -o jsonpath='{.status.phase}')" == Succeeded ]]; }
 observer_failed() { [[ "$(kubectl -n "$ns" get pod "ccp-observe-$1" -o jsonpath='{.status.phase}')" == Failed ]]; }
+old_job_absent() {
+  kubectl -n "$ns" get jobs -o json | jq -e --arg uid "$uid" 'all(.items[]; .metadata.uid != $uid)' >/dev/null
+}
 old_pod_absent() {
   kubectl -n "$ns" get pods -o json | jq -e --arg uid "$old_pod_uid" 'all(.items[]; .metadata.uid != $uid)' >/dev/null
 }
@@ -288,11 +291,39 @@ quota_released() {
 workload_for_uid() {
   workloads_json | jq -e --arg id "$1" '[.items[] | select(any(.metadata.ownerReferences[]?; .kind == "Job" and .uid == $id))] | length == 1' >/dev/null
 }
+workload_unreserved() {
+  # Quota reservation and admission are distinct Kueue facts. No default-to-
+  # true when a condition is absent or the owner UID does not match.
+  workloads_json | jq -e --arg id "$1" '
+    [.items[] | select(any(.metadata.ownerReferences[]?; .kind == "Job" and .uid == $id))
+      | select((.metadata.uid | type) == "string" and (.metadata.uid | length) > 0
+        and (.metadata.resourceVersion | type) == "string" and (.metadata.resourceVersion | length) > 0
+        and .status.admission == null
+        and any(.status.conditions[]?; .type == "QuotaReserved" and .status == "False")
+        and (any(.status.conditions[]?; .type == "Admitted" and .status == "True") | not))] | length == 1' >/dev/null
+}
 workload_admitted() {
-  workloads_json | jq -e --arg id "$1" '[.items[] | select(any(.metadata.ownerReferences[]?; .kind == "Job" and .uid == $id)) | any(.status.conditions[]?; .type == "Admitted" and .status == "True")] == [true]' >/dev/null
+  workloads_json | jq -e --arg id "$1" '
+    [.items[] | select(any(.metadata.ownerReferences[]?; .kind == "Job" and .uid == $id))
+      | select((.metadata.uid | type) == "string" and (.metadata.uid | length) > 0
+        and (.metadata.resourceVersion | type) == "string" and (.metadata.resourceVersion | length) > 0
+        and .status.admission.clusterQueue == "ccp-smoke"
+        and (.status.admission.podSetAssignments | type) == "array"
+        and (.status.admission.podSetAssignments | length) > 0
+        and any(.status.admission.podSetAssignments[]; (.resourceUsage | type) == "object" and (.resourceUsage | length) > 0)
+        and any(.status.conditions[]?; .type == "QuotaReserved" and .status == "True")
+        and any(.status.conditions[]?; .type == "Admitted" and .status == "True"))] | length == 1' >/dev/null
+}
+quota_reserved_in_clusterqueue() {
+  kubectl get clusterqueue ccp-smoke -o json | jq -e '
+    .status.admittedWorkloads == 1 and .status.reservingWorkloads == 1' >/dev/null
 }
 pod_scheduled() {
-  pods_json "$1" | jq -e '[.items[] | select(.spec.nodeName != "" and any(.status.conditions[]?; .type == "PodScheduled" and .status == "True"))] | length == 1' >/dev/null
+  pods_json "$1" | jq -e --arg node "$node" '
+    [.items[] | select((.metadata.uid | type) == "string" and (.metadata.uid | length) > 0
+      and (.metadata.resourceVersion | type) == "string" and (.metadata.resourceVersion | length) > 0
+      and .spec.nodeName == $node
+      and any(.status.conditions[]?; .type == "PodScheduled" and .status == "True"))] | length == 1' >/dev/null
 }
 
 observer() {
@@ -325,28 +356,39 @@ YAML
 create_job
 uid="$(job_uid)"
 wait_for 'Kueue Workload created for Job UID' workload_for_uid "$uid"
+wait_for 'Kueue explicitly denies quota reservation at zero quota' workload_unreserved "$uid"
 if workload_admitted "$uid"; then echo "zero quota incorrectly admitted" >&2; exit 1; fi
 [[ "$(pods_json "$uid" | jq '.items | length')" == 0 ]] || { echo "Pod created before admission" >&2; exit 1; }
+echo "kueue_unreserved_evidence=$(workloads_json | jq -c --arg id "$uid" '.items[] | select(any(.metadata.ownerReferences[]?; .kind == "Job" and .uid == $id)) | {uid:.metadata.uid,rv:.metadata.resourceVersion,conditions:.status.conditions,admission:.status.admission}')"
 observer queued "$uid" UNPROVEN
 
 # Enable admission while no node matches, to prove admission != placement.
 kubectl patch clusterqueue ccp-smoke --type=json -p='[{"op":"replace","path":"/spec/resourceGroups/0/flavors/0/resources/0/nominalQuota","value":"2"},{"op":"replace","path":"/spec/resourceGroups/0/flavors/0/resources/1/nominalQuota","value":"2Gi"}]'
-wait_for 'Kueue admitted Job' workload_admitted "$uid"
-if pod_scheduled "$uid"; then echo "Pod scheduled before node opt-in" >&2; exit 1; fi
+wait_for 'Kueue reserved quota and admitted Job' workload_admitted "$uid"
+wait_for 'ClusterQueue tracks exact quota reservation' quota_reserved_in_clusterqueue
+if [[ "$(pods_json "$uid" | jq '[.items[] | select((.spec.nodeName // "") != "")] | length')" != 0 ]]; then
+  echo "Pod bound before node opt-in" >&2; exit 1
+fi
+echo "kueue_reserved_evidence=$(workloads_json | jq -c --arg id "$uid" '.items[] | select(any(.metadata.ownerReferences[]?; .kind == "Job" and .uid == $id)) | {uid:.metadata.uid,rv:.metadata.resourceVersion,conditions:.status.conditions,admission:.status.admission}')"
+echo "clusterqueue_reserved_evidence=$(kubectl get clusterqueue ccp-smoke -o json | jq -c '{uid:.metadata.uid,rv:.metadata.resourceVersion,reserving:.status.reservingWorkloads,admitted:.status.admittedWorkloads}')"
 observer admitted "$uid" KUEUE_ADMITTED
 
 node="$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')"
 kubectl label node "$node" ccp-kueue-smoke/eligible=true --overwrite
-wait_for 'Pod placed on node' pod_scheduled "$uid"
+wait_for 'Pod placed on exact node' pod_scheduled "$uid"
+echo "pod_binding_evidence=$(pods_json "$uid" | jq -c --arg node "$node" '.items[] | select(.spec.nodeName == $node) | {uid:.metadata.uid,rv:.metadata.resourceVersion,node:.spec.nodeName,conditions:.status.conditions}')"
 observer placed "$uid" POD_PLACED
 old_pod_uid="$(pods_json "$uid" | jq -r '.items[0].metadata.uid')"
 old_workload_uid="$(workloads_json | jq -r --arg id "$uid" '.items[] | select(any(.metadata.ownerReferences[]?; .kind == "Job" and .uid == $id)) | .metadata.uid')"
 
 # Only disposable test teardown: NOT an Allocation RELEASED proof.
 kubectl -n "$ns" delete job "$job" --cascade=background --wait=true
+wait_for 'old Job UID absent' old_job_absent
 wait_for 'old Pod UID absent' old_pod_absent
 wait_for 'old Kueue Workload UID absent' old_workload_absent
 wait_for 'queue reservation released' quota_released
+echo "kueue_release_observation=$(kubectl get clusterqueue ccp-smoke -o json | jq -c --arg job "$uid" --arg pod "$old_pod_uid" --arg workload "$old_workload_uid" '{oldJobUID:$job,oldPodUID:$pod,oldKueueUID:$workload,clusterqueueUID:.metadata.uid,clusterqueueRV:.metadata.resourceVersion,reserving:.status.reservingWorkloads,admitted:.status.admittedWorkloads}')"
+
 
 create_job
 new_uid="$(job_uid)"
@@ -666,4 +708,4 @@ jq -e '.phase == "fail-closed" and .failed_closed == true and .reason == "unreac
   exit 1
 }
 echo "durable_sigkill_uid=$pinned_uid successor_uid=$successor_uid"
-echo "PASS: real Kueue queue/admission/placement, quota cleanup, stale UID rejection, in-memory adapter CREATE/DELETE, and separate-process Postgres SIGKILL recovery of the Job pin and DELETE tombstone. NO GPU/DRA readiness, quota release, or Allocation RELEASED attestation."
+echo "PASS: disposable CPU-only Kueue quota-denial/QuotaReserved/Admitted with exact Workload UID+RV, ClusterQueue reservation counters, Job/Pod UID+RV and node binding, teardown observation, stale UID refusal, and separate-process Postgres pin/tombstone SIGKILL recovery. This is NOT GPU/DRA device release, a production quota-release attestation, Provider retirement, Allocation RELEASED or cost finality."
