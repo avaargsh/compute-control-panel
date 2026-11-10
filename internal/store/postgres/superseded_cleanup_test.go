@@ -47,7 +47,7 @@ func TestEnqueueSupersededCleanupUsesExactHistoricalUIDAndIdempotentReplay(t *te
 	db := openIntegrationDB(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	tenant := "tenant-cleanup-"+randomSuffix(t)
+	tenant := "tenant-cleanup-" + randomSuffix(t)
 	source := supersededCreateFixture(t, db, tenant)
 	repoA, _ := NewRepository(db)
 	repoB, _ := NewRepository(db)
@@ -95,7 +95,7 @@ func TestEnqueueSupersededCleanupFencesStaleAndCrossTenantRequests(t *testing.T)
 	db := openIntegrationDB(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	tenant := "tenant-cleanup-fence-"+randomSuffix(t)
+	tenant := "tenant-cleanup-fence-" + randomSuffix(t)
 	source := supersededCreateFixture(t, db, tenant)
 	repo, _ := NewRepository(db)
 	if _, created, err := repo.EnqueueSupersededCleanup(ctx, tenant, source.ID, source.Version-1); !errors.Is(err, operation.ErrStale) || created {
@@ -115,12 +115,12 @@ func TestEnqueueSupersededCleanupConcurrentControllersCreateOneIntent(t *testing
 	db := openIntegrationDB(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	tenant := "tenant-cleanup-race-"+randomSuffix(t)
+	tenant := "tenant-cleanup-race-" + randomSuffix(t)
 	source := supersededCreateFixture(t, db, tenant)
 	type result struct {
-		op operation.Operation
+		op      operation.Operation
 		created bool
-		err error
+		err     error
 	}
 	var wg sync.WaitGroup
 	results := make([]result, 2)

@@ -72,8 +72,8 @@ func (r *Repository) EnqueueSupersededCleanup(
 	id := "cleanup-" + hex.EncodeToString(identity[:])
 	fingerprint, err := json.Marshal(struct {
 		TenantID, WorkloadID, AllocationID, ProviderID, SourceOperationID string
-		SourceGeneration                                             uint64
-		ResourceID, ResourceUID                                     string
+		SourceGeneration                                                  uint64
+		ResourceID, ResourceUID                                           string
 	}{
 		source.TenantID, source.WorkloadID, source.AllocationID, source.ProviderID, source.ID,
 		source.Generation, source.ProviderResourceID, source.ProviderResourceUID,
@@ -86,8 +86,8 @@ func (r *Repository) EnqueueSupersededCleanup(
 		ID: id, TenantID: source.TenantID, WorkloadID: source.WorkloadID,
 		AllocationID: source.AllocationID, ProviderID: source.ProviderID,
 		IdempotencyKey: "cleanup:" + source.ID,
-		RequestDigest: "sha256:" + hex.EncodeToString(digest[:]),
-		Generation: source.Generation, Version: 1, Kind: operation.Delete,
+		RequestDigest:  "sha256:" + hex.EncodeToString(digest[:]),
+		Generation:     source.Generation, Version: 1, Kind: operation.Delete,
 		Status: operation.Pending, TargetResourceID: source.ProviderResourceID,
 		TargetResourceUID: source.ProviderResourceUID,
 	}
@@ -138,11 +138,11 @@ func (r *Repository) EnqueueSupersededCleanup(
 		"operation_id": created.ID, "workload_id": created.WorkloadID,
 		"allocation_id": created.AllocationID, "provider_id": created.ProviderID,
 		"desired_generation": created.Generation, "operation_kind": created.Kind,
-		"request_digest": created.RequestDigest,
+		"request_digest":              created.RequestDigest,
 		"cleanup_source_operation_id": source.ID,
-		"target_resource_id": created.TargetResourceID,
-		"target_resource_uid": created.TargetResourceUID,
-		"dispatch_authorized": false,
+		"target_resource_id":          created.TargetResourceID,
+		"target_resource_uid":         created.TargetResourceUID,
+		"dispatch_authorized":         false,
 	})
 	if err != nil {
 		return operation.Operation{}, false, err
