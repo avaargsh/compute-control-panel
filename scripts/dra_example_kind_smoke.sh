@@ -13,7 +13,9 @@ for tool in kubectl jq; do command -v "$tool" >/dev/null || exit 2; done
 ns="ccp-dra-smoke"
 claim="ccp-example-gpu"
 pod="ccp-dra-consumer"
-driver_image="registry.k8s.io/dra-example-driver/dra-example-driver:v0.2.0"
+# v0.2.0 resolved by real kind/Kubelet imageID at PR head 67ee16dc.
+# Digest pins the exact simulated driver artifact; this is NOT a real GPU driver.
+driver_image="registry.k8s.io/dra-example-driver/dra-example-driver@sha256:6fd370402b8f54e0b57b251414f1692a9252f1e6edaf1fc3305b8ba66bf12e99"
 failure() {
   rc=$?
   echo "simulated DRA smoke failed (status=$rc)" >&2
@@ -132,7 +134,7 @@ kubectl -n "$ns" rollout status daemonset/dra-example-driver-kubeletplugin --tim
 driver_image_id="$(kubectl -n "$ns" get pods -l app.kubernetes.io/name=dra-example-driver -o json |
   jq -er '[.items[].status.containerStatuses[]? | select(.name == "plugin") | .imageID] |
     if length == 1 then .[0] else empty end')"
-[[ "$driver_image_id" == *"sha256:"* ]] || { echo "driver runtime digest not attested" >&2; exit 1; }
+[[ "$driver_image_id" == "$driver_image" ]] || { echo "driver runtime image differs from pinned digest: $driver_image_id" >&2; exit 1; }
 echo "simulated_dra_driver_image_id=$driver_image_id"
 slice_json=""
 for _ in $(seq 1 90); do
