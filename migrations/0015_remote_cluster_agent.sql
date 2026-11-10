@@ -55,6 +55,7 @@ CREATE TABLE public.compute_cluster_agent_commands (
     cluster_scope TEXT NOT NULL,
     provider_id TEXT NOT NULL,
     operation_id TEXT NOT NULL,
+    command_sequence BIGINT NOT NULL DEFAULT 1 CHECK (command_sequence > 0),
     tenant_id TEXT NOT NULL,
     workload_id TEXT NOT NULL,
     desired_generation BIGINT NOT NULL CHECK (desired_generation > 0),
@@ -73,7 +74,7 @@ CREATE TABLE public.compute_cluster_agent_commands (
     error_code TEXT CHECK (error_code IS NULL OR error_code ~ '^[A-Z][A-Z0-9_]{0,127}$'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
-    UNIQUE (agent_id, operation_id, command_action),
+    UNIQUE (agent_id, operation_id, command_action, command_sequence),
     FOREIGN KEY (agent_id, cluster_scope)
         REFERENCES public.compute_cluster_agents (agent_id, cluster_scope),
     FOREIGN KEY (provider_id, cluster_scope)
