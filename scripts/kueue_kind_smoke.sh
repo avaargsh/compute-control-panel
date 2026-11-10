@@ -80,7 +80,8 @@ for verb in create update patch delete; do
 done
 
 # Zero CPU/memory quota gives a real unadmitted Kueue Workload.
-kubectl apply -f - <<YAML
+# Keep this manifest stable so transient webhook startup failures can be retried.
+cat > "$dir/kueue-queues.yaml" <<YAML
 apiVersion: kueue.x-k8s.io/v1beta1
 kind: ResourceFlavor
 metadata: {name: ccp-smoke}
@@ -103,6 +104,29 @@ kind: LocalQueue
 metadata: {name: ccp-smoke, namespace: $ns}
 spec: {clusterQueue: ccp-smoke}
 YAML
+
+# Deployment Available does not guarantee the webhook listener is accepting
+# admission/conversion calls yet. Retry only transient webhook transport errors,
+# never swallow invalid schema, permission failures or a deadline expiration.
+queue_ready=false
+for attempt in $(seq 1 30); do
+  if kubectl apply -f "$dir/kueue-queues.yaml" >"$dir/kueue-queues.out" 2>"$dir/kueue-queues.err"; then
+    cat "$dir/kueue-queues.out"
+    queue_ready=true
+    break
+  fi
+  cat "$dir/kueue-queues.err" >&2
+  if ! grep -Eq 'failed calling webhook|conversion webhook|connect: connection refused|no endpoints available' "$dir/kueue-queues.err"; then
+    echo "non-retryable Kueue queue apply failure" >&2
+    exit 1
+  fi
+  echo "Kueue webhook not ready; retry queue apply $attempt/30" >&2
+  sleep 2
+done
+[[ "$queue_ready" == true ]] || { echo "Kueue webhook never became ready" >&2; exit 1; }
+kubectl get resourceflavor ccp-smoke -o name
+kubectl get clusterqueue ccp-smoke -o name
+kubectl -n "$ns" get localqueue ccp-smoke -o name
 
 CGO_ENABLED=0 go build -trimpath -o "$dir/kueue-observe" ./cmd/kueue-observe
 cat > "$dir/Dockerfile" <<'DOCKER'
