@@ -12,10 +12,10 @@ import (
 // It is NOT an authenticated release receipt, tenant-specific reservation
 // accounting, Pod/Job disappearance, GPU/device release or Allocation RELEASED.
 type KueueQuotaClearedObservation struct {
-	PreviousWorkload           KubernetesResourceRef
+	PreviousWorkload            KubernetesResourceRef
 	WorkloadListResourceVersion string
-	LocalQueue                 KubernetesResourceRef
-	ClusterQueue               KubernetesResourceRef
+	LocalQueue                  KubernetesResourceRef
+	ClusterQueue                KubernetesResourceRef
 }
 
 type kueueQuotaQueueObject struct {
@@ -139,9 +139,9 @@ func (r *KubernetesObservationReader) ObserveKueueQuotaCleared(
 		return reject()
 	}
 	return KueueQuotaClearedObservation{
-		PreviousWorkload: prior.Job.KueueWorkload,
+		PreviousWorkload:            prior.Job.KueueWorkload,
 		WorkloadListResourceVersion: firstWL.Metadata.ResourceVersion,
-		LocalQueue: refFromKube(firstLQ.Metadata),
-		ClusterQueue: refFromKube(firstCQ.Metadata),
+		LocalQueue:                  refFromKube(firstLQ.Metadata),
+		ClusterQueue:                refFromKube(firstCQ.Metadata),
 	}, nil
 }
