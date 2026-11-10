@@ -83,7 +83,7 @@ func TestDRAPoolInventoryRequiresCompleteCurrentGeneration(t *testing.T) {
 				w.Header().Set("Content-Type","application/json")
 				switch r.URL.RequestURI(){
 				case "/api/v1/namespaces/tenant-a/pods/gpu-pod-a":
-					podReads.Add(1);_,_=fmt.Fprint(w,draPodJSON)
+					podReads.Add(1);_,_=fmt.Fprint(w,podDRABindingFixture)
 				case "/apis/resource.k8s.io/v1/namespaces/tenant-a/resourceclaims/gpu-claim-a":
 					claimReads.Add(1);_,_=fmt.Fprint(w,draClaimFixture)
 				case "/apis/resource.k8s.io/v1/resourceslices":
@@ -97,7 +97,7 @@ func TestDRAPoolInventoryRequiresCompleteCurrentGeneration(t *testing.T) {
 			client:=ts.Client();client.Timeout=3*time.Second
 			reader,err:=NewKubernetesObservationReader(ts.URL,client)
 			if err!=nil {t.Fatal(err)}
-			got,err:=reader.ObserveDRAPoolInventory(context.Background(),DRAPoolInventoryQuery{Pod:draPodQuery()})
+			got,err:=reader.ObserveDRAPoolInventory(context.Background(),DRAPoolInventoryQuery{Pod:podDRAQuery()})
 			if tc.want {
 				if err!=nil || got.PodClaim.Pod.UID!="pod-uid-a" || got.PodClaim.Claim.Claim.UID!="claim-uid-a" ||
 					got.Slice.UID!="slice-uid-a" || got.Slice.Name!="gpu-slice-a" ||
