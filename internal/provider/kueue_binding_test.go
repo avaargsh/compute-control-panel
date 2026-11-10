@@ -362,3 +362,70 @@ func TestServiceAccountJobAdapterInjectsTrustedBindingStore(t *testing.T) {
 		t.Fatalf("nil binding accepted for ServiceAccount writer: %v", err)
 	}
 }
+
+type rejectedBindingWrites struct {
+	*MemoryKueueJobBindingStore
+	rejectCreate bool
+	rejectDelete bool
+}
+
+func (s *rejectedBindingWrites) PutCreatePin(ns string, req Request, name, uid string) error {
+	if s.rejectCreate {
+		return errBindingUnreadable
+	}
+	return s.MemoryKueueJobBindingStore.PutCreatePin(ns, req, name, uid)
+}
+
+func (s *rejectedBindingWrites) PutDeleteTombstone(ns string, req Request, name, uid string, acknowledged bool) error {
+	if s.rejectDelete {
+		return errBindingUnreadable
+	}
+	return s.MemoryKueueJobBindingStore.PutDeleteTombstone(ns, req, name, uid, acknowledged)
+}
+
+func TestKueueSuccessfulCreateThenBindingWriteFailureRemainsUnknown(t *testing.T) {
+	store := &rejectedBindingWrites{MemoryKueueJobBindingStore: NewMemoryKueueJobBindingStore(), rejectCreate: true}
+	adapter, api, server := newKueueAdapterFixtureWithStore(t, &kueueAPI{}, store)
+	defer server.Close()
+	req := kueueAdapterRequest()
+	_, err := adapter.Apply(context.Background(), req)
+	if !errors.Is(err, ErrAcknowledgementLost) || !errors.Is(err, errBindingUnreadable) {
+		t.Fatalf("successful Kubernetes CREATE with failed pin was not UNKNOWN: %v", err)
+	}
+	if api.postCount() != 1 || api.storedJobs() != 1 {
+		t.Fatalf("CREATE side effect missing or duplicated: posts=%d jobs=%d", api.postCount(), api.storedJobs())
+	}
+	if _, ok, err := store.GetCreatePin("tenant-a", req); err != nil || ok {
+		t.Fatalf("uncommitted UID trusted: ok=%v err=%v", ok, err)
+	}
+	next := reopenKueueAdapter(t, server, store)
+	obs, err := next.Inspect(context.Background(), req)
+	if err != nil || obs.Result != operation.OperationInProgress || obs.ResourceUID != "" || obs.ResourceID != "" {
+		t.Fatalf("unbound UID incorrectly finalized: %+v err=%v", obs, err)
+	}
+}
+
+func TestKueueSuccessfulDeleteThenBindingWriteFailureRemainsUnknown(t *testing.T) {
+	store := &rejectedBindingWrites{MemoryKueueJobBindingStore: NewMemoryKueueJobBindingStore()}
+	adapter, api, server := newKueueAdapterFixtureWithStore(t, &kueueAPI{}, store)
+	defer server.Close()
+	create, observed := createSuspendedJob(t, adapter, api)
+	remove := kueueDeleteRequest(create, observed)
+	store.rejectDelete = true
+	_, err := adapter.Apply(context.Background(), remove)
+	if !errors.Is(err, ErrAcknowledgementLost) || !errors.Is(err, errBindingUnreadable) {
+		t.Fatalf("successful Kubernetes DELETE with failed tombstone was not UNKNOWN: %v", err)
+	}
+	if api.deleteCount() != 1 || api.storedJobs() != 0 {
+		t.Fatalf("DELETE side effect missing or duplicated: deletes=%d jobs=%d", api.deleteCount(), api.storedJobs())
+	}
+	if _, ok, err := store.GetDeleteTombstone("tenant-a", remove); err != nil || ok {
+		t.Fatalf("uncommitted tombstone trusted: ok=%v err=%v", ok, err)
+	}
+	next := reopenKueueAdapter(t, server, store)
+	obs, err := next.Inspect(context.Background(), remove)
+	if err != nil || obs.Result != operation.ObservationConflict ||
+		obs.ReasonCode != "MISSING_AUTHORITATIVE_OPERATION" || obs.Result == operation.TargetAbsent {
+		t.Fatalf("bare 404 incorrectly proved release: %+v err=%v", obs, err)
+	}
+}
