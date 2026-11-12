@@ -138,9 +138,9 @@ type preemptSubmitReport struct {
 	High            preemptJobReport `json:"high"`
 	Projection      string           `json:"projection,omitempty"`
 	Disposition     string           `json:"disposition,omitempty"`
-	Evicted         bool             `json:"evicted,omitempty"`
+	Evicted         bool             `json:"evicted"`
 	EvictedReason   string           `json:"evicted_reason,omitempty"`
-	Preempted       bool             `json:"preempted,omitempty"`
+	Preempted       bool             `json:"preempted"`
 	PreemptedReason string           `json:"preempted_reason,omitempty"`
 	QuotaReserved   bool             `json:"quota_reserved,omitempty"`
 	Admitted        bool             `json:"admitted,omitempty"`

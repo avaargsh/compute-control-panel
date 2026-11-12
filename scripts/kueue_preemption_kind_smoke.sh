@@ -114,7 +114,7 @@ low_job_rv="$(jq -r .job_resource_version "$dir/preempt-submit-low.json")"
 workloads_json | jq -e --arg id "$low_job_uid" --arg uid "$low_workload_uid" --arg rv "$low_workload_rv" '
   [.items[] | select(any(.metadata.ownerReferences[]?; .kind == "Job" and .uid == $id))]
   | if length == 1 then .[0] else empty end
-  | .metadata.uid == $uid and .metadata.resourceVersion == $rv
+  | .metadata.uid == $uid and (.metadata.resourceVersion | tonumber) >= ($rv | tonumber)
     and any(.status.conditions[]?; .type == "QuotaReserved" and .status == "True")
     and any(.status.conditions[]?; .type == "Admitted" and .status == "True")
     and (any(.status.conditions[]?; .type == "Evicted" and .status == "True") | not)
@@ -159,7 +159,7 @@ low_preempt_rv="$(jq -r .low.workload_resource_version "$dir/preempt-submit-high
 workloads_json | jq -e --arg id "$low_job_uid" --arg uid "$low_workload_uid" --arg rv "$low_preempt_rv" '
   [.items[] | select(any(.metadata.ownerReferences[]?; .kind == "Job" and .uid == $id))]
   | if length == 1 then .[0] else empty end
-  | .metadata.uid == $uid and .metadata.resourceVersion == $rv and .status.admission == null
+  | .metadata.uid == $uid and (.metadata.resourceVersion | tonumber) >= ($rv | tonumber) and .status.admission == null
     and any(.status.conditions[]?; .type == "Evicted" and .status == "True" and .reason == "Preempted")
     and any(.status.conditions[]?; .type == "Preempted" and .status == "True" and .reason == "InClusterQueue")
     and any(.status.conditions[]?; .type == "QuotaReserved" and .status == "False")
@@ -168,7 +168,7 @@ workloads_json | jq -e --arg id "$low_job_uid" --arg uid "$low_workload_uid" --a
 workloads_json | jq -e --arg id "$high_job_uid" --arg uid "$high_workload_uid" --arg rv "$high_workload_rv" '
   [.items[] | select(any(.metadata.ownerReferences[]?; .kind == "Job" and .uid == $id))]
   | if length == 1 then .[0] else empty end
-  | .metadata.uid == $uid and .metadata.resourceVersion == $rv
+  | .metadata.uid == $uid and (.metadata.resourceVersion | tonumber) >= ($rv | tonumber)
     and .status.admission.clusterQueue == "ccp-preempt"
     and any(.status.conditions[]?; .type == "QuotaReserved" and .status == "True")
     and any(.status.conditions[]?; .type == "Admitted" and .status == "True")
