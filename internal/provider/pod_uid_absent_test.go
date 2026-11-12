@@ -18,12 +18,12 @@ const priorPodJSON = `{"metadata":{"namespace":"tenant-a","name":"gpu-pod-a","ui
 // kubelet/driver deallocation, release authorization or accounting finality.
 func TestObservePodUIDAbsentRejectsIncompleteAndReusedEvidence(t *testing.T) {
 	tests := []struct {
-		name string
-		first string
+		name   string
+		first  string
 		second string
 		status int
 		mutate func(*KubernetesResourceRef)
-		valid bool
+		valid  bool
 	}{
 		{name: "stable complete PodList without old UID", valid: true},
 		{name: "prior Pod remains", first: strings.Replace(absentPodList, "[]", "["+priorPodJSON+"]", 1)},
@@ -39,8 +39,8 @@ func TestObservePodUIDAbsentRejectsIncompleteAndReusedEvidence(t *testing.T) {
 		{name: "foreign namespace in namespace-scoped list", first: strings.Replace(absentPodList, "[]", `[{"metadata":{"namespace":"tenant-b","name":"other-pod","uid":"new-uid","resourceVersion":"305"}}]`, 1)},
 		{name: "API forbidden", status: http.StatusForbidden},
 		{name: "API unavailable", status: http.StatusServiceUnavailable},
-		{name: "untrusted Pod namespace", mutate: func(ref *KubernetesResourceRef) {ref.Namespace = "../tenant-b"}},
-		{name: "prior Pod UID missing", mutate: func(ref *KubernetesResourceRef) {ref.UID = ""}},
+		{name: "untrusted Pod namespace", mutate: func(ref *KubernetesResourceRef) { ref.Namespace = "../tenant-b" }},
+		{name: "prior Pod UID missing", mutate: func(ref *KubernetesResourceRef) { ref.UID = "" }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
