@@ -51,7 +51,7 @@ func (s podAbsentListSnapshot) excludesPriorPod(prior KubernetesResourceRef) boo
 
 // ObservePodUIDAbsent performs two unpaginated Pod LIST reads in the pinned
 // namespace and requires the same resourceVersion and object snapshot.
-// Old UID, same-name successor, malformed items, pagination, stale/moving
+// Old UID, same-name successor, malformed items, pagination, inconsistent
 // snapshots and API errors all fail closed. It never issues writes.
 //
 // Two API reads are not a transactional finality guarantee. A caller must
