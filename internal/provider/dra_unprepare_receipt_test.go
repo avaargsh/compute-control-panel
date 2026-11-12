@@ -3,6 +3,8 @@ package provider
 import (
 	"bytes"
 	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"testing"
 	"time"
@@ -125,10 +127,13 @@ func TestDriverUnprepareReceiptSignedAndBoundToHistoricalAllocation(t *testing.T
 			}
 			got, err := v.Correlate(e, signed, now)
 			if tc.valid {
+				keyDigest := sha256.Sum256(a.PublicKey)
 				if err != nil || got.Release.AllocationID != "allocation-a" ||
 					got.Event.ClaimUID != "claim-uid-a" || got.Event.EventID != "unprepare-a" ||
 					!strings.HasPrefix(got.PayloadSHA256, "sha256:") ||
-					len(got.PayloadSHA256) != 71 {
+					len(got.PayloadSHA256) != 71 ||
+					got.KeySHA256 != "sha256:"+hex.EncodeToString(keyDigest[:]) ||
+					!ed25519.Verify(a.PublicKey, draUnprepareSigningBytes(got.Event), got.Signature[:]) {
 					t.Fatalf("valid signed receipt not correlated: %+v err=%v", got, err)
 				}
 			} else if err == nil || got != (DRAUnprepareCorrelation{}) {
