@@ -25,6 +25,10 @@ func unprepareTestReceipt(private ed25519.PrivateKey) SignedDRAUnprepare {
 		Result: "SUCCESS", Driver: "gpu.example.com", NodeName: "gpu-node-a",
 		ClaimNamespace: "tenant-a", ClaimName: "gpu-claim-a", ClaimUID: "claim-uid-a",
 		PodUID: "pod-uid-a", AllocatedClaimResourceVersion: "150",
+		AllocatedDevice: DRAAllocatedDevice{
+			Request: "gpu", Driver: "gpu.example.com", Pool: "pool-a",
+			Device: "device-a", ShareID: "share-a",
+		},
 		CompletedAt: time.Date(2026, 11, 10, 10, 0, 30, 0, time.UTC),
 	}
 	return SignedDRAUnprepare{Event: event, Signature: ed25519.Sign(private, draUnprepareSigningBytes(event))}
@@ -64,6 +68,24 @@ func TestDriverUnprepareReceiptSignedAndBoundToHistoricalAllocation(t *testing.T
 		}},
 		{name: "signed absent allocated Claim RV", resign: true, mutate: func(_ *ReleaseEvidenceCandidate, s *SignedDRAUnprepare, _ *DRAUnprepareAuthority, _ *time.Time) {
 			s.Event.AllocatedClaimResourceVersion = ""
+		}},
+		{name: "signed other device on the same Claim and Pod", resign: true, mutate: func(_ *ReleaseEvidenceCandidate, s *SignedDRAUnprepare, _ *DRAUnprepareAuthority, _ *time.Time) {
+			s.Event.AllocatedDevice.Device = "device-b"
+		}},
+		{name: "signed other device pool", resign: true, mutate: func(_ *ReleaseEvidenceCandidate, s *SignedDRAUnprepare, _ *DRAUnprepareAuthority, _ *time.Time) {
+			s.Event.AllocatedDevice.Pool = "pool-b"
+		}},
+		{name: "signed other request alias", resign: true, mutate: func(_ *ReleaseEvidenceCandidate, s *SignedDRAUnprepare, _ *DRAUnprepareAuthority, _ *time.Time) {
+			s.Event.AllocatedDevice.Request = "gpu-other"
+		}},
+		{name: "signed other device share ID", resign: true, mutate: func(_ *ReleaseEvidenceCandidate, s *SignedDRAUnprepare, _ *DRAUnprepareAuthority, _ *time.Time) {
+			s.Event.AllocatedDevice.ShareID = "share-b"
+		}},
+		{name: "signed device driver differs from event driver", resign: true, mutate: func(_ *ReleaseEvidenceCandidate, s *SignedDRAUnprepare, _ *DRAUnprepareAuthority, _ *time.Time) {
+			s.Event.AllocatedDevice.Driver = "other.example.com"
+		}},
+		{name: "signed missing device tuple", resign: true, mutate: func(_ *ReleaseEvidenceCandidate, s *SignedDRAUnprepare, _ *DRAUnprepareAuthority, _ *time.Time) {
+			s.Event.AllocatedDevice = DRAAllocatedDevice{}
 		}},
 		{name: "signed wrong node", resign: true, mutate: func(_ *ReleaseEvidenceCandidate, s *SignedDRAUnprepare, _ *DRAUnprepareAuthority, _ *time.Time) {
 			s.Event.NodeName = "other-node"
@@ -146,6 +168,7 @@ func TestDriverUnprepareReceiptSignedAndBoundToHistoricalAllocation(t *testing.T
 				keyDigest := sha256.Sum256(a.PublicKey)
 				if err != nil || got.Release.AllocationID != "allocation-a" ||
 					got.Event.ClaimUID != "claim-uid-a" || got.Event.EventID != "unprepare-a" ||
+					got.Event.AllocatedDevice != e.PriorPodClaim.Claim.Device ||
 					!strings.HasPrefix(got.PayloadSHA256, "sha256:") ||
 					len(got.PayloadSHA256) != 71 ||
 					got.KeySHA256 != "sha256:"+hex.EncodeToString(keyDigest[:]) ||
