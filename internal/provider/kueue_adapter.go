@@ -828,6 +828,31 @@ func (a *KueueJobAdapter) observationQuery(req Request, name, uid string) Kubern
 	}
 }
 
+// CollectCreate reads the pinned CREATE Job through the existing collector.
+// It does not write Kubernetes objects and does not project Allocation readiness.
+func (a *KueueJobAdapter) CollectCreate(ctx context.Context, req Request) (KueueJobCollection, error) {
+	if err := ctx.Err(); err != nil {
+		return KueueJobCollection{}, err
+	}
+	if a == nil || a.reader == nil {
+		return KueueJobCollection{}, ErrInvalidKueueObservation
+	}
+	if err := req.Validate(); err != nil {
+		return KueueJobCollection{}, err
+	}
+	if req.Kind != operation.Create {
+		return KueueJobCollection{}, ErrInvalidRequest
+	}
+	pin, ok, err := a.lookupPin(req)
+	if err != nil {
+		return KueueJobCollection{}, err
+	}
+	if !ok || pin.Name == "" || pin.UID == "" {
+		return KueueJobCollection{}, ErrInvalidKueueObservation
+	}
+	return a.reader.Collect(ctx, a.observationQuery(req, pin.Name, pin.UID))
+}
+
 func unboundKueueJobObservation(req Request) operation.Observation {
 	return operation.Observation{
 		OperationID: req.OperationID, TenantID: req.TenantID,
