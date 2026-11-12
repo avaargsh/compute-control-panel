@@ -19,19 +19,19 @@ var ErrUncorrelatedDRAUnprepare = errors.New("driver NodeUnprepare receipt canno
 // API object, gRPC response, or signed event emitted by Kubernetes. Real
 // adapter instrumentation must tie it to the exact driver RPC result.
 type DRAUnprepareEvent struct {
-	Version                       string    `json:"version"`
-	ClusterID                     string    `json:"cluster_id"`
-	SourceID                      string    `json:"source_id"`
-	KeyID                         string    `json:"key_id"`
-	EventID                       string    `json:"event_id"`
-	RPC                           string    `json:"rpc"`
-	Result                        string    `json:"result"`
-	Driver                        string    `json:"driver"`
-	NodeName                      string    `json:"node_name"`
-	ClaimNamespace                string    `json:"claim_namespace"`
-	ClaimName                     string    `json:"claim_name"`
-	ClaimUID                      string    `json:"claim_uid"`
-	PodUID                        string    `json:"pod_uid"`
+	Version                       string             `json:"version"`
+	ClusterID                     string             `json:"cluster_id"`
+	SourceID                      string             `json:"source_id"`
+	KeyID                         string             `json:"key_id"`
+	EventID                       string             `json:"event_id"`
+	RPC                           string             `json:"rpc"`
+	Result                        string             `json:"result"`
+	Driver                        string             `json:"driver"`
+	NodeName                      string             `json:"node_name"`
+	ClaimNamespace                string             `json:"claim_namespace"`
+	ClaimName                     string             `json:"claim_name"`
+	ClaimUID                      string             `json:"claim_uid"`
+	PodUID                        string             `json:"pod_uid"`
 	AllocatedClaimResourceVersion string             `json:"allocated_claim_resource_version"`
 	AllocatedDevice               DRAAllocatedDevice `json:"allocated_device"`
 	CompletedAt                   time.Time          `json:"completed_at"`
