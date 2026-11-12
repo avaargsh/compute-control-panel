@@ -22,6 +22,7 @@ type ReleaseEvidenceCandidate struct {
 	Create           operation.Operation
 	Delete           operation.Operation
 	ProviderAbsence  operation.Observation
+	PodAbsent        KubernetesPodAbsentObservation
 	PriorQueue       KueueQueueBindingEvidence
 	QuotaCleared     KueueQuotaClearedObservation
 	PriorPodClaim    DRAPodClaimObservation
@@ -117,7 +118,13 @@ func validReleaseClaimCorrelation(e ReleaseEvidenceCandidate) bool {
 	p := e.PriorQueue.Job
 	d := e.PriorPodClaim
 	u := e.ClaimUnallocated
-	if !validKubernetesRef(d.Pod) || d.Pod != p.Pod ||
+	a := e.PodAbsent
+	if a.PreviousPod != p.Pod ||
+		!validKubernetesRef(a.PreviousPod) ||
+		a.PodListResourceVersion == "" ||
+		a.PodListResourceVersion != strings.TrimSpace(a.PodListResourceVersion) ||
+		strings.ContainsRune(a.PodListResourceVersion, 0) ||
+		!validKubernetesRef(d.Pod) || d.Pod != p.Pod ||
 		d.NodeName != p.PodNodeName ||
 		!validKubeName(d.PodClaimAlias) ||
 		!validKubeName(d.ConsumerContainer) ||
@@ -136,7 +143,8 @@ func validReleaseClaimCorrelation(e ReleaseEvidenceCandidate) bool {
 }
 
 // CorrelateReleaseEvidence only checks same-Allocation durable CREATE/DELETE
-// identities and cross-source structural consistency. Inputs must originate
+// identities and cross-source structural consistency, including an independent
+// API observation that the historical Pod UID/name is absent. Inputs must originate
 // from separate, authenticated stores/collectors; this is not a trust
 // resolver. In particular a Kubernetes quota-zero/Claim-unallocated snapshot
 // cannot establish Pod disappearance, kubelet/driver physical deallocation,
