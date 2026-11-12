@@ -28,7 +28,7 @@ cleanup() {
     kubectl --request-timeout=10s -n kueue-system logs deploy/kueue-controller-manager --tail=80 || true
   fi
   if [[ "$status" -ne 0 ]]; then
-    for f in "$dir"/durable-*.json "$dir"/durable-*.err "$dir"/journal-*.json "$dir"/journal-*.err "$dir"/pg-boot.log "$dir"/migrate.log; do
+    for f in "$dir"/durable-*.json "$dir"/durable-*.err "$dir"/journal-*.json "$dir"/journal-*.err "$dir"/admission-*.json "$dir"/admission-*.err "$dir"/pg-boot.log "$dir"/migrate.log; do
       [[ -f "$f" ]] || continue
       echo "----- $(basename "$f") -----" >&2
       tail -n 40 "$f" >&2 || true
@@ -1045,7 +1045,166 @@ journal_successor_row="$(psql_at "SELECT status || '|' || coalesce(manual_review
   exit 1
 }
 echo "journal_delete_uid=$journal_uid journal_successor_uid=$journal_successor_uid"
-echo "PASS: disposable CPU-only Kueue quota-denial/QuotaReserved/Admitted, exact Workload/Pod/Job UID+RV and node binding, teardown observation, Postgres pin/tombstone SIGKILL recovery, and real kind + Postgres ComputeOperation UNKNOWN -> fenced Inspect-first CREATE SUCCEEDED and DELETE TARGET_ABSENT after process SIGKILL. TARGET_ABSENT is not Allocation RELEASED, Kueue quota release, or device release. This is NOT GPU/DRA device release, a production quota-release attestation, Provider retirement, Allocation RELEASED or cost finality."
+
+# Admission versus placement. The queued writer and the least-privilege
+# binding login submit one Job. A NoSchedule taint the Job does not tolerate
+# keeps its Pod unscheduled after Kueue reserves quota. CCP records that as
+# NOT_READY. The UID-fenced DELETE then Inspects absence and leaves a
+# same-name successor in place. This is not Allocation RELEASED.
+binding_role_dsn="postgres://ccp_kueue_job_binding:kueue-binding-ci-only@127.0.0.1:${pg_port}/postgres?sslmode=disable"
+run_admission() {
+  local outfile="$1"
+  shift
+  set +e
+  CCP_DISPOSABLE_KIND_SMOKE=1 \
+    POD_NAMESPACE="$ns" \
+    KUBERNETES_SERVICE_HOST="$api_host" \
+    KUBERNETES_SERVICE_PORT_HTTPS="$api_port" \
+    CCP_KUEUE_SA_CA="$dir/kube-ca.crt" \
+    CCP_KUEUE_SA_TOKEN="$dir/sa.token" \
+    CCP_KUEUE_BINDING_DSN="$binding_role_dsn" \
+    "$dir/kueue-provider-smoke" "$@" >"$outfile" 2>"$outfile.err"
+  local code=$?
+  set -e
+  return "$code"
+}
+[[ "$(psql_at "SELECT rolsuper::text || ':' || rolname FROM pg_roles WHERE rolname='ccp_kueue_job_binding'")" == "false:ccp_kueue_job_binding" ]] || {
+  echo "ccp_kueue_job_binding is not the restricted login" >&2
+  exit 1
+}
+mapfile -t smoke_nodes < <(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
+[[ "${#smoke_nodes[@]}" -ge 1 ]] || { echo "no disposable node to taint" >&2; exit 1; }
+for n in "${smoke_nodes[@]}"; do
+  kubectl taint node "$n" ccp-kueue-smoke/unplaceable=true:NoSchedule
+done
+echo "admission: queued Job with least-privilege binding, Kueue admission, unscheduled Pod"
+if ! run_admission "$dir/admission-create.json" admission create; then
+  cat "$dir/admission-create.json.err" >&2 || true
+  exit 1
+fi
+admission_job_uid="$(jq -r '.job_uid' "$dir/admission-create.json")"
+admission_job_name="$(jq -r '.job_name' "$dir/admission-create.json")"
+admission_pod_uid="$(jq -r '.pod_uid' "$dir/admission-create.json")"
+admission_workload_uid="$(jq -r '.workload_uid' "$dir/admission-create.json")"
+admission_workload_name="$(jq -r '.workload_name' "$dir/admission-create.json")"
+[[ -n "$admission_job_uid" && -n "$admission_job_name" && -n "$admission_pod_uid" && -n "$admission_workload_uid" &&
+  "$admission_job_uid" != "$admission_pod_uid" && "$admission_job_uid" != "$admission_workload_uid" &&
+  "$admission_pod_uid" != "$admission_workload_uid" ]] || {
+  echo "admission observation did not keep separate Job, Pod, and Workload UIDs" >&2
+  exit 1
+}
+jq -e --arg ns "$ns" --arg job "$admission_job_uid" --arg pod "$admission_pod_uid" --arg workload "$admission_workload_uid" --arg wname "$admission_workload_name" '
+  .phase == "create" and .projection == "NOT_READY" and .stage == "KUEUE_ADMITTED" and
+  .result == "RESOURCE_PRESENT" and .quota_reserved == true and .admitted == true and
+  .cluster_queue == "ccp-smoke" and (.pod_set_assignments | type == "string" and length > 0) and
+  .workload_namespace == $ns and .workload_name == $wname and .workload_uid == $workload and
+  (.workload_resource_version | type == "string" and length > 0) and
+  .job_uid == $job and (.job_resource_version | type == "string" and length > 0) and
+  .pod_uid == $pod and (.pod_resource_version | type == "string" and length > 0) and
+  .pod_scheduled == false and .node_bound == false and .node_name == "" and
+  .absence_observed == false and .allocated == false and .active == false and
+  .ready == false and .costable == false and .released == false and .release_attested == false and
+  .operation_id == "ccp-kind-admission-unplaced"' "$dir/admission-create.json" >/dev/null
+wait_for 'admitted unplaced workload still quota-reserved' workload_admitted "$admission_job_uid"
+wait_for 'clusterqueue still reserves the admitted unplaced job' quota_reserved_in_clusterqueue
+pod_unplaceable() {
+  pods_json "$1" | jq -e --arg uid "$admission_pod_uid" '
+    [.items[] | select(.metadata.uid == $uid and
+      (.metadata.resourceVersion | type == "string" and length > 0) and
+      ((.spec.nodeName // "") == "") and
+      any(.status.conditions[]?; .type == "PodScheduled" and .status == "False" and .reason == "Unschedulable"))] | length == 1' >/dev/null
+}
+wait_for 'pod exists and scheduler reports it unschedulable' pod_unplaceable "$admission_job_uid"
+kubectl -n "$ns" get job "$admission_job_name" -o json | jq -e --arg uid "$admission_job_uid" '
+  .metadata.uid == $uid and .metadata.labels["kueue.x-k8s.io/queue-name"] == "ccp-smoke"' >/dev/null
+live_workload="$(workloads_json | jq -ce --arg id "$admission_job_uid" --arg uid "$admission_workload_uid" --arg name "$admission_workload_name" --arg ns "$ns" '
+  [.items[] | select(any(.metadata.ownerReferences[]?; .kind == "Job" and .uid == $id))]
+  | if length == 1 then .[0] else empty end
+  | select(.metadata.uid == $uid and .metadata.name == $name and .metadata.namespace == $ns
+      and (.metadata.resourceVersion | type == "string" and length > 0))')"
+[[ -n "$live_workload" ]] || { echo "live workload identity did not match the admission observation" >&2; exit 1; }
+for n in "${smoke_nodes[@]}"; do
+  kubectl get node "$n" -o json | jq -e 'any(.spec.taints[]?; .key == "ccp-kueue-smoke/unplaceable" and .effect == "NoSchedule")' >/dev/null
+done
+echo "admission_vs_placement=$(jq -c '{projection,stage,workload_namespace,workload_name,workload_uid,workload_resource_version,job_uid,job_resource_version,pod_uid,pod_resource_version,quota_reserved,admitted,node_bound,node_name,allocated,active,ready,costable,released}' "$dir/admission-create.json")"
+echo "admission_clusterqueue=$(kubectl get clusterqueue ccp-smoke -o json | jq -c '{uid:.metadata.uid,rv:.metadata.resourceVersion,reserving:.status.reservingWorkloads,admitted:.status.admittedWorkloads}')"
+[[ "$(psql_at "SELECT job_uid FROM public.kueue_job_create_pins WHERE namespace='ccp-kueue-smoke' AND operation_id='ccp-kind-admission-unplaced'")" == "$admission_job_uid" ]] || {
+  echo "least-privilege binding pin was not the admitted Job UID" >&2
+  exit 1
+}
+kubectl -n "$ns" get job "$admission_job_name" -o json | jq '
+  .spec |= (
+    del(.selector) |
+    if .template.metadata.labels == null then . else
+      .template.metadata.labels |= del(
+        .["batch.kubernetes.io/controller-uid"],
+        .["batch.kubernetes.io/job-name"],
+        .["controller-uid"],
+        .["job-name"]
+      )
+    end
+  ) | {
+    apiVersion, kind,
+    metadata: {name: .metadata.name, namespace: .metadata.namespace, annotations: .metadata.annotations, labels: .metadata.labels},
+    spec: .spec
+  }' > "$dir/admission-successor-template.json"
+
+echo "admission: UID-fenced DELETE, then a fresh process Inspects absence"
+if ! run_admission "$dir/admission-delete.json" admission delete; then
+  cat "$dir/admission-delete.json.err" >&2 || true
+  exit 1
+fi
+jq -e --arg uid "$admission_job_uid" --arg name "$admission_job_name" '
+  .phase == "delete" and .projection == "NOT_READY" and .job_uid == $uid and .job_name == $name and
+  .target_uid == $uid and .absence_observed == false and .released == false and .ready == false and
+  .release_attested == false and .operation_id == "ccp-kind-admission-unplaced-delete"' \
+  "$dir/admission-delete.json" >/dev/null
+if ! run_admission "$dir/admission-inspect-delete.json" admission inspect delete; then
+  cat "$dir/admission-inspect-delete.json.err" >&2 || true
+  exit 1
+fi
+jq -e --arg uid "$admission_job_uid" '
+  .phase == "inspect-delete" and .projection == "NOT_READY" and .result == "TARGET_ABSENT" and
+  .target_uid == $uid and .job_uid == "" and .absence_observed == true and
+  .allocated == false and .active == false and .ready == false and .costable == false and
+  .released == false and .release_attested == false' "$dir/admission-inspect-delete.json" >/dev/null
+admission_job_absent() {
+  kubectl -n "$ns" get jobs -o json | jq -e --arg uid "$admission_job_uid" 'all(.items[]; .metadata.uid != $uid)' >/dev/null
+}
+wait_for 'exact admitted Job UID absent after Inspect' admission_job_absent
+if kubectl -n "$ns" get job "$admission_job_name" >/dev/null 2>&1; then
+  echo "Inspect-first absence left the original Job name in place" >&2
+  exit 1
+fi
+
+echo "admission: same-name successor stays in place"
+kubectl apply -f "$dir/admission-successor-template.json" >/dev/null
+admission_successor_uid="$(kubectl -n "$ns" get job "$admission_job_name" -o jsonpath='{.metadata.uid}')"
+admission_successor_created="$(kubectl -n "$ns" get job "$admission_job_name" -o jsonpath='{.metadata.creationTimestamp}')"
+[[ -n "$admission_successor_uid" && "$admission_successor_uid" != "$admission_job_uid" && -n "$admission_successor_created" ]] || {
+  echo "admission successor was not a new UID" >&2
+  exit 1
+}
+if ! run_admission "$dir/admission-inspect-create.json" admission inspect create; then
+  cat "$dir/admission-inspect-create.json.err" >&2 || true
+  exit 1
+fi
+jq -e '
+  .phase == "inspect-create" and .projection == "NOT_READY" and .result == "CONFLICT" and
+  .reason_code == "JOB_UID_REPLACED" and .job_uid == "" and .absence_observed == false and
+  .ready == false and .released == false and .release_attested == false' \
+  "$dir/admission-inspect-create.json" >/dev/null
+[[ "$(kubectl -n "$ns" get job "$admission_job_name" -o jsonpath='{.metadata.uid}')" == "$admission_successor_uid" &&
+  "$(kubectl -n "$ns" get job "$admission_job_name" -o jsonpath='{.metadata.creationTimestamp}')" == "$admission_successor_created" &&
+  -z "$(kubectl -n "$ns" get job "$admission_job_name" -o jsonpath='{.metadata.deletionTimestamp}')" ]] || {
+  echo "JOB_UID_REPLACED process deleted or replaced the admission successor" >&2
+  exit 1
+}
+echo "admission_successor_uid=$admission_successor_uid admission_deleted_uid=$admission_job_uid"
+for n in "${smoke_nodes[@]}"; do
+  kubectl taint node "$n" 'ccp-kueue-smoke/unplaceable=true:NoSchedule-' >/dev/null
+done
+echo "PASS: disposable CPU-only Kueue quota-denial/QuotaReserved/Admitted, exact Workload/Pod/Job UID+RV and node binding, teardown observation, Postgres pin/tombstone SIGKILL recovery, real kind + Postgres ComputeOperation UNKNOWN -> fenced Inspect-first CREATE SUCCEEDED and DELETE TARGET_ABSENT after process SIGKILL, and admitted-but-unplaced queued Job projected NOT_READY through the ccp_kueue_job_binding login. TARGET_ABSENT is not Allocation RELEASED, Kueue quota release, or device release. This is NOT GPU/DRA device release, a production quota-release attestation, Provider retirement, Allocation RELEASED or cost finality."
 # Independent official DRA example-driver lane. This creates a simulated GPU
 # ResourceSlice/Claim/Pod *separate* from the queued CCP Job to keep authority
 # and attribution claims explicit; never promote Allocation READY/RELEASED.
