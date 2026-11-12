@@ -24,6 +24,7 @@ func unprepareTestReceipt(private ed25519.PrivateKey) SignedDRAUnprepare {
 		KeyID: "driver-key-a", EventID: "unprepare-a", RPC: "NodeUnprepareResources",
 		Result: "SUCCESS", Driver: "gpu.example.com", NodeName: "gpu-node-a",
 		ClaimNamespace: "tenant-a", ClaimName: "gpu-claim-a", ClaimUID: "claim-uid-a",
+		PodUID: "pod-uid-a", AllocatedClaimResourceVersion: "150",
 		CompletedAt: time.Date(2026, 11, 10, 10, 0, 30, 0, time.UTC),
 	}
 	return SignedDRAUnprepare{Event: event, Signature: ed25519.Sign(private, draUnprepareSigningBytes(event))}
@@ -48,6 +49,21 @@ func TestDriverUnprepareReceiptSignedAndBoundToHistoricalAllocation(t *testing.T
 		}},
 		{name: "signed wrong driver", resign: true, mutate: func(_ *ReleaseEvidenceCandidate, s *SignedDRAUnprepare, _ *DRAUnprepareAuthority, _ *time.Time) {
 			s.Event.Driver = "other.example.com"
+		}},
+		{name: "signed other Pod UID on same Claim", resign: true, mutate: func(_ *ReleaseEvidenceCandidate, s *SignedDRAUnprepare, _ *DRAUnprepareAuthority, _ *time.Time) {
+			s.Event.PodUID = "successor-pod-uid"
+		}},
+		{name: "signed missing Pod UID", resign: true, mutate: func(_ *ReleaseEvidenceCandidate, s *SignedDRAUnprepare, _ *DRAUnprepareAuthority, _ *time.Time) {
+			s.Event.PodUID = ""
+		}},
+		{name: "signed other allocated Claim RV on same UID", resign: true, mutate: func(_ *ReleaseEvidenceCandidate, s *SignedDRAUnprepare, _ *DRAUnprepareAuthority, _ *time.Time) {
+			s.Event.AllocatedClaimResourceVersion = "149"
+		}},
+		{name: "signed cleared Claim RV instead of allocation RV", resign: true, mutate: func(_ *ReleaseEvidenceCandidate, s *SignedDRAUnprepare, _ *DRAUnprepareAuthority, _ *time.Time) {
+			s.Event.AllocatedClaimResourceVersion = "151"
+		}},
+		{name: "signed absent allocated Claim RV", resign: true, mutate: func(_ *ReleaseEvidenceCandidate, s *SignedDRAUnprepare, _ *DRAUnprepareAuthority, _ *time.Time) {
+			s.Event.AllocatedClaimResourceVersion = ""
 		}},
 		{name: "signed wrong node", resign: true, mutate: func(_ *ReleaseEvidenceCandidate, s *SignedDRAUnprepare, _ *DRAUnprepareAuthority, _ *time.Time) {
 			s.Event.NodeName = "other-node"
