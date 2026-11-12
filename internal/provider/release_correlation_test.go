@@ -51,7 +51,7 @@ func releaseCandidateFixture() ReleaseEvidenceCandidate {
 		Create:          create,
 		Delete:          del,
 		ProviderAbsence: obs,
-		PodAbsent: KubernetesPodAbsentObservation{PreviousPod: q.Job.Pod, PodListResourceVersion: "300"},
+		PodAbsent:       KubernetesPodAbsentObservation{PreviousPod: q.Job.Pod, PodListResourceVersion: "300"},
 		PriorQueue:      q,
 		QuotaCleared: KueueQuotaClearedObservation{
 			PreviousWorkload:            q.Job.KueueWorkload,
