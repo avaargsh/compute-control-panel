@@ -75,7 +75,6 @@ func TestProjectAdmissionWithoutPlacementRejectsPlacementAndMissingPod(t *testin
 	}
 }
 
-
 // The integration of Kueue admission without placement (#99) and release
 // correlation (#98) must not reinterpret admitted/reserved quota as a
 // previously placed, device-assigned Allocation. Even fabricated later Pod,
