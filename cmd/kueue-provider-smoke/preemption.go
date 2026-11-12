@@ -43,7 +43,7 @@ func preemptLowRequest() provider.Request {
 		WorkloadID: "workload-preempt-low", ProviderID: preemptProviderID,
 		IdempotencyKey:    "ccp-kind-preempt-low-key",
 		RequestDigest:     "sha256:" + strings.Repeat("17", 32),
-		DesiredGeneration: 4, Kind: operation.Create,
+		DesiredGeneration: 1, Kind: operation.Create,
 	}
 }
 
@@ -53,7 +53,7 @@ func preemptHighRequest() provider.Request {
 		WorkloadID: "workload-preempt-high", ProviderID: preemptProviderID,
 		IdempotencyKey:    "ccp-kind-preempt-high-key",
 		RequestDigest:     "sha256:" + strings.Repeat("18", 32),
-		DesiredGeneration: 5, Kind: operation.Create,
+		DesiredGeneration: 1, Kind: operation.Create,
 	}
 }
 

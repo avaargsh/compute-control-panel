@@ -55,7 +55,8 @@ func TestPreemptionRequestsStayDistinct(t *testing.T) {
 			}
 		}
 	}
-	if low.Kind != operation.Create || high.ProviderID != preemptProviderID || low.WorkloadID == high.WorkloadID {
+	if low.Kind != operation.Create || high.ProviderID != preemptProviderID || low.WorkloadID == high.WorkloadID ||
+		low.DesiredGeneration != 1 || high.DesiredGeneration != 1 {
 		t.Fatalf("low and high requests were not distinct queued creates: %+v %+v", low, high)
 	}
 	remove := preemptLowDelete(smokeNamespace+"/ccp-example", "uid-low")
