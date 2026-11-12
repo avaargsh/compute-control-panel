@@ -60,13 +60,16 @@ type DRAUnprepareVerifier struct {
 	futureSkew time.Duration
 }
 
-// DRAUnprepareCorrelation retains exact source event and signed-payload
-// digest for future authenticated evidence persistence. It has no RELEASED,
-// driver-physical-finality, READY, or cost-finality status.
+// DRAUnprepareCorrelation retains the original signature, provisioned signer
+// key fingerprint, exact source event and signed-payload digest for later
+// independently authorized verification. It has no RELEASED, physical-device,
+// READY, or cost-finality status.
 type DRAUnprepareCorrelation struct {
 	Release       ReleaseEvidenceCorrelation
 	Event         DRAUnprepareEvent
 	PayloadSHA256 string
+	KeySHA256     string
+	Signature     [ed25519.SignatureSize]byte
 }
 
 // Fixed-field struct JSON with a domain separator. No maps or arbitrary input
@@ -141,8 +144,14 @@ func (v *DRAUnprepareVerifier) Correlate(
 		return reject()
 	}
 	digest := sha256.Sum256(payload)
+	keyDigest := sha256.Sum256(v.authority.PublicKey)
+	var signature [ed25519.SignatureSize]byte
+	copy(signature[:], signed.Signature)
 	return DRAUnprepareCorrelation{
-		Release: release, Event: event,
+		Release:       release,
+		Event:         event,
 		PayloadSHA256: "sha256:" + hex.EncodeToString(digest[:]),
+		KeySHA256:     "sha256:" + hex.EncodeToString(keyDigest[:]),
+		Signature:     signature,
 	}, nil
 }
