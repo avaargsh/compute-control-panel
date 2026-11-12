@@ -3,9 +3,12 @@
 // With no arguments it uses an explicit private in-memory binding store.
 // That store is the test fake, not the in-cluster constructor. The durable
 // phases use PostgresKueueJobBindingStore when CCP_KUEUE_BINDING_DSN is set,
-// as separate processes. The disposable database login is still a superuser;
-// NewServiceAccountKueueJobAdapter would refuse it. This must never be used
-// to infer production GPU readiness, quota release, or Allocation RELEASED.
+// as separate processes. The disposable database login for those phases is
+// still a superuser; NewServiceAccountKueueJobAdapter would refuse it.
+// The admission phase calls NewQueuedServiceAccountKueueJobAdapter, which
+// requires the ccp_kueue_job_binding login and refuses that superuser.
+// This must never be used to infer production GPU readiness, quota release,
+// or Allocation RELEASED.
 package main
 
 import (
@@ -282,6 +285,8 @@ func main() {
 			err = runQueued(ctx, os.Getenv, os.Stdout)
 		} else if os.Args[1] == "journal" {
 			err = runJournal(os.Args[1:], os.Getenv, os.Stdout)
+		} else if os.Args[1] == "admission" {
+			err = runAdmission(os.Args[1:], os.Getenv, os.Stdout)
 		} else {
 			err = runDurable(os.Args[1:], os.Getenv, os.Stdout)
 		}
