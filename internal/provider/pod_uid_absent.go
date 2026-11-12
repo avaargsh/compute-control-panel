@@ -17,8 +17,8 @@ type KubernetesPodAbsentObservation struct {
 }
 
 type podAbsentListSnapshot struct {
-	APIVersion string `json:"apiVersion"`
-	Kind       string `json:"kind"`
+	APIVersion string   `json:"apiVersion"`
+	Kind       string   `json:"kind"`
 	Metadata   kubeMeta `json:"metadata"`
 	Items      []struct {
 		Metadata kubeMeta `json:"metadata"`
@@ -77,7 +77,7 @@ func (r *KubernetesObservationReader) ObservePodUIDAbsent(
 		return reject()
 	}
 	return KubernetesPodAbsentObservation{
-		PreviousPod: prior,
+		PreviousPod:            prior,
 		PodListResourceVersion: first.Metadata.ResourceVersion,
 	}, nil
 }
