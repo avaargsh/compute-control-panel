@@ -59,8 +59,8 @@ func (r *KubernetesObservationReader) ObserveKubernetesReleaseSnapshot(
 			return KubernetesReleaseSnapshot{}, err
 		}
 		return KubernetesReleaseSnapshot{
-			PodAbsent: pod,
-			QuotaCleared: quota,
+			PodAbsent:        pod,
+			QuotaCleared:     quota,
 			ClaimUnallocated: claim,
 		}, nil
 	}
