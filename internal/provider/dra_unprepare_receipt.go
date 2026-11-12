@@ -32,8 +32,9 @@ type DRAUnprepareEvent struct {
 	ClaimName                     string    `json:"claim_name"`
 	ClaimUID                      string    `json:"claim_uid"`
 	PodUID                        string    `json:"pod_uid"`
-	AllocatedClaimResourceVersion string    `json:"allocated_claim_resource_version"`
-	CompletedAt                   time.Time `json:"completed_at"`
+	AllocatedClaimResourceVersion string             `json:"allocated_claim_resource_version"`
+	AllocatedDevice               DRAAllocatedDevice `json:"allocated_device"`
+	CompletedAt                   time.Time          `json:"completed_at"`
 }
 
 // SignedDRAUnprepare is a custom Ed25519 envelope (not a Kubernetes protobuf).
@@ -138,6 +139,7 @@ func (v *DRAUnprepareVerifier) Correlate(
 		event.PodUID != prior.Claim.PodUID ||
 		!validDRAIdentity(event.AllocatedClaimResourceVersion) ||
 		event.AllocatedClaimResourceVersion != prior.Claim.Claim.ResourceVersion ||
+		event.AllocatedDevice != prior.Claim.Device ||
 		event.Driver != prior.Claim.Device.Driver ||
 		event.NodeName != prior.NodeName ||
 		!validDRAIdentity(event.NodeName) ||
