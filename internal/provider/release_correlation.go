@@ -146,8 +146,8 @@ func validReleaseClaimCorrelation(e ReleaseEvidenceCandidate) bool {
 // identities and cross-source structural consistency, including an independent
 // API observation that the historical Pod UID/name is absent. Inputs must originate
 // from separate, authenticated stores/collectors; this is not a trust
-// resolver. In particular a Kubernetes quota-zero/Claim-unallocated snapshot
-// cannot establish Pod disappearance, kubelet/driver physical deallocation,
+// resolver. Even a correlated PodList absence snapshot cannot establish Pod
+// deletion finality, kubelet/driver physical deallocation,
 // Provider final absence, or the end of GPU cost liability.
 //
 // No backend mutation, state transition, capability grant or cost posting.
