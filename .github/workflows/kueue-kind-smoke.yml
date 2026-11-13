@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/kueue-kind-smoke.yml'
       - 'scripts/kueue_kind_smoke.sh'
+      - 'scripts/kueue_relist_kind_smoke.sh'
       - 'scripts/dra_example_kind_smoke.sh'
       - 'scripts/kueue_preemption_kind_smoke.sh'
       - 'cmd/kueue-observe/**'
@@ -15,6 +16,7 @@ on:
     paths:
       - '.github/workflows/kueue-kind-smoke.yml'
       - 'scripts/kueue_kind_smoke.sh'
+      - 'scripts/kueue_relist_kind_smoke.sh'
       - 'scripts/dra_example_kind_smoke.sh'
       - 'scripts/kueue_preemption_kind_smoke.sh'
       - 'cmd/kueue-observe/**'
@@ -43,6 +45,8 @@ jobs:
         run: |
           bash -n scripts/kueue_kind_smoke.sh
           bash -n scripts/dra_example_kind_smoke.sh
+          bash -n scripts/kueue_relist_kind_smoke.sh
+          bash -n scripts/kueue_preemption_kind_smoke.sh
       - name: Kubernetes 1.34 / Kueue v0.19.6 + simulated DRA v0.2.0 + PG16 (disposable)
         env:
           CCP_DISPOSABLE_KIND_SMOKE: '1'
