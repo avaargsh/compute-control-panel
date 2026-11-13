@@ -309,6 +309,14 @@ func (r *KubernetesObservationReader) ObserveJob(
 		if err != nil {
 			return reject(err)
 		}
+		evictedCondition, err := nativeKueueCondition(workload.Status.Conditions, "Evicted")
+		if err != nil {
+			return reject(err)
+		}
+		preemptedCondition, err := nativeKueueCondition(workload.Status.Conditions, "Preempted")
+		if err != nil {
+			return reject(err)
+		}
 		reserved := quotaCondition.Status == "True"
 		admitted := admissionCondition.Status == "True"
 		// An Admitted=True without the independent quota reservation is
@@ -329,8 +337,12 @@ func (r *KubernetesObservationReader) ObserveJob(
 		}
 		e.KueueQuotaCondition = quotaCondition
 		e.KueueAdmissionCondition = admissionCondition
+		e.KueueEvictedCondition = evictedCondition
+		e.KueuePreemptedCondition = preemptedCondition
 		e.KueueQuotaReserved = reserved
 		e.KueueAdmitted = admitted
+		e.KueueEvicted = evictedCondition.Status == "True"
+		e.KueuePreempted = preemptedCondition.Status == "True"
 	}
 	if e.KueueAdmitted {
 		var pods kubeObjectList

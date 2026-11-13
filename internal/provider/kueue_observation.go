@@ -57,6 +57,13 @@ type KueueJobEvidence struct {
 	KueueAdmitted           bool
 	KueueQuotaCondition     KueueConditionEvidence
 	KueueAdmissionCondition KueueConditionEvidence
+	// Evicted and Preempted are native Kueue conditions. They are observations.
+	// AssessKueueJobObservation does not treat them as admission, placement,
+	// or release. A separate projection maps a preempted workload.
+	KueueEvictedCondition   KueueConditionEvidence
+	KueuePreemptedCondition KueueConditionEvidence
+	KueueEvicted            bool
+	KueuePreempted          bool
 	// Canonical JSON of the native status.admission.podSetAssignments list.
 	// Keep immutable text here so KueueJobEvidence remains a value snapshot;
 	// these quantities are quota reservations, not device or billing usage.

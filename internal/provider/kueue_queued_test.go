@@ -42,6 +42,7 @@ func TestQueuedKueueJobIsUIDPinnedAcrossAdmissionSuspendTransitions(t *testing.T
 		}
 	}
 	if submitted.Metadata.Labels["kueue.x-k8s.io/queue-name"] != "ccp-smoke" ||
+		submitted.Metadata.Labels["kueue.x-k8s.io/priority-class"] != "" ||
 		submitted.Spec.Suspend ||
 		submitted.Spec.Template.Spec.Containers[0].Resources.Requests["cpu"] != "100m" ||
 		submitted.Spec.Template.Spec.Containers[0].Resources.Requests["memory"] != "32Mi" {
