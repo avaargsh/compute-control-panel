@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/avaargsh/compute-control-panel/internal/pgtest"
 )
 
 // Validates a *candidate* forward-only audit function replacement using
@@ -24,10 +26,17 @@ func TestProviderAuditHardenedFunctionCandidateRestrictedWriter(t *testing.T) {
 	if !superuser {
 		t.Skip("requires disposable PostgreSQL CI superuser to provision test roles")
 	}
-	tx, err := db.BeginTx(ctx, nil)
+	conn, release, err := pgtest.LockCatalogConn(ctx, db)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer release()
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Roll back while the catalog lock is still held so another package cannot
+	// interleave role DDL with this transaction's catalog locks.
 	defer func() { _ = tx.Rollback() }()
 
 	owner := "ccp_provider_audit_owner_" + randomSuffix(t)

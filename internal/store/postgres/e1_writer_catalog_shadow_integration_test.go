@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/avaargsh/compute-control-panel/internal/pgtest"
 )
 
 // TEMP is an ordinary writer capability. Same-name temporary catalogs must
@@ -38,20 +40,20 @@ func TestE1WriterRejectsSetRoleMembershipDespiteTemporaryRolesCatalog(t *testing
 	}
 
 	adminRole := "e1_shadow_policy_admin_" + randomSuffix(t)
-	if _, err := admin.ExecContext(ctx, fmt.Sprintf("CREATE ROLE %s NOLOGIN", adminRole)); err != nil {
+	if err := pgtest.ExecCatalog(ctx, admin, fmt.Sprintf("CREATE ROLE %s NOLOGIN", adminRole)); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = admin.ExecContext(context.Background(), fmt.Sprintf("REVOKE %s FROM %s", adminRole, login))
-		_, _ = admin.ExecContext(context.Background(), fmt.Sprintf("DROP OWNED BY %s", adminRole))
-		_, _ = admin.ExecContext(context.Background(), fmt.Sprintf("DROP ROLE %s", adminRole))
+		cleanup, stop := context.WithTimeout(context.Background(), 15*time.Second)
+		defer stop()
+		if err := pgtest.CleanupRole(cleanup, admin, adminRole, fmt.Sprintf("REVOKE %s FROM %s", adminRole, login)); err != nil {
+			t.Errorf("drop role %s: %v", adminRole, err)
+		}
 	})
-	if _, err := admin.ExecContext(ctx, fmt.Sprintf(
-		"GRANT UPDATE(revision) ON public.compute_evidence_policy_fences TO %s", adminRole)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := admin.ExecContext(ctx, fmt.Sprintf(
-		"GRANT %s TO %s WITH INHERIT FALSE, SET TRUE", adminRole, login)); err != nil {
+	if err := pgtest.ExecCatalog(ctx, admin,
+		fmt.Sprintf("GRANT UPDATE(revision) ON public.compute_evidence_policy_fences TO %s", adminRole),
+		fmt.Sprintf("GRANT %s TO %s WITH INHERIT FALSE, SET TRUE", adminRole, login),
+	); err != nil {
 		t.Fatal(err)
 	}
 	var maySetRole, inheritedUpdate bool
@@ -101,13 +103,17 @@ func TestE1WriterRejectsStatusGrantDespiteTemporaryAttributesCatalog(t *testing.
 	if err := verifyEvidenceWriterPrivileges(ctx, conn); err != nil {
 		t.Fatalf("safe writer with unrelated temporary catalog rejected: %v", err)
 	}
-	if _, err := admin.ExecContext(ctx, fmt.Sprintf(
+	if err := pgtest.ExecCatalog(ctx, admin, fmt.Sprintf(
 		"GRANT UPDATE(status) ON public.compute_operations TO %s", login)); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = admin.ExecContext(context.Background(), fmt.Sprintf(
-			"REVOKE UPDATE(status) ON public.compute_operations FROM %s", login))
+		cleanup, stop := context.WithTimeout(context.Background(), 15*time.Second)
+		defer stop()
+		if err := pgtest.ExecCatalogCleanup(cleanup, admin, fmt.Sprintf(
+			"REVOKE UPDATE(status) ON public.compute_operations FROM %s", login)); err != nil {
+			t.Errorf("revoke status update: %v", err)
+		}
 	})
 	var canUpdateStatus bool
 	if err := conn.QueryRowContext(ctx, `

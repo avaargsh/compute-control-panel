@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/avaargsh/compute-control-panel/internal/pgtest"
 )
 
 // The E1 runtime writer may read ordinary policy projections, but must never
@@ -31,11 +33,13 @@ func TestE1WriterRejectsIndependentAuthorizationIssuerGrants(t *testing.T) {
 	} {
 		t.Run(grant, func(t *testing.T) {
 			statement := fmt.Sprintf("GRANT %s ON public.compute_e1_final_authorizations TO %s", grant, login)
-			if _, err := admin.ExecContext(ctx, statement); err != nil {
+			if err := pgtest.ExecCatalog(ctx, admin, statement); err != nil {
 				t.Fatalf("grant test-only privilege: %v", err)
 			}
 			t.Cleanup(func() {
-				_, err := admin.ExecContext(context.Background(),
+				cleanup, stop := context.WithTimeout(context.Background(), 15*time.Second)
+				defer stop()
+				err := pgtest.ExecCatalogCleanup(cleanup, admin,
 					fmt.Sprintf("REVOKE %s ON public.compute_e1_final_authorizations FROM %s", grant, login))
 				if err != nil {
 					t.Errorf("restore approval issuer ACL: %v", err)
