@@ -126,6 +126,7 @@ type preemptJobReport struct {
 	Released                bool   `json:"released"`
 	OperationID             string `json:"operation_id"`
 	PinDurable              bool   `json:"pin_durable"`
+	ReadSequence            uint64 `json:"read_sequence"`
 }
 
 type preemptSubmitReport struct {
@@ -176,7 +177,7 @@ func reportFromProjection(p provider.KueuePreemptionProjection, operationID stri
 		JobUID: p.JobUID, JobName: p.JobName, JobResourceVersion: p.JobResourceVersion,
 		PodUID: p.PodUID, PodScheduled: p.PodScheduled, NodeName: p.NodeName,
 		Allocated: p.Allocated, Active: p.Active, Ready: p.Ready, Costable: p.Costable, Released: p.Released,
-		OperationID: operationID, PinDurable: pin,
+		OperationID: operationID, PinDurable: pin, ReadSequence: p.ReadSequence,
 	}
 }
 
@@ -190,6 +191,7 @@ func projectionFromReport(r preemptJobReport) provider.KueuePreemptionProjection
 		JobNamespace: smokeNamespace, JobName: r.JobName, JobUID: r.JobUID, JobResourceVersion: r.JobResourceVersion,
 		PodUID: r.PodUID, PodScheduled: r.PodScheduled, NodeName: r.NodeName,
 		Allocated: r.Allocated, Active: r.Active, Ready: r.Ready, Costable: r.Costable, Released: r.Released,
+		ReadSequence: r.ReadSequence,
 	}
 }
 
@@ -347,6 +349,9 @@ func preemptSubmitLow(getenv func(string) string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// This process performed the read after CREATE. Sequence 1 is that read,
+	// not a Kubernetes resourceVersion.
+	projected.ReadSequence = 1
 	present, err := stableJobObservation(ctx, func(ctx context.Context) (operation.Observation, error) {
 		return adapter.Inspect(ctx, req)
 	})
@@ -406,6 +411,8 @@ func preemptSubmitHigh(getenv func(string) string, out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("admitted fence: %w", err)
 	}
+	// Reads in this process start after the admitted fence was recorded.
+	nextRead := prior.ReadSequence
 	lowAdapter, err := openPreemptAdapter(getenv, preemptLowPriority)
 	if err != nil {
 		return err
@@ -452,7 +459,13 @@ func preemptSubmitHigh(getenv func(string) string, out io.Writer) error {
 		var fencedNow provider.KueuePreemptionFence
 		var fenceErr error
 		if lowOK == nil {
+			nextRead++
+			lowProjected.ReadSequence = nextRead
 			fencedNow, fenceErr = provider.AdvanceKueuePreemptionFence(priorFence, lowProjected)
+		}
+		if highOK == nil {
+			nextRead++
+			highProjected.ReadSequence = nextRead
 		}
 		if lowOK == nil && highOK == nil && fenceErr == nil && fencedNow.Disposition == "PREEMPTED" &&
 			highProjected.ClusterQueue == preemptQueue &&

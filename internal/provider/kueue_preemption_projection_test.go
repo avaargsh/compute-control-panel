@@ -142,8 +142,9 @@ func TestPreemptionFenceRejectsStaleAndCrossProjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	admitted.ReadSequence = 1
 	fence, err := AdvanceKueuePreemptionFence(KueuePreemptionFence{}, admitted)
-	if err != nil || fence.Phase != "ADMITTED" || fence.JobUID != admitted.JobUID {
+	if err != nil || fence.Phase != "ADMITTED" || fence.JobUID != admitted.JobUID || fence.ReadSequence != 1 {
 		t.Fatalf("initial fence: %+v err=%v", fence, err)
 	}
 	again, err := AdvanceKueuePreemptionFence(fence, admitted)
@@ -154,22 +155,24 @@ func TestPreemptionFenceRejectsStaleAndCrossProjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	preempted.ReadSequence = 2
 	if _, err := AdvanceKueuePreemptionFence(KueuePreemptionFence{}, preempted); !errors.Is(err, ErrInvalidKueueObservation) {
 		t.Fatalf("preemption without an admitted fence: %v", err)
 	}
 	next, err := AdvanceKueuePreemptionFence(fence, preempted)
-	if err != nil || next.Disposition != "PREEMPTED" || next.Phase != "NOT_READY" || next.WorkloadResourceVersion != "202" {
+	if err != nil || next.Disposition != "PREEMPTED" || next.Phase != "NOT_READY" || next.WorkloadResourceVersion != "202" || next.ReadSequence != 2 {
 		t.Fatalf("preemption fence: %+v err=%v", next, err)
 	}
 	stale, err := AdvanceKueuePreemptionFence(next, admitted)
 	if !errors.Is(err, ErrStaleKueuePreemption) || stale != next {
-		t.Fatalf("stale observation overwrote the fence: %+v err=%v", stale, err)
+		t.Fatalf("earlier read overwrote the fence: %+v err=%v", stale, err)
 	}
 	other := preempted
 	other.JobUID = "job-uid-b"
 	other.WorkloadUID = "kueue-uid-b"
-	other.JobResourceVersion = "301"
-	other.WorkloadResourceVersion = "302"
+	other.JobResourceVersion = "rv-b"
+	other.WorkloadResourceVersion = "abc-b"
+	other.ReadSequence = 3
 	crossed, err := AdvanceKueuePreemptionFence(next, other)
 	if !errors.Is(err, ErrCrossKueuePreemption) || crossed != next {
 		t.Fatalf("cross projection overwrote A: %+v err=%v", crossed, err)
@@ -179,16 +182,86 @@ func TestPreemptionFenceRejectsStaleAndCrossProjection(t *testing.T) {
 	bAdmitted.WorkloadUID = "kueue-uid-b"
 	bAdmitted.JobName = "job-b"
 	bAdmitted.WorkloadName = "kueue-workload-b"
+	bAdmitted.ReadSequence = 1
 	bFence, err := AdvanceKueuePreemptionFence(KueuePreemptionFence{}, bAdmitted)
 	if err != nil || bFence.JobUID != "job-uid-b" || bFence.WorkloadUID == fence.WorkloadUID {
 		t.Fatalf("B did not get its own fence: %+v err=%v", bFence, err)
 	}
 	readmitted := admitted
-	readmitted.JobResourceVersion = "401"
-	readmitted.WorkloadResourceVersion = "402"
+	readmitted.JobResourceVersion = "rv-later"
+	readmitted.WorkloadResourceVersion = "abc-later"
+	readmitted.ReadSequence = 4
 	kept, err := AdvanceKueuePreemptionFence(next, readmitted)
 	if err == nil || kept != next || kept.Phase != "NOT_READY" || kept.Disposition != "PREEMPTED" {
 		t.Fatalf("later admission cleared preemption: %+v err=%v", kept, err)
+	}
+}
+
+func TestPreemptionFenceOrdersOpaqueResourceVersionsByCCPRead(t *testing.T) {
+	evidence := admittedPreemptionEvidence()
+	evidence.Job.ResourceVersion = "rv-a"
+	evidence.KueueWorkload.ResourceVersion = "abc"
+	admitted, err := ProjectKueueAdmissionBeforePreemption(evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admitted.JobResourceVersion = "100"
+	admitted.WorkloadResourceVersion = "100"
+	admitted.ReadSequence = 1
+	fence, err := AdvanceKueuePreemptionFence(KueuePreemptionFence{}, admitted)
+	if err != nil || fence.JobResourceVersion != "100" || fence.WorkloadResourceVersion != "100" {
+		t.Fatalf("opaque resourceVersion was rejected: %+v err=%v", fence, err)
+	}
+	blank := evidence
+	blank.Job.ResourceVersion = ""
+	if _, err := ProjectKueueAdmissionBeforePreemption(blank); err == nil {
+		t.Fatal("empty resourceVersion was projected")
+	}
+	preempted, err := ProjectKueuePreemptedWorkload(preemptedPreemptionEvidence())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Numerically smaller than the fenced "100", but from a later CCP read.
+	preempted.JobResourceVersion = "9"
+	preempted.WorkloadResourceVersion = "9"
+	preempted.ReadSequence = 5
+	next, err := AdvanceKueuePreemptionFence(fence, preempted)
+	if err != nil || next.Phase != "NOT_READY" || next.WorkloadResourceVersion != "9" || next.ReadSequence != 5 || next.JobResourceVersion != "9" {
+		t.Fatalf("later read with a smaller resourceVersion was rejected: %+v err=%v", next, err)
+	}
+	earlier := preempted
+	earlier.JobResourceVersion = "999"
+	earlier.WorkloadResourceVersion = "1000"
+	earlier.ReadSequence = 4
+	kept, err := AdvanceKueuePreemptionFence(next, earlier)
+	if !errors.Is(err, ErrStaleKueuePreemption) || kept != next {
+		t.Fatalf("earlier read with a different resourceVersion was accepted: %+v err=%v", kept, err)
+	}
+	repeat := preempted
+	repeat.ReadSequence = 5
+	again, err := AdvanceKueuePreemptionFence(next, repeat)
+	if err != nil || again != next {
+		t.Fatalf("identical repeat was not idempotent: %+v err=%v", again, err)
+	}
+	laterSame := preempted
+	laterSame.ReadSequence = 6
+	bumped, err := AdvanceKueuePreemptionFence(next, laterSame)
+	if err != nil || bumped.ReadSequence != 6 || bumped.WorkloadResourceVersion != next.WorkloadResourceVersion || bumped.Phase != "NOT_READY" {
+		t.Fatalf("later identical resourceVersion did not stay the same state: %+v err=%v", bumped, err)
+	}
+	empty := preempted
+	empty.WorkloadResourceVersion = ""
+	empty.ReadSequence = 7
+	rejected, err := AdvanceKueuePreemptionFence(bumped, empty)
+	if err == nil || rejected != bumped || rejected.Phase == "READY" || rejected.Phase == "RELEASED" {
+		t.Fatalf("empty resourceVersion was fenced: %+v err=%v", rejected, err)
+	}
+	noRead := preempted
+	noRead.ReadSequence = 0
+	noRead.JobResourceVersion = "rv-z"
+	rejected, err = AdvanceKueuePreemptionFence(bumped, noRead)
+	if err == nil || rejected != bumped {
+		t.Fatalf("read without a CCP sequence was fenced: %+v err=%v", rejected, err)
 	}
 }
 

@@ -2,13 +2,12 @@ package provider
 
 import (
 	"errors"
-	"strconv"
-	"strings"
 )
 
-// ErrStaleKueuePreemption means an observation for a UID is older than the
-// fenced resourceVersion. The caller must keep the newer fence.
-var ErrStaleKueuePreemption = errors.New("stale kueue preemption resourceVersion")
+// ErrStaleKueuePreemption means an observation for a UID came from an earlier
+// CCP read than the fence. The caller must keep the fence. Kubernetes
+// resourceVersion is not an order.
+var ErrStaleKueuePreemption = errors.New("stale kueue preemption read")
 
 // ErrCrossKueuePreemption means an observation for one Job or Workload UID was
 // applied to a fence for a different UID.
@@ -47,10 +46,14 @@ type KueuePreemptionProjection struct {
 	Ready                   bool
 	Costable                bool
 	Released                bool
+	// ReadSequence is the monotonic order CCP assigned when it performed the
+	// read that produced this snapshot. It is not a Kubernetes resourceVersion.
+	ReadSequence uint64
 }
 
 // KueuePreemptionFence is the newest accepted projection for one Job UID and
-// its Workload UID. ResourceVersions are compared only within the same object.
+// its Workload UID. ResourceVersion strings are opaque and are compared only
+// for equality. ReadSequence is the order of CCP's own reads.
 type KueuePreemptionFence struct {
 	JobUID                  string
 	JobResourceVersion      string
@@ -58,21 +61,15 @@ type KueuePreemptionFence struct {
 	WorkloadResourceVersion string
 	Phase                   string
 	Disposition             string
+	ReadSequence            uint64
 }
 
 func inactivePreemptionProjection(p KueuePreemptionProjection) bool {
 	return !p.Allocated && !p.Active && !p.Ready && !p.Costable && !p.Released
 }
 
-func kubePositiveResourceVersion(v string) (uint64, bool) {
-	if v == "" || len(v) > 20 || strings.TrimLeft(v, "0") != v {
-		return 0, false
-	}
-	n, err := strconv.ParseUint(v, 10, 64)
-	if err != nil || n == 0 {
-		return 0, false
-	}
-	return n, true
+func opaqueResourceVersion(v string) bool {
+	return v != ""
 }
 
 func conditionObserved(c KueueConditionEvidence) bool {
@@ -113,10 +110,7 @@ func ProjectKueueAdmissionBeforePreemption(e KueueJobEvidence) (KueuePreemptionP
 		e.KueueWorkload.Namespace != e.Job.Namespace || e.Job.UID == e.KueueWorkload.UID {
 		return reject()
 	}
-	if _, ok := kubePositiveResourceVersion(e.Job.ResourceVersion); !ok {
-		return reject()
-	}
-	if _, ok := kubePositiveResourceVersion(e.KueueWorkload.ResourceVersion); !ok {
+	if !opaqueResourceVersion(e.Job.ResourceVersion) || !opaqueResourceVersion(e.KueueWorkload.ResourceVersion) {
 		return reject()
 	}
 	podUID := ""
@@ -190,10 +184,7 @@ func ProjectKueuePreemptedWorkload(e KueueJobEvidence) (KueuePreemptionProjectio
 		e.Job.UID == e.KueueWorkload.UID {
 		return reject()
 	}
-	if _, ok := kubePositiveResourceVersion(e.Job.ResourceVersion); !ok {
-		return reject()
-	}
-	if _, ok := kubePositiveResourceVersion(e.KueueWorkload.ResourceVersion); !ok {
+	if !opaqueResourceVersion(e.Job.ResourceVersion) || !opaqueResourceVersion(e.KueueWorkload.ResourceVersion) {
 		return reject()
 	}
 	out := KueuePreemptionProjection{
@@ -232,13 +223,10 @@ func (p KueuePreemptionProjection) fence() (KueuePreemptionFence, error) {
 	default:
 		return KueuePreemptionFence{}, ErrInvalidKueueObservation
 	}
-	if p.JobUID == "" || p.WorkloadUID == "" || p.JobUID == p.WorkloadUID {
+	if p.JobUID == "" || p.WorkloadUID == "" || p.JobUID == p.WorkloadUID || p.ReadSequence == 0 {
 		return KueuePreemptionFence{}, ErrInvalidKueueObservation
 	}
-	if _, ok := kubePositiveResourceVersion(p.JobResourceVersion); !ok {
-		return KueuePreemptionFence{}, ErrInvalidKueueObservation
-	}
-	if _, ok := kubePositiveResourceVersion(p.WorkloadResourceVersion); !ok {
+	if !opaqueResourceVersion(p.JobResourceVersion) || !opaqueResourceVersion(p.WorkloadResourceVersion) {
 		return KueuePreemptionFence{}, ErrInvalidKueueObservation
 	}
 	return KueuePreemptionFence{
@@ -248,6 +236,7 @@ func (p KueuePreemptionProjection) fence() (KueuePreemptionFence, error) {
 		WorkloadResourceVersion: p.WorkloadResourceVersion,
 		Phase:                   p.Phase,
 		Disposition:             p.Disposition,
+		ReadSequence:            p.ReadSequence,
 	}, nil
 }
 
@@ -256,11 +245,12 @@ func (f KueuePreemptionFence) empty() bool {
 }
 
 // AdvanceKueuePreemptionFence records next only when it is the same Job and
-// Workload as prior and both resourceVersions move forward, or when it repeats
-// the fenced UID and resourceVersion exactly. An older resourceVersion returns
-// the prior fence and ErrStaleKueuePreemption. A different UID returns the
-// prior fence and ErrCrossKueuePreemption. On error the returned fence is the
-// one the caller must keep.
+// Workload as prior. The same resourceVersion strings are an idempotent
+// repeat. A different resourceVersion is accepted only when next.ReadSequence
+// is a strictly later CCP read than the fence. An earlier read returns the
+// prior fence and ErrStaleKueuePreemption. A different UID returns the prior
+// fence and ErrCrossKueuePreemption. On error the returned fence is the one
+// the caller must keep. ResourceVersion strings are never ordered.
 func AdvanceKueuePreemptionFence(prior KueuePreemptionFence, next KueuePreemptionProjection) (KueuePreemptionFence, error) {
 	keep := func(err error) (KueuePreemptionFence, error) {
 		return prior, err
@@ -278,30 +268,26 @@ func AdvanceKueuePreemptionFence(prior KueuePreemptionFence, next KueuePreemptio
 	if prior.JobUID != observed.JobUID || prior.WorkloadUID != observed.WorkloadUID {
 		return keep(fmtWrapCross())
 	}
-	priorJob, okJob := kubePositiveResourceVersion(prior.JobResourceVersion)
-	priorWorkload, okWorkload := kubePositiveResourceVersion(prior.WorkloadResourceVersion)
-	nextJob, okNextJob := kubePositiveResourceVersion(observed.JobResourceVersion)
-	nextWorkload, okNextWorkload := kubePositiveResourceVersion(observed.WorkloadResourceVersion)
-	if !okJob || !okWorkload || !okNextJob || !okNextWorkload ||
-		prior.Phase == "" || prior.Disposition == "" {
+	if prior.ReadSequence == 0 || prior.Phase == "" || prior.Disposition == "" ||
+		!opaqueResourceVersion(prior.JobResourceVersion) ||
+		!opaqueResourceVersion(prior.WorkloadResourceVersion) {
 		return keep(ErrInvalidKueueObservation)
 	}
-	if nextJob < priorJob || nextWorkload < priorWorkload {
-		return keep(fmtWrapStale())
-	}
-	if nextJob == priorJob && nextWorkload == priorWorkload {
+	sameVersion := prior.JobResourceVersion == observed.JobResourceVersion &&
+		prior.WorkloadResourceVersion == observed.WorkloadResourceVersion
+	if sameVersion {
 		if prior.Phase != observed.Phase || prior.Disposition != observed.Disposition {
 			return keep(ErrInvalidKueueObservation)
 		}
+		if observed.ReadSequence > prior.ReadSequence {
+			prior.ReadSequence = observed.ReadSequence
+		}
 		return prior, nil
 	}
-	if nextWorkload <= priorWorkload || nextJob < priorJob {
-		return keep(ErrInvalidKueueObservation)
+	if observed.ReadSequence <= prior.ReadSequence {
+		return keep(fmtWrapStale())
 	}
 	if prior.Disposition == "PREEMPTED" && observed.Disposition != "PREEMPTED" {
-		return keep(ErrInvalidKueueObservation)
-	}
-	if prior.Disposition == "ADMITTED" && observed.Disposition == "PREEMPTED" && nextWorkload <= priorWorkload {
 		return keep(ErrInvalidKueueObservation)
 	}
 	return observed, nil

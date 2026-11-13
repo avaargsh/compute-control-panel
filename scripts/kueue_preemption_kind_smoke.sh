@@ -101,7 +101,8 @@ jq -e '
   (.job_uid | type == "string" and length > 0) and .job_uid != .workload_uid and
   (.job_name | type == "string" and length > 0) and
   .allocated == false and .active == false and .ready == false and .costable == false and .released == false and
-  .release_attested == false and .pin_durable == true and .operation_id == "ccp-kind-preempt-low"
+  .release_attested == false and .pin_durable == true and .operation_id == "ccp-kind-preempt-low" and
+  (.low.read_sequence > 0)
 ' "$dir/preempt-submit-low.json" >/dev/null || preempt_fail "low-priority projection was not admitted and inactive"
 low_job_uid="$(jq -r .job_uid "$dir/preempt-submit-low.json")"
 low_job_name="$(jq -r .job_name "$dir/preempt-submit-low.json")"
@@ -111,10 +112,10 @@ low_job_rv="$(jq -r .job_resource_version "$dir/preempt-submit-low.json")"
 [[ "$(psql_at "SELECT job_uid FROM public.kueue_job_create_pins WHERE namespace='ccp-kueue-smoke' AND operation_id='ccp-kind-preempt-low'")" == "$low_job_uid" ]] || {
   preempt_fail "low-priority pin was not stored by the restricted login"
 }
-workloads_json | jq -e --arg id "$low_job_uid" --arg uid "$low_workload_uid" --arg rv "$low_workload_rv" '
+workloads_json | jq -e --arg id "$low_job_uid" --arg uid "$low_workload_uid" '
   [.items[] | select(any(.metadata.ownerReferences[]?; .kind == "Job" and .uid == $id))]
   | if length == 1 then .[0] else empty end
-  | .metadata.uid == $uid and (.metadata.resourceVersion | tonumber) >= ($rv | tonumber)
+  | .metadata.uid == $uid and (.metadata.resourceVersion | type == "string" and length > 0)
     and any(.status.conditions[]?; .type == "QuotaReserved" and .status == "True")
     and any(.status.conditions[]?; .type == "Admitted" and .status == "True")
     and (any(.status.conditions[]?; .type == "Evicted" and .status == "True") | not)
@@ -125,7 +126,8 @@ export CCP_KUEUE_PREEMPTION_PRIOR="$dir/preempt-submit-low.json"
 if ! run_admission "$dir/preempt-submit-high.json" preemption submit-high; then
   preempt_fail "high-priority submit did not observe preemption"
 fi
-jq -e --arg low "$low_job_uid" --arg high_forbidden "$low_workload_uid" --arg prior_rv "$low_workload_rv" '
+prior_read="$(jq -r .low.read_sequence "$dir/preempt-submit-low.json")"
+jq -e --arg low "$low_job_uid" --arg high_forbidden "$low_workload_uid" --argjson prior_read "$prior_read" '
   .phase == "submit-high" and .stale_rejected == true and .cross_rejected == true and .deduped == true and
   .release_attested == false and
   .low.projection == "NOT_READY" and .low.disposition == "PREEMPTED" and
@@ -133,7 +135,9 @@ jq -e --arg low "$low_job_uid" --arg high_forbidden "$low_workload_uid" --arg pr
   .low.preempted == true and .low.preempted_reason == "InClusterQueue" and
   .low.quota_reserved == false and .low.admitted == false and
   .low.job_uid == $low and .low.workload_uid != $low and .low.job_uid != .low.workload_uid and
-  (.low.workload_resource_version | tonumber) > ($prior_rv | tonumber) and
+  (.low.workload_resource_version | type == "string" and length > 0) and
+  (.low.job_resource_version | type == "string" and length > 0) and
+  (.low.read_sequence > $prior_read) and
   .low.allocated == false and .low.active == false and .low.ready == false and
   .low.costable == false and .low.released == false and .low.pin_durable == true and
   .high.projection == "ADMITTED" and .high.disposition == "ADMITTED" and
@@ -156,19 +160,19 @@ low_preempt_rv="$(jq -r .low.workload_resource_version "$dir/preempt-submit-high
 [[ "$(psql_at "SELECT job_uid FROM public.kueue_job_create_pins WHERE namespace='ccp-kueue-smoke' AND operation_id='ccp-kind-preempt-high'")" == "$high_job_uid" ]] || {
   preempt_fail "high-priority pin was not its own binding"
 }
-workloads_json | jq -e --arg id "$low_job_uid" --arg uid "$low_workload_uid" --arg rv "$low_preempt_rv" '
+workloads_json | jq -e --arg id "$low_job_uid" --arg uid "$low_workload_uid" '
   [.items[] | select(any(.metadata.ownerReferences[]?; .kind == "Job" and .uid == $id))]
   | if length == 1 then .[0] else empty end
-  | .metadata.uid == $uid and (.metadata.resourceVersion | tonumber) >= ($rv | tonumber) and .status.admission == null
+  | .metadata.uid == $uid and (.metadata.resourceVersion | type == "string" and length > 0) and .status.admission == null
     and any(.status.conditions[]?; .type == "Evicted" and .status == "True" and .reason == "Preempted")
     and any(.status.conditions[]?; .type == "Preempted" and .status == "True" and .reason == "InClusterQueue")
     and any(.status.conditions[]?; .type == "QuotaReserved" and .status == "False")
     and any(.status.conditions[]?; .type == "Admitted" and .status == "False")
 ' >/dev/null || preempt_fail "live low-priority Workload conditions were not Evicted/Preempted with quota and admission false"
-workloads_json | jq -e --arg id "$high_job_uid" --arg uid "$high_workload_uid" --arg rv "$high_workload_rv" '
+workloads_json | jq -e --arg id "$high_job_uid" --arg uid "$high_workload_uid" '
   [.items[] | select(any(.metadata.ownerReferences[]?; .kind == "Job" and .uid == $id))]
   | if length == 1 then .[0] else empty end
-  | .metadata.uid == $uid and (.metadata.resourceVersion | tonumber) >= ($rv | tonumber)
+  | .metadata.uid == $uid and (.metadata.resourceVersion | type == "string" and length > 0)
     and .status.admission.clusterQueue == "ccp-preempt"
     and any(.status.conditions[]?; .type == "QuotaReserved" and .status == "True")
     and any(.status.conditions[]?; .type == "Admitted" and .status == "True")
