@@ -93,7 +93,10 @@ type admissionReport struct {
 	OperationID             string `json:"operation_id"`
 }
 
-func openAdmissionAdapter(getenv func(string) string) (*provider.KueueJobAdapter, error) {
+// openQueuedBindingAdapter is the shared disposable-kind constructor for the
+// opt-in queued writer. It calls NewQueuedServiceAccountKueueJobAdapter, which
+// refuses a superuser DSN and an in-memory binding store before it posts a Job.
+func openQueuedBindingAdapter(getenv func(string) string, localQueue string) (*provider.KueueJobAdapter, error) {
 	if err := requireDisposableSmoke(getenv); err != nil {
 		return nil, err
 	}
@@ -106,11 +109,13 @@ func openAdmissionAdapter(getenv func(string) string) (*provider.KueueJobAdapter
 		return nil, err
 	}
 	ca, token := durableCredentialPaths(getenv)
-	// This is the queued in-cluster constructor. It refuses a superuser DSN
-	// and an in-memory binding store before it posts a Job.
 	return provider.NewQueuedServiceAccountKueueJobAdapter(
-		apiURL, ca, token, smokeNamespace, admissionLocalQueue, dsn,
+		apiURL, ca, token, smokeNamespace, localQueue, dsn,
 	)
+}
+
+func openAdmissionAdapter(getenv func(string) string) (*provider.KueueJobAdapter, error) {
+	return openQueuedBindingAdapter(getenv, admissionLocalQueue)
 }
 
 func openAdmissionPinStore(getenv func(string) string) (*sql.DB, *provider.PostgresKueueJobBindingStore, error) {

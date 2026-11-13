@@ -285,8 +285,12 @@ func main() {
 			err = runQueued(ctx, os.Getenv, os.Stdout)
 		} else if os.Args[1] == "journal" {
 			err = runJournal(os.Args[1:], os.Getenv, os.Stdout)
+		} else if os.Args[1] == "relist" {
+			err = runRelist(os.Args[1:], os.Getenv, os.Stdout)
 		} else if os.Args[1] == "admission" {
 			err = runAdmission(os.Args[1:], os.Getenv, os.Stdout)
+		} else if os.Args[1] == "preemption" {
+			err = runPreemption(os.Args[1:], os.Getenv, os.Stdout)
 		} else {
 			err = runDurable(os.Args[1:], os.Getenv, os.Stdout)
 		}

@@ -60,6 +60,9 @@ type KueueJobAdapter struct {
 	// Empty means the original inert suspended Job mode. A non-empty LocalQueue
 	// explicitly opts into Kueue-controlled suspend/unsuspend and Pod creation.
 	queueName string
+	// workloadPriorityClass is optional. Empty keeps the queued Job unlabeled.
+	// Kueue copies kueue.x-k8s.io/priority-class onto the Workload it creates.
+	workloadPriorityClass string
 }
 
 // NewKueueJobAdapter binds CREATE and Inspect to one namespace and an HTTPS
@@ -147,6 +150,22 @@ func NewQueuedServiceAccountKueueJobAdapter(
 	}
 	adapter.queueName = localQueue
 	return adapter, nil
+}
+
+// UseQueuedWorkloadPriorityClass sets kueue.x-k8s.io/priority-class on Jobs
+// this queued adapter submits. Kueue, not CCP, creates the Workload and applies
+// the WorkloadPriorityClass. An empty name omits the label, which is the
+// default. This does not create a Workload, choose a ClusterQueue, or unsuspend
+// a Job. The adapter must already be in the opt-in queued mode.
+func (a *KueueJobAdapter) UseQueuedWorkloadPriorityClass(name string) error {
+	if a == nil || a.queueName == "" {
+		return ErrInvalidKueueObservation
+	}
+	if name != "" && !validKubeName(name) {
+		return ErrInvalidKueueObservation
+	}
+	a.workloadPriorityClass = name
+	return nil
 }
 
 // NewServiceAccountKueueJobAdapter is the in-cluster constructor. It uses the
@@ -381,6 +400,7 @@ func (a *KueueJobAdapter) exactJobSpec(job kubeObject) bool {
 		return exactSuspendedJobSpec(job)
 	}
 	if job.Metadata.Labels["kueue.x-k8s.io/queue-name"] != a.queueName ||
+		job.Metadata.Labels["kueue.x-k8s.io/priority-class"] != a.workloadPriorityClass ||
 		job.Spec.Parallelism == nil || *job.Spec.Parallelism != 1 ||
 		job.Spec.Completions == nil || *job.Spec.Completions != 1 ||
 		job.Spec.Template.Spec.RestartPolicy != "Never" ||
@@ -479,7 +499,11 @@ func (a *KueueJobAdapter) jobBody(req Request, name string) ([]byte, error) {
 		},
 	}
 	if a.queueName != "" {
-		payload.Metadata.Labels = map[string]string{"kueue.x-k8s.io/queue-name": a.queueName}
+		labels := map[string]string{"kueue.x-k8s.io/queue-name": a.queueName}
+		if a.workloadPriorityClass != "" {
+			labels["kueue.x-k8s.io/priority-class"] = a.workloadPriorityClass
+		}
+		payload.Metadata.Labels = labels
 		payload.Spec.Suspend = false // Kueue's mutating webhook may immediately suspend it.
 		payload.Spec.Template.Spec.Containers[0] = kueueBatchContainer{
 			Name: "ccp-queued", Image: kueueSuspendedJobImage,

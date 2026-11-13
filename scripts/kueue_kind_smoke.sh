@@ -28,7 +28,12 @@ cleanup() {
     kubectl --request-timeout=10s -n kueue-system logs deploy/kueue-controller-manager --tail=80 || true
   fi
   if [[ "$status" -ne 0 ]]; then
-    for f in "$dir"/durable-*.json "$dir"/durable-*.err "$dir"/journal-*.json "$dir"/journal-*.err "$dir"/admission-*.json "$dir"/admission-*.err "$dir"/pg-boot.log "$dir"/migrate.log; do
+    for f in "$dir"/durable-*.json "$dir"/durable-*.err "$dir"/journal-*.json "$dir"/journal-*.err "$dir"/admission-*.json "$dir"/admission-*.err "$dir"/preempt-*.json "$dir"/preempt-*.err "$dir"/pg-boot.log "$dir"/migrate.log; do
+      [[ -f "$f" ]] || continue
+      echo "----- $(basename "$f") -----" >&2
+      tail -n 40 "$f" >&2 || true
+    done
+    for f in "$dir"/relist-*.json "$dir"/relist-*.err; do
       [[ -f "$f" ]] || continue
       echo "----- $(basename "$f") -----" >&2
       tail -n 40 "$f" >&2 || true
@@ -1204,9 +1209,20 @@ echo "admission_successor_uid=$admission_successor_uid admission_deleted_uid=$ad
 for n in "${smoke_nodes[@]}"; do
   kubectl taint node "$n" 'ccp-kueue-smoke/unplaceable=true:NoSchedule-' >/dev/null
 done
+# Relist plus Kueue controller restart. Separate file so a preemption slice can
+# rebase without sharing its script or projection types.
+export CCP_RELIST_DIR="$dir"
+export CCP_RELIST_NS="$ns"
+export CCP_RELIST_PG_PORT="$pg_port"
+export CCP_RELIST_PG_NAME="$pg_name"
+export CCP_RELIST_API_HOST="$api_host"
+export CCP_RELIST_API_PORT="$api_port"
+bash scripts/kueue_relist_kind_smoke.sh
 echo "PASS: disposable CPU-only Kueue quota-denial/QuotaReserved/Admitted, exact Workload/Pod/Job UID+RV and node binding, teardown observation, Postgres pin/tombstone SIGKILL recovery, real kind + Postgres ComputeOperation UNKNOWN -> fenced Inspect-first CREATE SUCCEEDED and DELETE TARGET_ABSENT after process SIGKILL, and admitted-but-unplaced queued Job projected NOT_READY through the ccp_kueue_job_binding login. TARGET_ABSENT is not Allocation RELEASED, Kueue quota release, or device release. This is NOT GPU/DRA device release, a production quota-release attestation, Provider retirement, Allocation RELEASED or cost finality."
 # Independent official DRA example-driver lane. This creates a simulated GPU
 # ResourceSlice/Claim/Pod *separate* from the queued CCP Job to keep authority
 # and attribution claims explicit; never promote Allocation READY/RELEASED.
 bash scripts/dra_example_kind_smoke.sh
+# Kueue withinClusterQueue preemption. Separate file; reuses run_admission.
+. scripts/kueue_preemption_kind_smoke.sh
 
