@@ -80,7 +80,10 @@ type DRAUnprepareCorrelation struct {
 // its transport, source key custody and operation-result authenticity remain
 // separate production gates.
 func draUnprepareSigningBytes(event DRAUnprepareEvent) []byte {
-	payload, _ := json.Marshal(event) // fixed scalar fields + time.Time; cannot fail
+	payload, err := json.Marshal(event)
+	if err != nil { // time.Time can fail RFC3339 JSON encoding outside years 0..9999
+		return nil
+	}
 	return append([]byte("CCP:DRA:NodeUnprepareResources:v1\n"), payload...)
 }
 
@@ -149,7 +152,7 @@ func (v *DRAUnprepareVerifier) Correlate(
 		return reject()
 	}
 	payload := draUnprepareSigningBytes(event)
-	if !ed25519.Verify(v.authority.PublicKey, payload, signed.Signature) {
+	if len(payload) == 0 || !ed25519.Verify(v.authority.PublicKey, payload, signed.Signature) {
 		return reject()
 	}
 	digest := sha256.Sum256(payload)
