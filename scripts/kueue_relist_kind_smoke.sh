@@ -101,6 +101,7 @@ jq -e '
   (.job_resource_version | type == "string" and length > 0) and
   .job_uid != .workload_uid and
   (.attempts | type == "number" and . >= 1) and
+  (.read_sequence | type == "number" and . >= 1) and
   .allocated == false and .active == false and .ready == false and
   .costable == false and .released == false and .release_attested == false and
   .kept_stale == false and .operation_id == "ccp-kind-relist-create"' \
@@ -196,11 +197,13 @@ if ! run_relist "$dir/relist-converge.json" relist converge; then
   exit 1
 fi
 unset CCP_KUEUE_RELIST_PRIOR
-jq -e --arg uid "$job_uid" --arg workload "$workload_uid" --arg prior_job "$recorded_job_rv" --arg prior_workload "$recorded_workload_rv" '
+recorded_read="$(jq -r '.read_sequence' "$dir/relist-record.json")"
+jq -e --arg uid "$job_uid" --arg workload "$workload_uid" --arg prior_job "$recorded_job_rv" --arg prior_workload "$recorded_workload_rv" --argjson prior_read "$recorded_read" '
   .phase == "converge" and .projection == "NOT_READY" and .status == "UNKNOWN" and
   .job_uid == $uid and .workload_uid == $workload and
   .prior_job_resource_version == $prior_job and .prior_workload_resource_version == $prior_workload and
   .job_resource_version != .prior_job_resource_version and
+  .prior_read_sequence == $prior_read and .read_sequence > .prior_read_sequence and
   .stale_rejected == true and .cross_rejected == true and .deduped == true and
   .kept_stale == false and .pin_durable == true and
   (.attempts | type == "number" and . >= 1 and . <= 20) and

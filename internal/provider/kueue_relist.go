@@ -2,8 +2,6 @@ package provider
 
 import (
 	"errors"
-	"strconv"
-	"strings"
 )
 
 // RelistAttemptLimit is the maximum number of API re-list attempts a fresh
@@ -11,9 +9,10 @@ import (
 // retry until a ready or released Allocation appears.
 const RelistAttemptLimit = 20
 
-// ErrStaleKueueRelist means an observation for a UID carries an older
-// resourceVersion than the fenced one. The newer fence is kept.
-var ErrStaleKueueRelist = errors.New("stale kueue relist resourceVersion")
+// ErrStaleKueueRelist means an observation for a UID came from an earlier CCP
+// read than the fenced one and does not repeat it. The fenced read is kept.
+// Kubernetes resourceVersion is not the order.
+var ErrStaleKueueRelist = errors.New("stale kueue relist observation")
 
 // ErrCrossKueueRelist means an observation for one Job or Workload UID was
 // applied to a fence for a different UID. A same-name successor is not the
@@ -48,15 +47,19 @@ type RelistProjection struct {
 	PodResourceVersion      string
 	PodScheduled            bool
 	NodeName                string
-	Allocated               bool
-	Active                  bool
-	Ready                   bool
-	Costable                bool
-	Released                bool
+	// ReadSequence is the monotonic order CCP assigned when it performed this
+	// re-list. It is not a Kubernetes resourceVersion and must not be derived
+	// from one. Zero means the caller did not order the read.
+	ReadSequence uint64
+	Allocated    bool
+	Active       bool
+	Ready        bool
+	Costable     bool
+	Released     bool
 }
 
-// RelistFence is the newest accepted re-list for one Job UID. ResourceVersions
-// are ordered only inside that same object. They are not compared across UIDs.
+// RelistFence is the accepted re-list for one Job UID. ResourceVersions are
+// opaque strings compared only for equality. ReadSequence is the CCP order.
 type RelistFence struct {
 	JobUID                  string
 	JobResourceVersion      string
@@ -65,17 +68,11 @@ type RelistFence struct {
 	PodUID                  string
 	PodResourceVersion      string
 	Phase                   string
+	ReadSequence            uint64
 }
 
-func relistResourceVersion(v string) (uint64, bool) {
-	if v == "" || len(v) > 20 || strings.TrimLeft(v, "0") != v {
-		return 0, false
-	}
-	n, err := strconv.ParseUint(v, 10, 64)
-	if err != nil || n == 0 {
-		return 0, false
-	}
-	return n, true
+func opaqueResourceVersion(v string) bool {
+	return v != ""
 }
 
 func inactiveRelistProjection(p RelistProjection) bool {
@@ -104,7 +101,7 @@ func ProjectRelistSnapshot(e KueueJobEvidence) (RelistProjection, error) {
 	if err != nil || !validKubernetesRef(e.Job) {
 		return reject()
 	}
-	if _, ok := relistResourceVersion(e.Job.ResourceVersion); !ok {
+	if !opaqueResourceVersion(e.Job.ResourceVersion) {
 		return reject()
 	}
 	out := RelistProjection{
@@ -122,7 +119,7 @@ func ProjectRelistSnapshot(e KueueJobEvidence) (RelistProjection, error) {
 			!validKubernetesRef(e.KueueWorkload) || e.KueueWorkload.Namespace != e.Job.Namespace {
 			return reject()
 		}
-		if _, ok := relistResourceVersion(e.KueueWorkload.ResourceVersion); !ok {
+		if !opaqueResourceVersion(e.KueueWorkload.ResourceVersion) {
 			return reject()
 		}
 		out.Phase = "NOT_READY"
@@ -138,7 +135,7 @@ func ProjectRelistSnapshot(e KueueJobEvidence) (RelistProjection, error) {
 				e.PodOwnerJobUID != e.Job.UID {
 				return reject()
 			}
-			if _, ok := relistResourceVersion(e.Pod.ResourceVersion); !ok {
+			if !opaqueResourceVersion(e.Pod.ResourceVersion) {
 				return reject()
 			}
 			out.PodUID = e.Pod.UID
@@ -163,7 +160,7 @@ func ProjectRelistSnapshot(e KueueJobEvidence) (RelistProjection, error) {
 				e.KueueClusterQueue != "" || e.KueuePodSetAssignmentsJSON != "" {
 				return reject()
 			}
-			if _, ok := relistResourceVersion(e.KueueWorkload.ResourceVersion); !ok {
+			if !opaqueResourceVersion(e.KueueWorkload.ResourceVersion) {
 				return reject()
 			}
 			out.WorkloadNamespace = e.KueueWorkload.Namespace
@@ -192,10 +189,10 @@ func (p RelistProjection) fence() (RelistFence, error) {
 	if !inactiveRelistProjection(p) || p.Ready || p.Released || p.Allocated || p.Active || p.Costable {
 		return RelistFence{}, ErrInvalidKueueObservation
 	}
-	if p.JobUID == "" || !relistIdentityDistinct(p) {
+	if p.JobUID == "" || !relistIdentityDistinct(p) || p.ReadSequence == 0 {
 		return RelistFence{}, ErrInvalidKueueObservation
 	}
-	if _, ok := relistResourceVersion(p.JobResourceVersion); !ok {
+	if !opaqueResourceVersion(p.JobResourceVersion) {
 		return RelistFence{}, ErrInvalidKueueObservation
 	}
 	switch p.Phase {
@@ -211,14 +208,14 @@ func (p RelistProjection) fence() (RelistFence, error) {
 		return RelistFence{}, ErrInvalidKueueObservation
 	}
 	if p.WorkloadUID != "" {
-		if _, ok := relistResourceVersion(p.WorkloadResourceVersion); !ok {
+		if !opaqueResourceVersion(p.WorkloadResourceVersion) {
 			return RelistFence{}, ErrInvalidKueueObservation
 		}
 	} else if p.WorkloadResourceVersion != "" {
 		return RelistFence{}, ErrInvalidKueueObservation
 	}
 	if p.PodUID != "" {
-		if _, ok := relistResourceVersion(p.PodResourceVersion); !ok {
+		if !opaqueResourceVersion(p.PodResourceVersion) {
 			return RelistFence{}, ErrInvalidKueueObservation
 		}
 	} else if p.PodResourceVersion != "" || p.PodScheduled || p.NodeName != "" {
@@ -232,6 +229,7 @@ func (p RelistProjection) fence() (RelistFence, error) {
 		PodUID:                  p.PodUID,
 		PodResourceVersion:      p.PodResourceVersion,
 		Phase:                   p.Phase,
+		ReadSequence:            p.ReadSequence,
 	}, nil
 }
 
@@ -239,26 +237,22 @@ func (f RelistFence) empty() bool {
 	return f == (RelistFence{})
 }
 
-// versionOrder reports whether next is older, the same, or newer than prior
-// for one object. Both values must already be valid resourceVersions.
-func versionOrder(prior, next string) int {
-	left, _ := relistResourceVersion(prior)
-	right, _ := relistResourceVersion(next)
-	switch {
-	case right < left:
-		return -1
-	case right > left:
-		return 1
-	default:
-		return 0
-	}
+func relistContentEqual(prior, observed RelistFence) bool {
+	return prior.JobUID == observed.JobUID &&
+		prior.JobResourceVersion == observed.JobResourceVersion &&
+		prior.WorkloadUID == observed.WorkloadUID &&
+		prior.WorkloadResourceVersion == observed.WorkloadResourceVersion &&
+		prior.PodUID == observed.PodUID &&
+		prior.PodResourceVersion == observed.PodResourceVersion &&
+		prior.Phase == observed.Phase
 }
 
-// AdvanceRelistFence accepts next when it is the same Job and its
-// resourceVersions move forward, or when it repeats the fenced UID and
-// resourceVersion. An older resourceVersion returns the prior fence and
-// ErrStaleKueueRelist. A different UID returns the prior fence and
-// ErrCrossKueueRelist. Inconclusive evidence does not replace a NOT_READY
+// AdvanceRelistFence accepts next when it repeats the fenced UID and
+// resourceVersion, or when the same UID carries a different resourceVersion
+// from a strictly later CCP read. ResourceVersions are compared only for
+// equality. An earlier read with a different resourceVersion returns the prior
+// fence and ErrStaleKueueRelist. A different UID returns the prior fence and
+// ErrCrossKueueRelist. An inconclusive later read does not replace a NOT_READY
 // fence and does not report release.
 func AdvanceRelistFence(prior RelistFence, next RelistProjection) (RelistFence, error) {
 	keep := func(err error) (RelistFence, error) {
@@ -280,49 +274,21 @@ func AdvanceRelistFence(prior RelistFence, next RelistProjection) (RelistFence, 
 	if prior.WorkloadUID != "" && observed.WorkloadUID == "" {
 		return keep(errors.Join(ErrInvalidKueueObservation, ErrStaleKueueRelist))
 	}
-	if _, ok := relistResourceVersion(prior.JobResourceVersion); !ok || prior.Phase == "" {
+	if prior.ReadSequence == 0 || prior.Phase == "" || !opaqueResourceVersion(prior.JobResourceVersion) {
 		return keep(ErrInvalidKueueObservation)
 	}
-	jobOrder := versionOrder(prior.JobResourceVersion, observed.JobResourceVersion)
-	workloadOrder := 0
-	if prior.WorkloadUID != "" && observed.WorkloadUID != "" {
-		if _, ok := relistResourceVersion(prior.WorkloadResourceVersion); !ok {
-			return keep(ErrInvalidKueueObservation)
-		}
-		workloadOrder = versionOrder(prior.WorkloadResourceVersion, observed.WorkloadResourceVersion)
-	} else if prior.WorkloadUID == "" && observed.WorkloadUID != "" {
-		workloadOrder = 1
-	}
-	if jobOrder < 0 || workloadOrder < 0 {
-		return keep(errors.Join(ErrInvalidKueueObservation, ErrStaleKueueRelist))
-	}
-	podOrder := 0
-	switch {
-	case prior.PodUID != "" && observed.PodUID == prior.PodUID:
-		if _, ok := relistResourceVersion(prior.PodResourceVersion); !ok {
-			return keep(ErrInvalidKueueObservation)
-		}
-		podOrder = versionOrder(prior.PodResourceVersion, observed.PodResourceVersion)
-		if podOrder < 0 {
-			return keep(errors.Join(ErrInvalidKueueObservation, ErrStaleKueueRelist))
-		}
-	case prior.PodUID != "" && observed.PodUID != "" && observed.PodUID != prior.PodUID:
-		if jobOrder <= 0 && workloadOrder <= 0 {
-			return keep(errors.Join(ErrInvalidKueueObservation, ErrCrossKueueRelist))
-		}
-		podOrder = 1
-	case prior.PodUID != "" && observed.PodUID == "":
-		if jobOrder <= 0 && workloadOrder <= 0 {
-			return keep(errors.Join(ErrInvalidKueueObservation, ErrStaleKueueRelist))
-		}
-	case prior.PodUID == "" && observed.PodUID != "":
-		podOrder = 1
-	}
-	if jobOrder == 0 && workloadOrder == 0 && podOrder == 0 {
-		if prior.Phase != observed.Phase || prior.WorkloadUID != observed.WorkloadUID || prior.PodUID != observed.PodUID {
-			return keep(ErrInvalidKueueObservation)
+	later := observed.ReadSequence > prior.ReadSequence
+	if relistContentEqual(prior, observed) {
+		if later {
+			prior.ReadSequence = observed.ReadSequence
 		}
 		return prior, nil
+	}
+	if !later {
+		if prior.PodUID != "" && observed.PodUID != "" && observed.PodUID != prior.PodUID {
+			return keep(errors.Join(ErrInvalidKueueObservation, ErrCrossKueueRelist))
+		}
+		return keep(errors.Join(ErrInvalidKueueObservation, ErrStaleKueueRelist))
 	}
 	if prior.Phase == "NOT_READY" && observed.Phase == "UNKNOWN" {
 		return keep(errors.Join(ErrInvalidKueueObservation, ErrRelistInconclusive))
@@ -331,9 +297,11 @@ func AdvanceRelistFence(prior RelistFence, next RelistProjection) (RelistFence, 
 }
 
 // ConvergeRelist rebuilds a fence from read, which must be a full API re-list.
-// It does not take a previous in-memory observation. expectJobUID, when set,
-// rejects any other Job UID. The attempt count stops at maxAttempts.
-func ConvergeRelist(maxAttempts int, expectJobUID string, read func() (KueueJobEvidence, error)) (RelistFence, int, error) {
+// It does not take a previous in-memory observation. afterSequence is the CCP
+// read already recorded; this process's reads are numbered strictly after it.
+// expectJobUID, when set, rejects any other Job UID. The attempt count stops
+// at maxAttempts.
+func ConvergeRelist(maxAttempts int, expectJobUID string, afterSequence uint64, read func() (KueueJobEvidence, error)) (RelistFence, int, error) {
 	if read == nil || maxAttempts < 1 || maxAttempts > RelistAttemptLimit {
 		return RelistFence{}, 0, ErrInvalidKueueObservation
 	}
@@ -341,6 +309,10 @@ func ConvergeRelist(maxAttempts int, expectJobUID string, read func() (KueueJobE
 	used := 0
 	for used < maxAttempts {
 		used++
+		sequence := afterSequence + uint64(used)
+		if sequence <= afterSequence {
+			return fence, used, ErrInvalidKueueObservation
+		}
 		evidence, err := read()
 		if err != nil {
 			continue
@@ -349,6 +321,7 @@ func ConvergeRelist(maxAttempts int, expectJobUID string, read func() (KueueJobE
 		if err != nil {
 			continue
 		}
+		projected.ReadSequence = sequence
 		if expectJobUID != "" && projected.JobUID != expectJobUID {
 			return fence, used, errors.Join(ErrInvalidKueueObservation, ErrCrossKueueRelist)
 		}

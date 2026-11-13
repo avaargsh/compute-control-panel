@@ -97,6 +97,8 @@ type relistReport struct {
 	TargetUID                    string `json:"target_uid"`
 	PriorWorkloadResourceVersion string `json:"prior_workload_resource_version"`
 	PriorJobResourceVersion      string `json:"prior_job_resource_version"`
+	ReadSequence                 uint64 `json:"read_sequence"`
+	PriorReadSequence            uint64 `json:"prior_read_sequence"`
 	Attempts                     int    `json:"attempts"`
 	StaleRejected                bool   `json:"stale_rejected"`
 	CrossRejected                bool   `json:"cross_rejected"`
@@ -129,7 +131,7 @@ func reportFromRelist(phase string, p provider.RelistProjection, attempts int) r
 		JobUID: p.JobUID, JobName: p.JobName, JobResourceVersion: p.JobResourceVersion,
 		PodUID: p.PodUID, PodResourceVersion: p.PodResourceVersion,
 		PodScheduled: p.PodScheduled, NodeName: p.NodeName, Attempts: attempts,
-		OperationID: relistCreateID,
+		ReadSequence: p.ReadSequence, OperationID: relistCreateID,
 	}
 }
 
@@ -142,6 +144,7 @@ func projectionFromReport(r relistReport) (provider.RelistProjection, error) {
 		JobNamespace: smokeNamespace, JobName: r.JobName, JobUID: r.JobUID,
 		JobResourceVersion: r.JobResourceVersion, PodUID: r.PodUID,
 		PodResourceVersion: r.PodResourceVersion, PodScheduled: r.PodScheduled, NodeName: r.NodeName,
+		ReadSequence: r.ReadSequence,
 	}
 	if _, err := provider.AdvanceRelistFence(provider.RelistFence{}, p); err != nil {
 		return provider.RelistProjection{}, err
@@ -277,6 +280,7 @@ func relistRecord(getenv func(string) string, out io.Writer) error {
 			got, perr := provider.ProjectRelistSnapshot(evidence)
 			if perr == nil && got.JobUID != "" && got.WorkloadUID != "" && got.WorkloadResourceVersion != "" &&
 				got.JobResourceVersion != "" && !got.Released && !got.Ready {
+				got.ReadSequence = uint64(attempts)
 				projected = got
 				break
 			}
@@ -365,7 +369,7 @@ func relistWindow(getenv func(string) string, out io.Writer) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	fence, attempts, err := provider.ConvergeRelist(provider.RelistAttemptLimit, pin.UID, relistRead(ctx, adapter))
+	fence, attempts, err := provider.ConvergeRelist(provider.RelistAttemptLimit, pin.UID, 0, relistRead(ctx, adapter))
 	report := relistReport{
 		Phase: "window", JobUID: pin.UID, JobName: pin.Name, Attempts: attempts,
 		OperationID: relistCreateID, ControllerRestart: getenv("CCP_KUEUE_RELIST_RESTART") == "1",
@@ -455,8 +459,11 @@ func relistConverge(getenv func(string) string, out io.Writer) error {
 		recorded.ProviderResourceUID != "" {
 		return fmt.Errorf("fresh process replayed the pre-restart journal: %+v err=%v", recorded, err)
 	}
+	if prior.ReadSequence == 0 {
+		return errors.New("recorded observation has no CCP read sequence")
+	}
 	read := relistRead(ctx, adapter)
-	fence, attempts, err := provider.ConvergeRelist(provider.RelistAttemptLimit-5, pin.UID, read)
+	fence, attempts, err := provider.ConvergeRelist(provider.RelistAttemptLimit-5, pin.UID, prior.ReadSequence, read)
 	if err != nil {
 		return fmt.Errorf("relist did not converge: %w", err)
 	}
@@ -465,13 +472,21 @@ func relistConverge(getenv func(string) string, out io.Writer) error {
 		return fmt.Errorf("relist converged to the wrong state: %+v attempts=%d", fence, attempts)
 	}
 	var current provider.RelistProjection
+	sequence := fence.ReadSequence
 	for attempts < provider.RelistAttemptLimit {
 		attempts++
+		if sequence == ^uint64(0) {
+			return errors.New("relist read sequence overflowed")
+		}
+		sequence++
 		evidence, readErr := read()
 		if readErr != nil {
 			continue
 		}
 		projected, projErr := provider.ProjectRelistSnapshot(evidence)
+		if projErr == nil {
+			projected.ReadSequence = sequence
+		}
 		if projErr != nil || projected.JobUID != pin.UID {
 			if projErr == nil && projected.JobUID != pin.UID {
 				return errors.Join(provider.ErrInvalidKueueObservation, provider.ErrCrossKueueRelist)
@@ -498,9 +513,12 @@ func relistConverge(getenv func(string) string, out io.Writer) error {
 		current.PodResourceVersion == prior.PodResourceVersion && current.PodUID == prior.PodUID {
 		return errors.New("relist kept the stale pre-restart observation")
 	}
+	if prior.ReadSequence >= fence.ReadSequence {
+		return errors.New("relist read sequence did not move past the recorded observation")
+	}
 	kept, staleErr := provider.AdvanceRelistFence(fence, prior)
 	if !errors.Is(staleErr, provider.ErrStaleKueueRelist) || kept != fence {
-		return fmt.Errorf("older observation overwrote the relist fence: %+v err=%v", kept, staleErr)
+		return fmt.Errorf("earlier read overwrote the relist fence: %+v err=%v", kept, staleErr)
 	}
 	duplicate, err := provider.AdvanceRelistFence(fence, current)
 	if err != nil || duplicate != fence {
@@ -526,6 +544,7 @@ func relistConverge(getenv func(string) string, out io.Writer) error {
 	report.Deduped = true
 	report.PriorWorkloadResourceVersion = prior.WorkloadResourceVersion
 	report.PriorJobResourceVersion = prior.JobResourceVersion
+	report.PriorReadSequence = prior.ReadSequence
 	report.TargetUID = pin.UID
 	if !relistInactive(report) || report.Projection != "NOT_READY" || report.KeptStale {
 		return errors.New("converged relist observation was promoted")
