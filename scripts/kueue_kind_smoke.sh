@@ -28,7 +28,7 @@ cleanup() {
     kubectl --request-timeout=10s -n kueue-system logs deploy/kueue-controller-manager --tail=80 || true
   fi
   if [[ "$status" -ne 0 ]]; then
-    for f in "$dir"/durable-*.json "$dir"/durable-*.err "$dir"/journal-*.json "$dir"/journal-*.err "$dir"/admission-*.json "$dir"/admission-*.err "$dir"/pg-boot.log "$dir"/migrate.log; do
+    for f in "$dir"/durable-*.json "$dir"/durable-*.err "$dir"/journal-*.json "$dir"/journal-*.err "$dir"/admission-*.json "$dir"/admission-*.err "$dir"/preempt-*.json "$dir"/preempt-*.err "$dir"/pg-boot.log "$dir"/migrate.log; do
       [[ -f "$f" ]] || continue
       echo "----- $(basename "$f") -----" >&2
       tail -n 40 "$f" >&2 || true
@@ -1209,4 +1209,6 @@ echo "PASS: disposable CPU-only Kueue quota-denial/QuotaReserved/Admitted, exact
 # ResourceSlice/Claim/Pod *separate* from the queued CCP Job to keep authority
 # and attribution claims explicit; never promote Allocation READY/RELEASED.
 bash scripts/dra_example_kind_smoke.sh
+# Kueue withinClusterQueue preemption. Separate file; reuses run_admission.
+. scripts/kueue_preemption_kind_smoke.sh
 
