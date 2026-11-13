@@ -135,7 +135,7 @@ func reportFromRelist(phase string, p provider.RelistProjection, attempts int) r
 	}
 }
 
-func projectionFromReport(r relistReport) (provider.RelistProjection, error) {
+func projectionFromRelistReport(r relistReport) (provider.RelistProjection, error) {
 	p := provider.RelistProjection{
 		Phase: r.Projection, Stage: provider.KueueObservationStage(r.Stage), Inconclusive: r.Inconclusive,
 		QuotaReserved: r.QuotaReserved, Admitted: r.Admitted, ClusterQueue: r.ClusterQueue,
@@ -415,7 +415,7 @@ func readRelistPrior(getenv func(string) string) (relistReport, provider.RelistP
 	if json.Unmarshal(raw, &prior) != nil || prior.Phase != "record" || prior.JobUID == "" || prior.WorkloadUID == "" {
 		return relistReport{}, provider.RelistProjection{}, errors.New("recorded observation is not the relist record")
 	}
-	projected, err := projectionFromReport(prior)
+	projected, err := projectionFromRelistReport(prior)
 	if err != nil {
 		return relistReport{}, provider.RelistProjection{}, fmt.Errorf("recorded observation is not a fenceable snapshot: %w", err)
 	}

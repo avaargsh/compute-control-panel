@@ -71,10 +71,6 @@ type RelistFence struct {
 	ReadSequence            uint64
 }
 
-func opaqueResourceVersion(v string) bool {
-	return v != ""
-}
-
 func inactiveRelistProjection(p RelistProjection) bool {
 	return !p.Allocated && !p.Active && !p.Ready && !p.Costable && !p.Released
 }
