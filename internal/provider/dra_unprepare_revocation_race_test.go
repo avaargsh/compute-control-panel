@@ -50,7 +50,10 @@ func TestRestrictedDRAJournalSerializesConcurrentSourceRevocation(t *testing.T) 
 	if _, err := hold.ExecContext(ctx, `LOCK TABLE public.dra_unprepare_receipt_journal IN ACCESS EXCLUSIVE MODE`); err != nil {
 		t.Fatal(err)
 	}
-	type outcome struct { added bool; err error }
+	type outcome struct {
+		added bool
+		err   error
+	}
 	done := make(chan outcome, 1)
 	asOf := time.Date(2026, 11, 10, 10, 1, 0, 0, time.UTC)
 	go func() {
