@@ -168,7 +168,11 @@ func TestDRASignedReceiptJournalRejectsInvalidSignatureAndImmutableRowChanges(t 
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = tx.ExecContext(ctx, query, signed.Event.ClusterID)
+		if query == "TRUNCATE public.dra_unprepare_receipt_journal" {
+			_, err = tx.ExecContext(ctx, query)
+		} else {
+			_, err = tx.ExecContext(ctx, query, signed.Event.ClusterID)
+		}
 		_ = tx.Rollback() // No negative DDL check may mutate another test's rows.
 		if postgresSQLState(err) != "55000" {
 			t.Fatalf("immutable journal allowed %s: code=%s err=%v", query, postgresSQLState(err), err)
