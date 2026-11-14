@@ -78,10 +78,9 @@ func TestRestrictedDRAJournalRefusesBroadRoleAndRuntimePrivilegeDrift(t *testing
 	pool.SetMaxOpenConns(1)
 	defer pool.Close()
 
-	verifier, _, signed := journalReceiptFixture(t)
+	verifier, signed, asOf := liveJournalReceiptFixture(t)
 	candidate := releaseCandidateFixture()
 	seedTrustedDRAReceiptSource(t, admin, verifier, signed, candidate)
-	asOf := time.Date(2026, 11, 10, 10, 1, 0, 0, time.UTC)
 	first, err := journal.VerifyAndRecord(ctx, verifier, candidate, signed, asOf)
 	if err != nil || !first {
 		t.Fatalf("restricted writer did not record valid evidence: new=%t err=%v", first, err)
