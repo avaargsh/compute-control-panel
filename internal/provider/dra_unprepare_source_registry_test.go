@@ -4,10 +4,34 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"database/sql"
 	"errors"
 	"testing"
 	"time"
 )
+
+// seedTrustedDRAReceiptSource is disposable-test DBA provisioning only.
+// Production source keys require independent identity and driver verification.
+func seedTrustedDRAReceiptSource(
+	t *testing.T, admin *sql.DB, verifier *DRAUnprepareVerifier,
+	receipt SignedDRAUnprepare, candidate ReleaseEvidenceCandidate,
+) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err := admin.ExecContext(ctx, `INSERT INTO public.dra_unprepare_source_keys
+		(cluster_id, source_id, key_id, tenant_id, provider_id, driver, public_key,
+		 valid_from, valid_until, maximum_age_seconds, future_skew_seconds)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,600,30)`,
+		receipt.Event.ClusterID, receipt.Event.SourceID, receipt.Event.KeyID,
+		candidate.Delete.TenantID, candidate.Delete.ProviderID,
+		receipt.Event.Driver, verifier.authority.PublicKey,
+		time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, 11, 10, 11, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("seed disposable independent DRA signer: %v", err)
+	}
+}
 
 func TestRestrictedDRAJournalRefusesUnregisteredKeyAndRevokedReplay(t *testing.T) {
 	admin := openProviderPostgresDB(t)
