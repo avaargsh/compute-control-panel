@@ -66,6 +66,7 @@ func TestRestrictedDRAJournalRefusesBroadRoleAndRuntimePrivilegeDrift(t *testing
 		"GRANT USAGE ON SCHEMA public TO "+role,
 		"GRANT SELECT, INSERT ON public.dra_unprepare_receipt_journal TO "+role,
 		"GRANT SELECT ON public.dra_unprepare_source_keys, public.dra_unprepare_source_revocations TO "+role,
+		"GRANT UPDATE (lock_token) ON public.dra_unprepare_source_keys TO "+role,
 	); err != nil {
 		t.Fatal(err)
 	}
