@@ -19,8 +19,10 @@ var ErrDRAReceiptJournalRole = errors.New("DRA receipt journal login is not leas
 
 // OpenRestrictedDRAUnprepareReceiptJournal opens the only production-eligible
 // journal database entrypoint. Its login must be independently provisioned,
-// have public schema USAGE and SELECT/INSERT on the DRA receipt journal only,
-// no other CCP relation privileges, ownership, role membership, or DDL. It
+// with public schema USAGE, journal SELECT/INSERT, source-key/revocation SELECT,
+// and UPDATE(lock_token) on the immutable source-key table solely for PG16
+// FOR UPDATE. Every actual UPDATE is trigger-rejected. No other CCP relation
+// privileges, ownership, role membership or DDL are allowed. The constructor
 // refuses caller-controlled search_path and pins each pooled connection.
 //
 // This does NOT provision secrets, authenticate an external driver, or make
