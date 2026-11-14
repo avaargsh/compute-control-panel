@@ -14,10 +14,10 @@ import (
 func journalReceiptFixture(t *testing.T) (*DRAUnprepareVerifier, ed25519.PrivateKey, SignedDRAUnprepare) {
 	t.Helper()
 	authority, private := unprepareTestAuthority()
-	authority.ClusterID = kueueTestIdent(t, "cluster-")
+	authority.ClusterID = kueueTestIdent(t, "cluster_")
 	receipt := unprepareTestReceipt(private)
 	receipt.Event.ClusterID = authority.ClusterID
-	receipt.Event.EventID = kueueTestIdent(t, "event-")
+	receipt.Event.EventID = kueueTestIdent(t, "event_")
 	receipt.Signature = ed25519.Sign(private, draUnprepareSigningBytes(receipt.Event))
 	verifier, err := NewDRAUnprepareVerifier(authority, 10*time.Minute, 30*time.Second)
 	if err != nil {
@@ -69,7 +69,7 @@ func TestDRASignedReceiptJournalDurableReplayAndEpochFence(t *testing.T) {
 	// Rotating the event ID must not evade the unique historical Claim/Pod
 	// allocation epoch fence.
 	altered = signed
-	altered.Event.EventID = kueueTestIdent(t, "event-")
+	altered.Event.EventID = kueueTestIdent(t, "event_")
 	altered.Signature = ed25519.Sign(private, draUnprepareSigningBytes(altered.Event))
 	replayed, err = restarted.VerifyAndRecord(ctx, verifier, candidate, altered, asOf)
 	if !errors.Is(err, ErrDRAReceiptReplayConflict) || replayed {
