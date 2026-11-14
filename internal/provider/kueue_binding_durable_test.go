@@ -94,7 +94,7 @@ func TestDurableKueueBindingRejectsOverPrivilegedRole(t *testing.T) {
 	broad := kueueTestIdent(t, "ccp_kbroad_")
 	createKueueBindingRole(t, admin, broad)
 	grantKueueBindingPrivileges(t, admin, broad)
-	if _, err := admin.ExecContext(ctx, "GRANT SELECT ON public.compute_providers TO "+broad); err != nil {
+	if err := grantKueueBindingPrivilege(ctx, admin, "GRANT SELECT ON public.compute_providers TO "+broad); err != nil {
 		t.Fatal(err)
 	}
 	_, _, err = OpenDurablePostgresKueueJobBindingStore(ctx, kueueBindingDSN(t, broad, kueueBindingTestPassword, ""))
@@ -104,7 +104,7 @@ func TestDurableKueueBindingRejectsOverPrivilegedRole(t *testing.T) {
 
 	narrow := kueueTestIdent(t, "ccp_kmiss_")
 	createKueueBindingRole(t, admin, narrow)
-	if _, err := admin.ExecContext(ctx, "GRANT SELECT ON public.kueue_job_create_pins, public.kueue_job_delete_tombstones TO "+narrow); err != nil {
+	if err := grantKueueBindingPrivilege(ctx, admin, "GRANT SELECT ON public.kueue_job_create_pins, public.kueue_job_delete_tombstones TO "+narrow); err != nil {
 		t.Fatal(err)
 	}
 	_, _, err = OpenDurablePostgresKueueJobBindingStore(ctx, kueueBindingDSN(t, narrow, kueueBindingTestPassword, ""))
@@ -228,39 +228,78 @@ func TestDurableKueueBindingCanonicalRoleAndShadow(t *testing.T) {
 // Test retries only the transient PostgreSQL catalog tuple-update collision
 // seen when package-level race tests concurrently GRANT on shared ACL catalogs.
 func TestRetryKueueCatalogGrantOnlyForTupleUpdate(t *testing.T) {
-    conflict := &pgconn.PgError{Code: "XX000", Message: "tuple concurrently updated"}
-    unrelated := &pgconn.PgError{Code: "XX000", Message: "corrupted catalog"}
-    cases := []struct {
-        name string
-        failures []error
-        attempts int
-        wantErr error
-    }{
-        {"one transient conflict", []error{conflict, nil}, 2, nil},
-        {"two transient conflicts", []error{conflict, conflict, nil}, 3, nil},
-        {"different internal failure", []error{unrelated, nil}, 1, unrelated},
-        {"non-pg failure", []error{errors.New("denied"), nil}, 1, nil},
-    }
-    for _, tc := range cases {
-        t.Run(tc.name, func(t *testing.T) {
-            calls := 0
-            err := retryKueueCatalogGrant(context.Background(), func(context.Context) error {
-                result := tc.failures[calls]
-                calls++
-                return result
-            })
-            if calls != tc.attempts {
-                t.Fatalf("calls=%d want=%d", calls, tc.attempts)
-            }
-            if tc.name == "non-pg failure" {
-                if err == nil || err.Error() != "denied" {
-                    t.Fatalf("unrelated error lost: %v", err)
-                }
-            } else if !errors.Is(err, tc.wantErr) {
-                t.Fatalf("err=%v want=%v", err, tc.wantErr)
-            }
-        })
-    }
+	conflict := &pgconn.PgError{Code: "XX000", Message: "tuple concurrently updated"}
+	unrelated := &pgconn.PgError{Code: "XX000", Message: "unexpected catalog corruption"}
+
+	calls := 0
+	err := retryKueueCatalogGrant(context.Background(), func(context.Context) error {
+		calls++
+		if calls < 3 {
+			return conflict
+		}
+		return nil
+	})
+	if err != nil || calls != 3 {
+		t.Fatalf("transient catalog grant did not recover: calls=%d err=%v", calls, err)
+	}
+
+	calls = 0
+	err = retryKueueCatalogGrant(context.Background(), func(context.Context) error {
+		calls++
+		return unrelated
+	})
+	if !errors.Is(err, unrelated) || calls != 1 {
+		t.Fatalf("unrelated SQLSTATE XX000 was retried or ignored: calls=%d err=%v", calls, err)
+	}
+
+	calls = 0
+	err = retryKueueCatalogGrant(context.Background(), func(context.Context) error {
+		calls++
+		return conflict
+	})
+	if !errors.Is(err, conflict) || calls != 5 {
+		t.Fatalf("persistent catalog failure did not fail closed: calls=%d err=%v", calls, err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	calls = 0
+	err = retryKueueCatalogGrant(ctx, func(context.Context) error {
+		calls++
+		return nil
+	})
+	if !errors.Is(err, context.Canceled) || calls != 0 {
+		t.Fatalf("cancelled grant executed: calls=%d err=%v", calls, err)
+	}
+}
+
+// retryKueueCatalogGrant is restricted to a disposable test-role grant.
+// Only the specific concurrent PostgreSQL catalog-tuple conflict is retried;
+// permission errors and unrelated internal errors must fail immediately.
+func retryKueueCatalogGrant(ctx context.Context, execute func(context.Context) error) error {
+	for attempt := 0; ; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err := execute(ctx)
+		if err == nil || attempt >= 4 ||
+			postgresSQLState(err) != "XX000" ||
+			!strings.Contains(err.Error(), "tuple concurrently updated") {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Duration(attempt+1) * 25 * time.Millisecond):
+		}
+	}
+}
+
+func grantKueueBindingPrivilege(ctx context.Context, admin *sql.DB, statement string) error {
+	return retryKueueCatalogGrant(ctx, func(ctx context.Context) error {
+		_, err := admin.ExecContext(ctx, statement)
+		return err
+	})
 }
 
 const kueueBindingTestPassword = "kueue-binding-test"
@@ -321,7 +360,7 @@ func grantKueueBindingPrivileges(t *testing.T, admin *sql.DB, role string) {
 		"GRANT EXECUTE ON FUNCTION public.kueue_job_create_pin_guard() TO " + role,
 		"GRANT EXECUTE ON FUNCTION public.kueue_job_delete_tombstone_guard() TO " + role,
 	} {
-		if _, err := admin.ExecContext(ctx, statement); err != nil {
+		if err := grantKueueBindingPrivilege(ctx, admin, statement); err != nil {
 			t.Fatalf("%s: %v", statement, err)
 		}
 	}
