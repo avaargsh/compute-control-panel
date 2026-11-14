@@ -100,6 +100,33 @@ func verifyDRAJournalSchema(ctx context.Context, q draJournalQueryRow) error {
 	).Scan(&present); err != nil || !present {
 		return fmt.Errorf("%w: missing journal table or catalog access: %v", ErrDRAReceiptJournalUnavailable, err)
 	}
+	// Both unique indexes are part of the receipt replay boundary. A DBA
+	// can drop or weaken them without altering journal triggers or role
+	// grants; never accept a matching constraint name alone. Pin the
+	// original column order, primary/unique kind, nondeferrable semantics
+	// and the backing index's live/valid uniqueness state.
+	var replayConstraints int
+	if err := q.QueryRowContext(ctx, `
+		SELECT count(*)::integer
+		FROM (VALUES
+		  ('dra_unprepare_receipt_journal_pkey'::pg_catalog.name, 'p'::text,
+		   'PRIMARY KEY (cluster_id, source_id, event_id)'::text),
+		  ('dra_unprepare_receipt_one_device_epoch'::pg_catalog.name, 'u'::text,
+		   'UNIQUE (cluster_id, driver, claim_uid, pod_uid, allocated_claim_resource_version, device_digest)'::text)
+		) required(name, kind, definition)
+		JOIN pg_catalog.pg_constraint c
+		  ON c.conrelid='public.dra_unprepare_receipt_journal'::pg_catalog.regclass
+		 AND c.conname=required.name AND c.contype::text=required.kind
+		JOIN pg_catalog.pg_index i
+		  ON i.indexrelid=c.conindid AND i.indrelid=c.conrelid
+		WHERE pg_catalog.pg_get_constraintdef(c.oid, false)=required.definition
+		  AND NOT c.condeferrable AND NOT c.condeferred AND c.convalidated
+		  AND i.indisunique AND i.indisvalid AND i.indisready AND i.indislive
+		  AND i.indimmediate AND i.indpred IS NULL AND i.indexprs IS NULL
+		  AND i.indisprimary=(required.kind='p')
+	`).Scan(&replayConstraints); err != nil || replayConstraints != 2 {
+		return fmt.Errorf("%w: DRA journal replay constraints absent or altered: %v", ErrDRAReceiptJournalUnavailable, err)
+	}
 	var guards int
 	err := q.QueryRowContext(ctx, `
 		SELECT count(*)::integer
