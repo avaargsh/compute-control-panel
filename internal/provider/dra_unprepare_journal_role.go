@@ -180,7 +180,11 @@ func verifyDRAJournalRole(ctx context.Context, q draJournalQueryRow) error {
 		  WHEN NOT (
 		    pg_catalog.has_table_privilege(current_user, 'public.dra_unprepare_source_keys'::pg_catalog.regclass, 'SELECT')
 		    AND pg_catalog.has_table_privilege(current_user, 'public.dra_unprepare_source_revocations'::pg_catalog.regclass, 'SELECT')
-		  ) THEN 'missing_source_registry_read'
+		    -- A single inert column grants PG16 SELECT ... FOR UPDATE.
+		    -- Its ENABLE ALWAYS immutable trigger rejects any actual UPDATE.
+		    AND pg_catalog.has_column_privilege(current_user,
+		      'public.dra_unprepare_source_keys'::pg_catalog.regclass, 'lock_token', 'UPDATE')
+		  ) THEN 'missing_source_registry_read_or_lock'
 		  WHEN EXISTS (
 		    SELECT 1 FROM pg_catalog.pg_class c
 		    JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
@@ -237,7 +241,8 @@ func verifyDRAJournalRole(ctx context.Context, q draJournalQueryRow) error {
 		        ))
 		        OR (c.relname IN ('dra_unprepare_source_keys','dra_unprepare_source_revocations') AND (
 		          pg_catalog.has_column_privilege(current_user, c.oid, a.attname, 'INSERT')
-		          OR pg_catalog.has_column_privilege(current_user, c.oid, a.attname, 'UPDATE')
+		          OR ((c.relname <> 'dra_unprepare_source_keys' OR a.attname <> 'lock_token')
+		            AND pg_catalog.has_column_privilege(current_user, c.oid, a.attname, 'UPDATE'))
 		          OR pg_catalog.has_column_privilege(current_user, c.oid, a.attname, 'REFERENCES')
 		        ))
 		        OR (c.relname='dra_unprepare_receipt_journal' AND (
