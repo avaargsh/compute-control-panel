@@ -65,6 +65,7 @@ func TestRestrictedDRAJournalRefusesBroadRoleAndRuntimePrivilegeDrift(t *testing
 	if err := pgtest.ExecCatalog(ctx, admin,
 		"GRANT USAGE ON SCHEMA public TO "+role,
 		"GRANT SELECT, INSERT ON public.dra_unprepare_receipt_journal TO "+role,
+		"GRANT SELECT ON public.dra_unprepare_source_keys, public.dra_unprepare_source_revocations TO "+role,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -78,6 +79,7 @@ func TestRestrictedDRAJournalRefusesBroadRoleAndRuntimePrivilegeDrift(t *testing
 
 	verifier, _, signed := journalReceiptFixture(t)
 	candidate := releaseCandidateFixture()
+	seedTrustedDRAReceiptSource(t, admin, verifier, signed, candidate)
 	asOf := time.Date(2026, 11, 10, 10, 1, 0, 0, time.UTC)
 	first, err := journal.VerifyAndRecord(ctx, verifier, candidate, signed, asOf)
 	if err != nil || !first {
