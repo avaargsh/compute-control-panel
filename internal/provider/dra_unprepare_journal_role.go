@@ -17,6 +17,17 @@ import (
 // authority or proof that a real driver RPC completed.
 var ErrDRAReceiptJournalRole = errors.New("DRA receipt journal login is not least privilege")
 
+// The immutable trigger function body is pinned to migration 0016. Checking
+// only trigger OIDs, enabled flags and proconfig cannot detect a malicious
+// CREATE OR REPLACE FUNCTION with an unchanged signature and metadata.
+// Even an otherwise well-formed, no-op trigger must make ingest fail closed.
+const draReceiptGuardSource = `
+BEGIN
+    RAISE EXCEPTION 'DRA unprepare receipt journal is immutable'
+        USING ERRCODE = '55000';
+END;
+`
+
 // OpenRestrictedDRAUnprepareReceiptJournal opens the only production-eligible
 // journal database entrypoint. Its login must be independently provisioned,
 // with public schema USAGE, journal SELECT/INSERT, source-key/revocation SELECT,
@@ -107,7 +118,8 @@ func verifyDRAJournalSchema(ctx context.Context, q draJournalQueryRow) error {
 		  AND NOT t.tgdeferrable AND NOT t.tginitdeferred
 		  AND NOT p.prosecdef
 		  AND p.proconfig=ARRAY['search_path=pg_catalog, pg_temp']::pg_catalog.text[]
-	`).Scan(&guards)
+		  AND p.prosrc=$1
+	`, draReceiptGuardSource).Scan(&guards)
 	if err != nil || guards != 2 {
 		return fmt.Errorf("%w: immutable DRA journal guards absent or altered: %v", ErrDRAReceiptJournalUnavailable, err)
 	}
@@ -136,7 +148,8 @@ func verifyDRAJournalSchema(ctx context.Context, q draJournalQueryRow) error {
 		  AND NOT t.tgdeferrable AND NOT t.tginitdeferred
 		  AND NOT p.prosecdef
 		  AND p.proconfig=ARRAY['search_path=pg_catalog, pg_temp']::pg_catalog.text[]
-	`).Scan(&registryGuards)
+		  AND p.prosrc=$1
+	`, draReceiptGuardSource).Scan(&registryGuards)
 	if err != nil || registryGuards != 4 {
 		return fmt.Errorf("%w: independent DRA signer registry guards absent or altered: %v", ErrDRAReceiptJournalUnavailable, err)
 	}
