@@ -84,19 +84,37 @@ func (j *DRAUnprepareReceiptJournal) VerifyAndRecord(
 		return false, ErrUncorrelatedDRAUnprepare
 	}
 	var session draJournalSQL = j.db
+	var tx *sql.Tx
 	if j.restricted {
 		conn, err := j.db.Conn(ctx)
 		if err != nil {
 			return false, fmt.Errorf("%w: open restricted session: %v", ErrDRAReceiptJournalUnavailable, err)
 		}
 		defer conn.Close()
-		if err := verifyDRAJournalSchema(ctx, conn); err != nil {
+		// Keep the source row's FOR UPDATE lock until the receipt journal
+		// INSERT (or replay decision) commits. A DBA revocation needs a
+		// conflicting FK KEY SHARE lock on that same source identity.
+		tx, err = conn.BeginTx(ctx, nil)
+		if err != nil {
+			return false, fmt.Errorf("%w: begin restricted write transaction: %v", ErrDRAReceiptJournalUnavailable, err)
+		}
+		defer tx.Rollback()
+		if err := verifyDRAJournalSchema(ctx, tx); err != nil {
 			return false, err
 		}
-		if err := verifyDRAJournalRole(ctx, conn); err != nil {
+		if err := verifyDRAJournalRole(ctx, tx); err != nil {
 			return false, err
 		}
-		session = conn
+		session = tx
+	}
+	commit := func() error {
+		if tx == nil {
+			return nil
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("%w: commit registered DRA receipt: %v", ErrDRAReceiptJournalUnavailable, err)
+		}
+		return nil
 	}
 	correlated, err := verifier.Correlate(candidate, signed, asOf)
 	if err != nil {
@@ -128,7 +146,9 @@ func (j *DRAUnprepareReceiptJournal) VerifyAndRecord(
 
 	// PostgreSQL uniqueness serializes same-event concurrent attempts and
 	// different event/source IDs for the same historical allocated device
-	// epoch. One statement and its implicit transaction commit the evidence.
+	// epoch. Restricted writes commit this statement together with the
+	// independently registered source row lock; unchecked test-only writes
+	// continue using the single INSERT statement's implicit transaction.
 	// No INSERT/UPDATE paths on Allocation or billable evidence are present.
 	result, err := session.ExecContext(ctx, `INSERT INTO public.dra_unprepare_receipt_journal (
 		cluster_id, source_id, event_id, driver, tenant_id, provider_id,
@@ -149,6 +169,9 @@ func (j *DRAUnprepareReceiptJournal) VerifyAndRecord(
 	}
 	switch n {
 	case 1:
+		if err := commit(); err != nil {
+			return false, err
+		}
 		return true, nil
 	case 0:
 		// A conflict may have been on the global per-source event identity
@@ -174,6 +197,9 @@ func (j *DRAUnprepareReceiptJournal) VerifyAndRecord(
 	}
 	if storedDigest != recordDigest || !payloadMatches {
 		return false, ErrDRAReceiptReplayConflict
+	}
+	if err := commit(); err != nil {
+		return false, err
 	}
 	return false, nil
 }
