@@ -48,15 +48,15 @@ func TestDRAReceiptCanonicalIngestRoleHasExactNarrowGrants(t *testing.T) {
 			journal != nil, pool != nil, err)
 	}
 	defer pool.Close()
-	verifier, _, receipt := journalReceiptFixture(t)
+	verifier, receipt, asOf := liveJournalReceiptFixture(t)
 	seedTrustedDRAReceiptSource(t, admin, verifier, receipt, releaseCandidateFixture())
 	first, err := journal.VerifyAndRecord(ctx, verifier, releaseCandidateFixture(), receipt,
-		time.Date(2026, 11, 10, 10, 1, 0, 0, time.UTC))
+		asOf)
 	if err != nil || !first {
 		t.Fatalf("canonical journal write failed: new=%t err=%v", first, err)
 	}
 	replayed, err := journal.VerifyAndRecord(ctx, verifier, releaseCandidateFixture(), receipt,
-		time.Date(2026, 11, 10, 10, 1, 0, 0, time.UTC))
+		asOf)
 	if err != nil || replayed {
 		t.Fatalf("canonical event replay not idempotent: new=%t err=%v", replayed, err)
 	}
@@ -101,7 +101,7 @@ func TestDRAReceiptCanonicalIngestRoleHasExactNarrowGrants(t *testing.T) {
 		}
 	})
 	replayed, err = journal.VerifyAndRecord(ctx, verifier, releaseCandidateFixture(), receipt,
-		time.Date(2026, 11, 10, 10, 1, 0, 0, time.UTC))
+		asOf)
 	if !errors.Is(err, ErrDRAReceiptJournalRole) || replayed {
 		t.Fatalf("canonical login accepted Provider grant drift: new=%t err=%v", replayed, err)
 	}
