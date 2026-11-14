@@ -139,6 +139,57 @@ func TestEmptyBindingDSNFailsClosedWithoutAPI(t *testing.T) {
 	}
 }
 
+func TestAdmissionRequestsStayDistinctFromOtherSmokeJobs(t *testing.T) {
+	create := admissionCreateRequest()
+	if err := create.Validate(); err != nil {
+		t.Fatalf("invalid admission create: %v", err)
+	}
+	if create.Kind != operation.Create || create.OperationID == "" ||
+		create.OperationID == lifecycleCreateRequest().OperationID ||
+		create.OperationID == durableCreateRequest().OperationID ||
+		create.IdempotencyKey == lifecycleCreateRequest().IdempotencyKey ||
+		create.IdempotencyKey == durableCreateRequest().IdempotencyKey ||
+		create.RequestDigest == lifecycleCreateRequest().RequestDigest ||
+		create.RequestDigest == durableCreateRequest().RequestDigest {
+		t.Fatalf("admission create collided with another smoke job: %+v", create)
+	}
+	remove := admissionDeleteRequest(smokeNamespace+"/ccp-example", "uid-admission")
+	if err := remove.Validate(); err != nil {
+		t.Fatalf("invalid admission delete: %v", err)
+	}
+	if remove.Kind != operation.Delete || remove.OperationID == create.OperationID ||
+		remove.TargetResourceUID != "uid-admission" || remove.TargetResourceID == "" {
+		t.Fatalf("unexpected admission delete: %+v", remove)
+	}
+}
+
+func TestAdmissionPhaseArgs(t *testing.T) {
+	phase, subject, err := parseAdmissionArgs([]string{"admission", "create"})
+	if err != nil || phase != "create" || subject != "" {
+		t.Fatalf("create: phase=%s subject=%s err=%v", phase, subject, err)
+	}
+	phase, subject, err = parseAdmissionArgs([]string{"admission", "inspect", "delete"})
+	if err != nil || phase != "inspect" || subject != "delete" {
+		t.Fatalf("inspect delete: phase=%s subject=%s err=%v", phase, subject, err)
+	}
+	phase, subject, err = parseAdmissionArgs([]string{"admission", "inspect", "create"})
+	if err != nil || phase != "inspect" || subject != "create" {
+		t.Fatalf("inspect create: phase=%s subject=%s err=%v", phase, subject, err)
+	}
+	for _, args := range [][]string{
+		{"admission"},
+		{"admission", "replay"},
+		{"admission", "inspect"},
+		{"admission", "inspect", "update"},
+		{"admission", "create", "--hold"},
+		{"durable", "create"},
+	} {
+		if _, _, err := parseAdmissionArgs(args); err == nil {
+			t.Fatalf("accepted admission args %q", args)
+		}
+	}
+}
+
 func TestDurablePhasesRejectMissingOptIn(t *testing.T) {
 	err := runDurable([]string{"durable", "create"}, func(string) string { return "" }, io.Discard)
 	if err == nil || errors.Is(err, errEmptyBindingDSN) {

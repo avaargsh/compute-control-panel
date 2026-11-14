@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/avaargsh/compute-control-panel/internal/pgtest"
 )
 
 // The administrator only provisions fixtures and verifies durable rows. Every
@@ -21,22 +23,23 @@ func testProviderAuditWriterDB(t *testing.T, admin *sql.DB) (*sql.DB, string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	role := "provider_writer_" + randomSuffix(t)
-	if _, err := admin.ExecContext(ctx, fmt.Sprintf(`CREATE ROLE %s
+	if err := pgtest.ExecCatalog(ctx, admin, fmt.Sprintf(`CREATE ROLE %s
 		LOGIN PASSWORD 'provider-ci-only' NOINHERIT NOSUPERUSER
 		NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`, role)); err != nil {
 		t.Fatalf("create restricted Provider login: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = admin.ExecContext(context.Background(), "DROP OWNED BY "+role)
-		_, _ = admin.ExecContext(context.Background(), "DROP ROLE "+role)
-	})
-	for _, grant := range []string{
-		"GRANT USAGE ON SCHEMA public TO " + role,
-		"GRANT SELECT, INSERT, UPDATE ON public.compute_providers TO " + role,
-	} {
-		if _, err := admin.ExecContext(ctx, grant); err != nil {
-			t.Fatalf("grant restricted Provider privileges: %v", err)
+		cleanup, stop := context.WithTimeout(context.Background(), 15*time.Second)
+		defer stop()
+		if err := pgtest.CleanupRole(cleanup, admin, role); err != nil {
+			t.Errorf("drop role %s: %v", role, err)
 		}
+	})
+	if err := pgtest.ExecCatalog(ctx, admin,
+		"GRANT USAGE ON SCHEMA public TO "+role,
+		"GRANT SELECT, INSERT, UPDATE ON public.compute_providers TO "+role,
+	); err != nil {
+		t.Fatalf("grant restricted Provider privileges: %v", err)
 	}
 	parsed, err := url.Parse(os.Getenv("DATABASE_URL"))
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
@@ -333,16 +336,20 @@ func TestProviderAuditRestrictedLoginRejectsPreattachedForeignTrigger(t *testing
 	// PostgreSQL checks function EXECUTE when attaching a trigger, not on each
 	// invocation. Simulate a trigger attached before the forward migration
 	// revoked the historical function's PUBLIC EXECUTE privilege.
-	if _, err := admin.ExecContext(ctx, "GRANT EXECUTE ON FUNCTION public.compute_provider_lifecycle_audit_append() TO "+actor); err != nil {
+	if err := pgtest.ExecCatalog(ctx, admin, "GRANT EXECUTE ON FUNCTION public.compute_provider_lifecycle_audit_append() TO "+actor); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = admin.ExecContext(context.Background(), "REVOKE EXECUTE ON FUNCTION public.compute_provider_lifecycle_audit_append() FROM "+actor)
+		cleanup, stop := context.WithTimeout(context.Background(), 15*time.Second)
+		defer stop()
+		if err := pgtest.ExecCatalogCleanup(cleanup, admin, "REVOKE EXECUTE ON FUNCTION public.compute_provider_lifecycle_audit_append() FROM "+actor); err != nil {
+			t.Errorf("revoke historical function execute: %v", err)
+		}
 	})
 	if _, err := writer.ExecContext(ctx, attach); err != nil {
 		t.Fatalf("attach historical caller-owned trigger: %v", err)
 	}
-	if _, err := admin.ExecContext(ctx, "REVOKE EXECUTE ON FUNCTION public.compute_provider_lifecycle_audit_append() FROM "+actor); err != nil {
+	if err := pgtest.ExecCatalog(ctx, admin, "REVOKE EXECUTE ON FUNCTION public.compute_provider_lifecycle_audit_append() FROM "+actor); err != nil {
 		t.Fatal(err)
 	}
 	requireProviderPermissionDenied(t, ctx, writer, `UPDATE pg_temp.compute_providers

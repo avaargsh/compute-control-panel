@@ -5,7 +5,9 @@ on:
     paths:
       - '.github/workflows/kueue-kind-smoke.yml'
       - 'scripts/kueue_kind_smoke.sh'
+      - 'scripts/kueue_relist_kind_smoke.sh'
       - 'scripts/dra_example_kind_smoke.sh'
+      - 'scripts/kueue_preemption_kind_smoke.sh'
       - 'cmd/kueue-observe/**'
       - 'cmd/kueue-provider-smoke/**'
       - 'internal/provider/kueue_*.go'
@@ -14,7 +16,9 @@ on:
     paths:
       - '.github/workflows/kueue-kind-smoke.yml'
       - 'scripts/kueue_kind_smoke.sh'
+      - 'scripts/kueue_relist_kind_smoke.sh'
       - 'scripts/dra_example_kind_smoke.sh'
+      - 'scripts/kueue_preemption_kind_smoke.sh'
       - 'cmd/kueue-observe/**'
       - 'cmd/kueue-provider-smoke/**'
       - 'internal/provider/kueue_*.go'
@@ -26,7 +30,7 @@ permissions:
 jobs:
   disposable-kind:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6 immutable commit
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6 immutable commit
@@ -41,6 +45,8 @@ jobs:
         run: |
           bash -n scripts/kueue_kind_smoke.sh
           bash -n scripts/dra_example_kind_smoke.sh
+          bash -n scripts/kueue_relist_kind_smoke.sh
+          bash -n scripts/kueue_preemption_kind_smoke.sh
       - name: Kubernetes 1.34 / Kueue v0.19.6 + simulated DRA v0.2.0 + PG16 (disposable)
         env:
           CCP_DISPOSABLE_KIND_SMOKE: '1'
