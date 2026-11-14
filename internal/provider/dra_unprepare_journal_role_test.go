@@ -173,3 +173,48 @@ func TestDRAJournalSchemaRejectsMissingReplayConstraints(t *testing.T) {
 		})
 	}
 }
+
+// The source-key FOR UPDATE / revocation FK KEY SHARE conflict is an essential
+// same-transaction revocation fence. A dropped or deferrable FK leaves the
+// source row/guard triggers looking healthy yet cannot provide that guarantee.
+func TestDRAJournalSchemaRejectsRevocationFencingFKDrift(t *testing.T) {
+	admin := openProviderPostgresDB(t)
+	if !postgresCurrentUserIsSuperuser(t, admin) {
+		t.Skip("disposable PostgreSQL superuser required for transactional FK tamper")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	for _, tc := range []struct {
+		name string
+		ddl  string
+	}{
+		{name: "missing-foreign-key"},
+		{name: "deferred-foreign-key", ddl: `ALTER TABLE public.dra_unprepare_source_revocations
+			ADD CONSTRAINT dra_unprepare_source_revocations_key_fkey
+			FOREIGN KEY (cluster_id, source_id, key_id)
+			REFERENCES public.dra_unprepare_source_keys (cluster_id, source_id, key_id)
+			DEFERRABLE INITIALLY DEFERRED`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tx, err := admin.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback()
+			_, err = tx.ExecContext(ctx, `ALTER TABLE public.dra_unprepare_source_revocations
+				DROP CONSTRAINT dra_unprepare_source_revocations_key_fkey`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.ddl != "" {
+				if _, err := tx.ExecContext(ctx, tc.ddl); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := verifyDRAJournalSchema(ctx, tx); !errors.Is(err, ErrDRAReceiptJournalUnavailable) {
+				t.Fatalf("accepted non-fencing revocation FK %s: %v", tc.name, err)
+			}
+		})
+	}
+}
