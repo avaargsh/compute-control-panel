@@ -150,16 +150,45 @@ func (j *DRAUnprepareReceiptJournal) VerifyAndRecord(
 	// independently registered source row lock; unchecked test-only writes
 	// continue using the single INSERT statement's implicit transaction.
 	// No INSERT/UPDATE paths on Allocation or billable evidence are present.
+	args := []any{
+		event.ClusterID, event.SourceID, event.EventID, event.Driver,
+		release.TenantID, release.ProviderID, release.AllocationID,
+		event.ClaimUID, event.PodUID, event.AllocatedClaimResourceVersion,
+		deviceDigest, recordDigest, recordJSON, event.CompletedAt,
+	}
+	insertRows := `VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14)`
+	if j.restricted {
+		// PostgreSQL acquires the journal relation's INSERT lock before
+		// evaluating this SELECT. An expiry that occurs while waiting for
+		// that lock therefore cannot use an earlier source-key snapshot.
+		// The previously locked source row also fences concurrent DBA
+		// revocation via its foreign-key KEY SHARE lock.
+		insertRows = `SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14::timestamptz
+			FROM public.dra_unprepare_source_keys k
+			WHERE k.cluster_id=$1 AND k.source_id=$2 AND k.key_id=$15
+			  AND k.tenant_id=$5 AND k.provider_id=$6 AND k.driver=$4
+			  AND k.public_key=$16
+			  AND k.valid_from <= $14::timestamptz
+			  AND k.valid_until > $14::timestamptz
+			  AND k.valid_from <= pg_catalog.clock_timestamp()
+			  AND k.valid_until > pg_catalog.clock_timestamp()
+			  AND $14::timestamptz >= pg_catalog.clock_timestamp() -
+			    ($17::bigint * INTERVAL '1 microsecond')
+			  AND $14::timestamptz <= pg_catalog.clock_timestamp() +
+			    ($18::bigint * INTERVAL '1 microsecond')
+			  AND NOT EXISTS (
+			    SELECT 1 FROM public.dra_unprepare_source_revocations r
+			    WHERE r.cluster_id=k.cluster_id AND r.source_id=k.source_id
+			      AND r.key_id=k.key_id
+			  )`
+		args = append(args, event.KeyID, verifier.authority.PublicKey,
+			verifier.maximumAge.Microseconds(), verifier.futureSkew.Microseconds())
+	}
 	result, err := session.ExecContext(ctx, `INSERT INTO public.dra_unprepare_receipt_journal (
 		cluster_id, source_id, event_id, driver, tenant_id, provider_id,
 		allocation_id, claim_uid, pod_uid, allocated_claim_resource_version,
 		device_digest, record_digest, record_payload, completed_at
-	) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14)
-	ON CONFLICT DO NOTHING`,
-		event.ClusterID, event.SourceID, event.EventID, event.Driver,
-		release.TenantID, release.ProviderID, release.AllocationID,
-		event.ClaimUID, event.PodUID, event.AllocatedClaimResourceVersion,
-		deviceDigest, recordDigest, recordJSON, event.CompletedAt)
+	) `+insertRows+` ON CONFLICT DO NOTHING`, args...)
 	if err != nil {
 		return false, fmt.Errorf("%w: append signed receipt: %v", ErrDRAReceiptJournalUnavailable, err)
 	}
@@ -174,9 +203,16 @@ func (j *DRAUnprepareReceiptJournal) VerifyAndRecord(
 		}
 		return true, nil
 	case 0:
-		// A conflict may have been on the global per-source event identity
-		// or the cross-source device epoch. Only an exact previously stored
-		// identity, payload AND digest is an idempotent replay.
+		// The final INSERT's live-clock predicate might have refused a
+		// signer that expired while waiting on the journal relation lock.
+		// Never report that case as an idempotent replay or success.
+		if j.restricted {
+			if err := verifyRegisteredDRAUnprepareSource(ctx, session, verifier, release, signed, asOf); err != nil {
+				return false, err
+			}
+		}
+		// Otherwise a conflict may be on the global source event identity
+		// or the cross-source device epoch; accept only exact stored replay.
 	default:
 		return false, ErrDRAReceiptJournalUnavailable
 	}
