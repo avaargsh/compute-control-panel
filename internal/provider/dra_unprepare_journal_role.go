@@ -127,6 +127,36 @@ func verifyDRAJournalSchema(ctx context.Context, q draJournalQueryRow) error {
 	`).Scan(&replayConstraints); err != nil || replayConstraints != 2 {
 		return fmt.Errorf("%w: DRA journal replay constraints absent or altered: %v", ErrDRAReceiptJournalUnavailable, err)
 	}
+	// The source-row FOR UPDATE revocation fence depends on PostgreSQL's
+	// nondeferrable FK KEY SHARE lock for revocation INSERT. The source/key
+	// table and their immutable triggers can all remain intact while a DBA
+	// drops, defers, redirects or disables that FK. Pin its authoritative
+	// catalog identity and all four active internal RI triggers before any
+	// signed receipt is recorded.
+	var revocationFence int
+	err := q.QueryRowContext(ctx, `
+		SELECT count(*)::integer
+		FROM pg_catalog.pg_constraint c
+		JOIN pg_catalog.pg_index i
+		  ON i.indexrelid=c.conindid AND i.indrelid=c.confrelid
+		WHERE c.conname='dra_unprepare_source_revocations_key_fkey'
+		  AND c.contype='f'
+		  AND c.conrelid='public.dra_unprepare_source_revocations'::pg_catalog.regclass
+		  AND c.confrelid='public.dra_unprepare_source_keys'::pg_catalog.regclass
+		  AND c.conkey=ARRAY[1,2,3]::smallint[]
+		  AND c.confkey=ARRAY[1,2,3]::smallint[]
+		  AND c.confupdtype='a' AND c.confdeltype='a' AND c.confmatchtype='s'
+		  AND NOT c.condeferrable AND NOT c.condeferred AND c.convalidated
+		  AND i.indisunique AND i.indisvalid AND i.indisready AND i.indislive
+		  AND i.indimmediate AND i.indpred IS NULL AND i.indexprs IS NULL
+		  AND (SELECT count(*) FROM pg_catalog.pg_trigger t
+		       WHERE t.tgconstraint=c.oid AND t.tgisinternal
+		         AND t.tgenabled IN ('O','A')
+		         AND NOT t.tgdeferrable AND NOT t.tginitdeferred) = 4
+	`).Scan(&revocationFence)
+	if err != nil || revocationFence != 1 {
+		return fmt.Errorf("%w: DRA signer revocation FK fence absent or altered: %v", ErrDRAReceiptJournalUnavailable, err)
+	}
 	var guards int
 	err := q.QueryRowContext(ctx, `
 		SELECT count(*)::integer
