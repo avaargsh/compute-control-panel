@@ -105,6 +105,12 @@ func TestRestrictedDRAJournalRefusesUnregisteredKeyAndRevokedReplay(t *testing.T
 		SET driver='forged' WHERE cluster_id=$1`, receipt.Event.ClusterID); postgresSQLState(err) != "42501" {
 		t.Fatalf("ingest login mutated source key: state=%s err=%v", postgresSQLState(err), err)
 	}
+	// PG16 FOR UPDATE requires permission on a column, but it must never
+	// permit a real UPDATE even to that deliberately inert lock marker.
+	if _, err = db.ExecContext(ctx, `UPDATE public.dra_unprepare_source_keys
+		SET lock_token=0 WHERE cluster_id=$1`, receipt.Event.ClusterID); postgresSQLState(err) != "55000" {
+		t.Fatalf("lock-only column could be rewritten: state=%s err=%v", postgresSQLState(err), err)
+	}
 	if _, err = db.ExecContext(ctx, `INSERT INTO public.dra_unprepare_source_revocations
 		(cluster_id, source_id, key_id, reason) VALUES ($1,$2,$3,'forged')`,
 		receipt.Event.ClusterID, receipt.Event.SourceID, receipt.Event.KeyID); postgresSQLState(err) != "42501" {
