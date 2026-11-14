@@ -1,0 +1,19 @@
+name: Main PR evidence declaration
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Run reviewer-gate regression tests
+        run: python3 -m unittest discover -s tests -p 'test_main_pr_evidence.py' -v
+      - name: Validate live PR evidence declaration
+        run: python3 scripts/check_main_pr_evidence.py "$GITHUB_EVENT_PATH"

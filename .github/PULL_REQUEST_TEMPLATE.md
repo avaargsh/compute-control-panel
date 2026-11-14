@@ -10,6 +10,8 @@ What user-visible or architectural behavior changes, and why?
 
 ## Governance metadata
 
+For a ready-to-merge PR targeting `main`, write the current 40-character base and head SHAs in the first field as `main base=<SHA> head=<SHA>`. Update after source/target changes. Draft PRs may remain incomplete until ready.
+
 - Target branch (`main` or internal feature parent); exact base/head commit SHAs:
 - Change class (docs-only / contract / migration / runtime / protected effect / provider):
 
@@ -21,6 +23,9 @@ What user-visible or architectural behavior changes, and why?
 - Migration or compatibility version; client impact:
 
 ## Evidence (link real CI runs)
+
+- Test/CI evidence at exact HEAD (run URL or explicit no-workflow reason):
+- Authorization/recovery negative-case evidence or explained N/A:
 
 - [ ] Unit tests and negative-path assertions, with source SHA
 - [ ] Contract/schema fixtures shared with actual consumers
