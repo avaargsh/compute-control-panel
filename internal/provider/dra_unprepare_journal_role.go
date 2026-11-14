@@ -158,7 +158,7 @@ func verifyDRAJournalSchema(ctx context.Context, q draJournalQueryRow) error {
 		return fmt.Errorf("%w: DRA signer revocation FK fence absent or altered: %v", ErrDRAReceiptJournalUnavailable, err)
 	}
 	var guards int
-	err := q.QueryRowContext(ctx, `
+	err = q.QueryRowContext(ctx, `
 		SELECT count(*)::integer
 		FROM (VALUES
 			('dra_unprepare_receipt_no_update_delete'::pg_catalog.name, 27::integer),
