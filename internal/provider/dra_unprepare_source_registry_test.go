@@ -10,6 +10,19 @@ import (
 	"time"
 )
 
+// Live receipt fixture is restricted-ingest only. The unchecked journal and
+// pure signature/unit tests deliberately retain stable historical timestamps.
+func liveJournalReceiptFixture(
+	t *testing.T,
+) (*DRAUnprepareVerifier, SignedDRAUnprepare, time.Time) {
+	t.Helper()
+	verifier, private, signed := journalReceiptFixture(t)
+	asOf := time.Now().UTC()
+	signed.Event.CompletedAt = asOf.Add(-30 * time.Second)
+	signed.Signature = ed25519.Sign(private, draUnprepareSigningBytes(signed.Event))
+	return verifier, signed, asOf
+}
+
 // seedTrustedDRAReceiptSource is disposable-test DBA provisioning only.
 // Production source keys require independent identity and driver verification.
 func seedTrustedDRAReceiptSource(
@@ -26,8 +39,8 @@ func seedTrustedDRAReceiptSource(
 		receipt.Event.ClusterID, receipt.Event.SourceID, receipt.Event.KeyID,
 		candidate.Delete.TenantID, candidate.Delete.ProviderID,
 		receipt.Event.Driver, verifier.authority.PublicKey,
-		time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC),
-		time.Date(2026, 11, 10, 11, 0, 0, 0, time.UTC))
+		receipt.Event.CompletedAt.Add(-time.Hour),
+		receipt.Event.CompletedAt.Add(time.Hour))
 	if err != nil {
 		t.Fatalf("seed disposable independent DRA signer: %v", err)
 	}
@@ -46,9 +59,8 @@ func TestRestrictedDRAJournalRefusesUnregisteredKeyAndRevokedReplay(t *testing.T
 		t.Fatalf("restricted journal: %v", err)
 	}
 	defer db.Close()
-	verifier, _, receipt := journalReceiptFixture(t)
+	verifier, receipt, asOf := liveJournalReceiptFixture(t)
 	candidate := releaseCandidateFixture()
-	asOf := time.Date(2026, 11, 10, 10, 1, 0, 0, time.UTC)
 
 	newEvent, err := journal.VerifyAndRecord(ctx, verifier, candidate, receipt, asOf)
 	if !errors.Is(err, ErrDRAReceiptSourceUntrusted) || newEvent {
@@ -69,8 +81,8 @@ func TestRestrictedDRAJournalRefusesUnregisteredKeyAndRevokedReplay(t *testing.T
 		receipt.Event.ClusterID, receipt.Event.SourceID, receipt.Event.KeyID,
 		candidate.Delete.TenantID, candidate.Delete.ProviderID, receipt.Event.Driver,
 		verifier.authority.PublicKey,
-		time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC),
-		time.Date(2026, 11, 10, 11, 0, 0, 0, time.UTC))
+		receipt.Event.CompletedAt.Add(-time.Hour),
+		receipt.Event.CompletedAt.Add(time.Hour))
 	if err != nil {
 		t.Fatalf("DBA source key provisioning: %v", err)
 	}
@@ -160,7 +172,7 @@ func TestRestrictedDRAJournalRequiresExactSourceScopeAndFreshness(t *testing.T) 
 		{"unreasonably relaxed future skew", candidate.Delete.TenantID, candidate.Delete.ProviderID, asOf.Add(-time.Hour), asOf.Add(time.Hour), 600, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			verifier, _, receipt := journalReceiptFixture(t)
+			verifier, receipt, _ := liveJournalReceiptFixture(t)
 			_, err := admin.ExecContext(ctx, `INSERT INTO public.dra_unprepare_source_keys
 				(cluster_id, source_id, key_id, tenant_id, provider_id, driver, public_key,
 				valid_from, valid_until, maximum_age_seconds, future_skew_seconds)
