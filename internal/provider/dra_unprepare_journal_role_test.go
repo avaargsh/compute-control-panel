@@ -105,3 +105,38 @@ func TestRestrictedDRAJournalRefusesBroadRoleAndRuntimePrivilegeDrift(t *testing
 		t.Fatalf("broad login accepted: journal=%v db=%v err=%v", broad != nil, broadDB != nil, err)
 	}
 }
+
+
+// Replacing only the guard's PL/pgSQL body preserves trigger OIDs,
+// tgtype/tgenabled, proconfig and SECURITY INVOKER. Catalog attestation must
+// reject a no-op body even before any attempted UPDATE/DELETE/TRUNCATE.
+func TestDRAJournalSchemaRejectsInPlaceGuardBodyTamper(t *testing.T) {
+	admin := openProviderPostgresDB(t)
+	if !postgresCurrentUserIsSuperuser(t, admin) {
+		t.Skip("disposable PostgreSQL superuser required for transactional catalog tamper")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	tx, err := admin.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+
+	// A rollback restores the canonical function body; no durable catalog
+	// drift, receipt write, or grant is introduced by this negative test.
+	_, err = tx.ExecContext(ctx, `CREATE OR REPLACE FUNCTION public.dra_unprepare_receipt_journal_guard()
+		RETURNS trigger LANGUAGE plpgsql
+		SET search_path = pg_catalog, pg_temp
+		AS $dra_guard_tamper$
+		BEGIN
+			RETURN NEW;
+		END;
+		$dra_guard_tamper$`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyDRAJournalSchema(ctx, tx); !errors.Is(err, ErrDRAReceiptJournalUnavailable) {
+		t.Fatalf("accepted no-op journal/source immutability guard body: %v", err)
+	}
+}
