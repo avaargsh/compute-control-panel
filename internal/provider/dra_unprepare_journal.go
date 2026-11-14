@@ -28,7 +28,8 @@ var ErrDRAReceiptJournalUnavailable = errors.New("DRA Unprepare receipt journal 
 // repository does not wire such an authority: a caller-supplied verifier
 // alone cannot turn a custom signed event into production driver attestation.
 type DRAUnprepareReceiptJournal struct {
-	db *sql.DB
+	db         *sql.DB
+	restricted bool
 }
 
 func NewDRAUnprepareReceiptJournal(db *sql.DB) (*DRAUnprepareReceiptJournal, error) {
@@ -36,6 +37,14 @@ func NewDRAUnprepareReceiptJournal(db *sql.DB) (*DRAUnprepareReceiptJournal, err
 		return nil, ErrDRAReceiptJournalUnavailable
 	}
 	return &DRAUnprepareReceiptJournal{db: db}, nil
+}
+
+// draJournalSQL is implemented by both *sql.DB and a dedicated *sql.Conn.
+// Restricted journal sessions attest privileges on the very connection used
+// to append and inspect the receipt, never on a different pooled session.
+type draJournalSQL interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
 type draReceiptJournalRecord struct {
@@ -74,6 +83,21 @@ func (j *DRAUnprepareReceiptJournal) VerifyAndRecord(
 	if verifier == nil {
 		return false, ErrUncorrelatedDRAUnprepare
 	}
+	var session draJournalSQL = j.db
+	if j.restricted {
+		conn, err := j.db.Conn(ctx)
+		if err != nil {
+			return false, fmt.Errorf("%w: open restricted session: %v", ErrDRAReceiptJournalUnavailable, err)
+		}
+		defer conn.Close()
+		if err := verifyDRAJournalSchema(ctx, conn); err != nil {
+			return false, err
+		}
+		if err := verifyDRAJournalRole(ctx, conn); err != nil {
+			return false, err
+		}
+		session = conn
+	}
 	correlated, err := verifier.Correlate(candidate, signed, asOf)
 	if err != nil {
 		return false, err
@@ -101,7 +125,7 @@ func (j *DRAUnprepareReceiptJournal) VerifyAndRecord(
 	// different event/source IDs for the same historical allocated device
 	// epoch. One statement and its implicit transaction commit the evidence.
 	// No INSERT/UPDATE paths on Allocation or billable evidence are present.
-	result, err := j.db.ExecContext(ctx, `INSERT INTO public.dra_unprepare_receipt_journal (
+	result, err := session.ExecContext(ctx, `INSERT INTO public.dra_unprepare_receipt_journal (
 		cluster_id, source_id, event_id, driver, tenant_id, provider_id,
 		allocation_id, claim_uid, pod_uid, allocated_claim_resource_version,
 		device_digest, record_digest, record_payload, completed_at
@@ -130,7 +154,7 @@ func (j *DRAUnprepareReceiptJournal) VerifyAndRecord(
 	}
 	var storedDigest string
 	var payloadMatches bool
-	err = j.db.QueryRowContext(ctx, `SELECT record_digest, record_payload=$4::jsonb
+	err = session.QueryRowContext(ctx, `SELECT record_digest, record_payload=$4::jsonb
 		FROM public.dra_unprepare_receipt_journal
 		WHERE cluster_id=$1 AND source_id=$2 AND event_id=$3`,
 		event.ClusterID, event.SourceID, event.EventID, recordJSON,
