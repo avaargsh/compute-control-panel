@@ -139,3 +139,37 @@ func TestDRAJournalSchemaRejectsInPlaceGuardBodyTamper(t *testing.T) {
 		t.Fatalf("accepted no-op journal/source immutability guard body: %v", err)
 	}
 }
+
+// A DBA can drop or weaken one replay constraint without changing the
+ // journal table name, immutable triggers, function source or role grants.
+ // Restricted ingestion must refuse that drift before a signed receipt can
+ // become a second claim-device assertion.
+func TestDRAJournalSchemaRejectsMissingReplayConstraints(t *testing.T) {
+	admin := openProviderPostgresDB(t)
+	if !postgresCurrentUserIsSuperuser(t, admin) {
+		t.Skip("disposable PostgreSQL superuser required for transactional constraint tamper")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	for _, name := range []string{
+		"dra_unprepare_receipt_journal_pkey",
+		"dra_unprepare_receipt_one_device_epoch",
+	} {
+		t.Run(name, func(t *testing.T) {
+			tx, err := admin.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback()
+			// A rollback restores the constraint; no durable DDL drift.
+			_, err = tx.ExecContext(ctx,
+				"ALTER TABLE public.dra_unprepare_receipt_journal DROP CONSTRAINT "+name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := verifyDRAJournalSchema(ctx, tx); !errors.Is(err, ErrDRAReceiptJournalUnavailable) {
+				t.Fatalf("accepted missing replay constraint %s: %v", name, err)
+			}
+		})
+	}
+}
