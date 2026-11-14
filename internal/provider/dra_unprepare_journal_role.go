@@ -109,6 +109,35 @@ func verifyDRAJournalSchema(ctx context.Context, q draJournalQueryRow) error {
 	if err != nil || guards != 2 {
 		return fmt.Errorf("%w: immutable DRA journal guards absent or altered: %v", ErrDRAReceiptJournalUnavailable, err)
 	}
+	// Source keys and revocations must be independently administered and
+	// append-only. Never accept a substituted registry with disabled guards.
+	var registryGuards int
+	err = q.QueryRowContext(ctx, `
+		SELECT count(*)::integer
+		FROM (VALUES
+		  ('public.dra_unprepare_source_keys'::pg_catalog.regclass,
+		   'dra_unprepare_keys_no_update_delete'::pg_catalog.name, 27::integer),
+		  ('public.dra_unprepare_source_keys'::pg_catalog.regclass,
+		   'dra_unprepare_keys_no_truncate'::pg_catalog.name, 34::integer),
+		  ('public.dra_unprepare_source_revocations'::pg_catalog.regclass,
+		   'dra_unprepare_revocations_no_update_delete'::pg_catalog.name, 27::integer),
+		  ('public.dra_unprepare_source_revocations'::pg_catalog.regclass,
+		   'dra_unprepare_revocations_no_truncate'::pg_catalog.name, 34::integer)
+		) required(rel, name, bits)
+		JOIN pg_catalog.pg_trigger t
+		  ON t.tgrelid=required.rel AND t.tgname=required.name
+		 AND t.tgtype=required.bits AND t.tgenabled='A'
+		JOIN pg_catalog.pg_proc p
+		  ON p.oid=t.tgfoid
+		 AND p.oid='public.dra_unprepare_receipt_journal_guard()'::pg_catalog.regprocedure
+		WHERE t.tgqual IS NULL AND t.tgnargs=0 AND t.tgattr::text=''
+		  AND NOT t.tgdeferrable AND NOT t.tginitdeferred
+		  AND NOT p.prosecdef
+		  AND p.proconfig=ARRAY['search_path=pg_catalog, pg_temp']::pg_catalog.text[]
+	`).Scan(&registryGuards)
+	if err != nil || registryGuards != 4 {
+		return fmt.Errorf("%w: independent DRA signer registry guards absent or altered: %v", ErrDRAReceiptJournalUnavailable, err)
+	}
 	return nil
 }
 
@@ -148,6 +177,24 @@ func verifyDRAJournalRole(ctx context.Context, q draJournalQueryRow) error {
 		    pg_catalog.has_table_privilege(current_user, 'public.dra_unprepare_receipt_journal'::pg_catalog.regclass, 'SELECT')
 		    AND pg_catalog.has_table_privilege(current_user, 'public.dra_unprepare_receipt_journal'::pg_catalog.regclass, 'INSERT')
 		  ) THEN 'missing_journal_dml'
+		  WHEN NOT (
+		    pg_catalog.has_table_privilege(current_user, 'public.dra_unprepare_source_keys'::pg_catalog.regclass, 'SELECT')
+		    AND pg_catalog.has_table_privilege(current_user, 'public.dra_unprepare_source_revocations'::pg_catalog.regclass, 'SELECT')
+		  ) THEN 'missing_source_registry_read'
+		  WHEN EXISTS (
+		    SELECT 1 FROM pg_catalog.pg_class c
+		    JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+		    WHERE n.nspname='public'
+		      AND c.relname IN ('dra_unprepare_source_keys','dra_unprepare_source_revocations')
+		      AND (
+		        pg_catalog.has_table_privilege(current_user, c.oid, 'INSERT')
+		        OR pg_catalog.has_table_privilege(current_user, c.oid, 'UPDATE')
+		        OR pg_catalog.has_table_privilege(current_user, c.oid, 'DELETE')
+		        OR pg_catalog.has_table_privilege(current_user, c.oid, 'TRUNCATE')
+		        OR pg_catalog.has_table_privilege(current_user, c.oid, 'TRIGGER')
+		        OR pg_catalog.has_table_privilege(current_user, c.oid, 'REFERENCES')
+		      )
+		  ) THEN 'source_registry_write_privilege'
 		  WHEN pg_catalog.has_table_privilege(current_user, 'public.dra_unprepare_receipt_journal'::pg_catalog.regclass, 'UPDATE')
 		    OR pg_catalog.has_table_privilege(current_user, 'public.dra_unprepare_receipt_journal'::pg_catalog.regclass, 'DELETE')
 		    OR pg_catalog.has_table_privilege(current_user, 'public.dra_unprepare_receipt_journal'::pg_catalog.regclass, 'TRUNCATE')
@@ -159,7 +206,11 @@ func verifyDRAJournalRole(ctx context.Context, q draJournalQueryRow) error {
 		    JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
 		    WHERE n.nspname='public'
 		      AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
-		      AND c.relname<>'dra_unprepare_receipt_journal'
+		      AND c.relname NOT IN (
+		        'dra_unprepare_receipt_journal',
+		        'dra_unprepare_source_keys',
+		        'dra_unprepare_source_revocations'
+		      )
 		      AND (
 		        pg_catalog.has_table_privilege(current_user, c.oid, 'SELECT')
 		        OR pg_catalog.has_table_privilege(current_user, c.oid, 'INSERT')
@@ -177,9 +228,15 @@ func verifyDRAJournalRole(ctx context.Context, q draJournalQueryRow) error {
 		    WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m','f')
 		      AND a.attnum>0 AND NOT a.attisdropped
 		      AND (
-		        (c.relname<>'dra_unprepare_receipt_journal' AND (
+		        (c.relname NOT IN ('dra_unprepare_receipt_journal',
+		          'dra_unprepare_source_keys','dra_unprepare_source_revocations') AND (
 		          pg_catalog.has_column_privilege(current_user, c.oid, a.attname, 'SELECT')
 		          OR pg_catalog.has_column_privilege(current_user, c.oid, a.attname, 'INSERT')
+		          OR pg_catalog.has_column_privilege(current_user, c.oid, a.attname, 'UPDATE')
+		          OR pg_catalog.has_column_privilege(current_user, c.oid, a.attname, 'REFERENCES')
+		        ))
+		        OR (c.relname IN ('dra_unprepare_source_keys','dra_unprepare_source_revocations') AND (
+		          pg_catalog.has_column_privilege(current_user, c.oid, a.attname, 'INSERT')
 		          OR pg_catalog.has_column_privilege(current_user, c.oid, a.attname, 'UPDATE')
 		          OR pg_catalog.has_column_privilege(current_user, c.oid, a.attname, 'REFERENCES')
 		        ))
