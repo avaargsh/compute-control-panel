@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/avaargsh/compute-control-panel/internal/pgtest"
 )
 
 // E1 FINAL must fail closed when its database login has unexpected DML or
@@ -44,12 +46,14 @@ func TestE1WriterRoleRejectsUnexpectedControlAndEvidenceGrants(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			grant := fmt.Sprintf("GRANT %s ON %s TO %s", tc.privilege, tc.relation, role)
-			if _, err := admin.ExecContext(ctx, grant); err != nil {
+			if err := pgtest.ExecCatalog(ctx, admin, grant); err != nil {
 				t.Fatalf("install unexpected test-only privilege %s: %v", grant, err)
 			}
 			t.Cleanup(func() {
 				revoke := fmt.Sprintf("REVOKE %s ON %s FROM %s", tc.privilege, tc.relation, role)
-				if _, err := admin.ExecContext(context.Background(), revoke); err != nil {
+				cleanup, stop := context.WithTimeout(context.Background(), 15*time.Second)
+				defer stop()
+				if err := pgtest.ExecCatalogCleanup(cleanup, admin, revoke); err != nil {
 					t.Errorf("revoke test-only privilege: %v", err)
 				}
 			})

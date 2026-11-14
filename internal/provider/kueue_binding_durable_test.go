@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/avaargsh/compute-control-panel/internal/pgtest"
 )
 
 func TestDurableKueueBindingConstructionFailClosed(t *testing.T) {
@@ -92,7 +94,7 @@ func TestDurableKueueBindingRejectsOverPrivilegedRole(t *testing.T) {
 	broad := kueueTestIdent(t, "ccp_kbroad_")
 	createKueueBindingRole(t, admin, broad)
 	grantKueueBindingPrivileges(t, admin, broad)
-	if _, err := admin.ExecContext(ctx, "GRANT SELECT ON public.compute_providers TO "+broad); err != nil {
+	if err := pgtest.ExecCatalog(ctx, admin, "GRANT SELECT ON public.compute_providers TO "+broad); err != nil {
 		t.Fatal(err)
 	}
 	_, _, err = OpenDurablePostgresKueueJobBindingStore(ctx, kueueBindingDSN(t, broad, kueueBindingTestPassword, ""))
@@ -102,7 +104,7 @@ func TestDurableKueueBindingRejectsOverPrivilegedRole(t *testing.T) {
 
 	narrow := kueueTestIdent(t, "ccp_kmiss_")
 	createKueueBindingRole(t, admin, narrow)
-	if _, err := admin.ExecContext(ctx, "GRANT SELECT ON public.kueue_job_create_pins, public.kueue_job_delete_tombstones TO "+narrow); err != nil {
+	if err := pgtest.ExecCatalog(ctx, admin, "GRANT SELECT ON public.kueue_job_create_pins, public.kueue_job_delete_tombstones TO "+narrow); err != nil {
 		t.Fatal(err)
 	}
 	_, _, err = OpenDurablePostgresKueueJobBindingStore(ctx, kueueBindingDSN(t, narrow, kueueBindingTestPassword, ""))
@@ -118,7 +120,7 @@ func TestDurableKueueBindingCanonicalRoleAndShadow(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	if _, err := admin.ExecContext(ctx, "ALTER ROLE "+kueueBindingRoleName+" PASSWORD '"+kueueBindingTestPassword+"'"); err != nil {
+	if err := pgtest.ExecCatalog(ctx, admin, "ALTER ROLE "+kueueBindingRoleName+" PASSWORD '"+kueueBindingTestPassword+"'"); err != nil {
 		t.Fatalf("binding role %s is not provisioned: %v", kueueBindingRoleName, err)
 	}
 	dsn := kueueBindingDSN(t, kueueBindingRoleName, kueueBindingTestPassword, "")
@@ -255,14 +257,13 @@ func createKueueBindingRole(t *testing.T, admin *sql.DB, role string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if _, err := admin.ExecContext(ctx, `CREATE ROLE `+role+` LOGIN PASSWORD '`+kueueBindingTestPassword+`' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`); err != nil {
+	if err := pgtest.ExecCatalog(ctx, admin, `CREATE ROLE `+role+` LOGIN PASSWORD '`+kueueBindingTestPassword+`' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		cleanup, stop := context.WithTimeout(context.Background(), 15*time.Second)
 		defer stop()
-		_, _ = admin.ExecContext(cleanup, "DROP OWNED BY "+role)
-		if _, err := admin.ExecContext(cleanup, "DROP ROLE "+role); err != nil {
+		if err := pgtest.CleanupRole(cleanup, admin, role); err != nil {
 			t.Errorf("drop role %s: %v", role, err)
 		}
 	})
@@ -272,18 +273,16 @@ func grantKueueBindingPrivileges(t *testing.T, admin *sql.DB, role string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	for _, statement := range []string{
-		"GRANT USAGE ON SCHEMA public TO " + role,
-		"GRANT SELECT, INSERT ON public.kueue_job_create_pins TO " + role,
-		"GRANT UPDATE (updated_at) ON public.kueue_job_create_pins TO " + role,
-		"GRANT SELECT, INSERT ON public.kueue_job_delete_tombstones TO " + role,
-		"GRANT UPDATE (acknowledged, updated_at) ON public.kueue_job_delete_tombstones TO " + role,
-		"GRANT EXECUTE ON FUNCTION public.kueue_job_create_pin_guard() TO " + role,
-		"GRANT EXECUTE ON FUNCTION public.kueue_job_delete_tombstone_guard() TO " + role,
-	} {
-		if _, err := admin.ExecContext(ctx, statement); err != nil {
-			t.Fatalf("%s: %v", statement, err)
-		}
+	if err := pgtest.ExecCatalog(ctx, admin,
+		"GRANT USAGE ON SCHEMA public TO "+role,
+		"GRANT SELECT, INSERT ON public.kueue_job_create_pins TO "+role,
+		"GRANT UPDATE (updated_at) ON public.kueue_job_create_pins TO "+role,
+		"GRANT SELECT, INSERT ON public.kueue_job_delete_tombstones TO "+role,
+		"GRANT UPDATE (acknowledged, updated_at) ON public.kueue_job_delete_tombstones TO "+role,
+		"GRANT EXECUTE ON FUNCTION public.kueue_job_create_pin_guard() TO "+role,
+		"GRANT EXECUTE ON FUNCTION public.kueue_job_delete_tombstone_guard() TO "+role,
+	); err != nil {
+		t.Fatal(err)
 	}
 }
 

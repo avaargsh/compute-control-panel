@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/avaargsh/compute-control-panel/internal/migrate"
+	"github.com/avaargsh/compute-control-panel/internal/pgtest"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -169,10 +170,17 @@ func TestProviderAuditMigrationRejectsUnsafePreprovisioning(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
-			tx, err := admin.BeginTx(ctx, nil)
+			conn, release, err := pgtest.LockCatalogConn(ctx, admin)
 			if err != nil {
 				t.Fatal(err)
 			}
+			defer release()
+			tx, err := conn.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Roll back while the catalog lock is still held so another package
+			// cannot interleave role DDL with this transaction's catalog locks.
 			defer func() { _ = tx.Rollback() }()
 			for _, statement := range tc.setup(randomSuffix(t)) {
 				if _, err := tx.ExecContext(ctx, statement); err != nil {
@@ -201,7 +209,7 @@ func TestProviderAuditMigrationWithRestrictedMigrationLogin(t *testing.T) {
 	database := "ccp_audit_migration_" + suffix
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	if _, err := admin.ExecContext(ctx, "CREATE ROLE "+role+" LOGIN PASSWORD 'provider-audit-ci-only' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"); err != nil {
+	if err := pgtest.ExecCatalog(ctx, admin, "CREATE ROLE "+role+" LOGIN PASSWORD 'provider-audit-ci-only' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"); err != nil {
 		t.Fatalf("create migration LOGIN fixture: %v", err)
 	}
 	t.Cleanup(func() {
@@ -210,11 +218,11 @@ func TestProviderAuditMigrationWithRestrictedMigrationLogin(t *testing.T) {
 		if _, err := admin.ExecContext(cleanupCtx, "DROP DATABASE IF EXISTS "+database+" WITH (FORCE)"); err != nil {
 			t.Errorf("drop migration database fixture: %v", err)
 		}
-		if _, err := admin.ExecContext(cleanupCtx, "DROP ROLE "+role); err != nil {
+		if err := pgtest.CleanupRole(cleanupCtx, admin, role); err != nil {
 			t.Errorf("drop migration LOGIN fixture: %v", err)
 		}
 	})
-	if _, err := admin.ExecContext(ctx, "GRANT "+providerAuditOwnerRole+" TO "+role+" WITH INHERIT FALSE, SET TRUE"); err != nil {
+	if err := pgtest.ExecCatalog(ctx, admin, "GRANT "+providerAuditOwnerRole+" TO "+role+" WITH INHERIT FALSE, SET TRUE"); err != nil {
 		t.Fatalf("provision trusted ownership-transfer membership: %v", err)
 	}
 	if _, err := admin.ExecContext(ctx, "CREATE DATABASE "+database+" OWNER "+role); err != nil {

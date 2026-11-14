@@ -9,6 +9,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/avaargsh/compute-control-panel/internal/pgtest"
 )
 
 // Test connections use a separate non-owner login. The migration/superuser
@@ -19,39 +21,38 @@ func testEvidenceWriterDB(t *testing.T, admin *sql.DB) *sql.DB {
 	role := "e1_writer_" + randomSuffix(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if _, err := admin.ExecContext(ctx, fmt.Sprintf("CREATE ROLE %s LOGIN PASSWORD 'e1-ci-only'", role)); err != nil {
+	if err := pgtest.ExecCatalog(ctx, admin, fmt.Sprintf("CREATE ROLE %s LOGIN PASSWORD 'e1-ci-only'", role)); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		// Close all writer sessions before removing grants and the test role.
-		_, _ = admin.ExecContext(context.Background(), fmt.Sprintf("DROP OWNED BY %s", role))
-		_, _ = admin.ExecContext(context.Background(), fmt.Sprintf("DROP ROLE %s", role))
+		// Registration order is LIFO: the writer pool is closed by a later cleanup.
+		cleanup, stop := context.WithTimeout(context.Background(), 15*time.Second)
+		defer stop()
+		if err := pgtest.CleanupRole(cleanup, admin, role); err != nil {
+			t.Errorf("drop role %s: %v", role, err)
+		}
 	})
-	for _, grant := range []string{
-		"GRANT USAGE ON SCHEMA public TO %s",
-		"GRANT SELECT ON ALL TABLES IN SCHEMA public TO %s",
-		"GRANT INSERT ON compute_allocation_usage_evidence_sets TO %s",
+	if err := pgtest.ExecCatalog(ctx, admin,
+		fmt.Sprintf("GRANT USAGE ON SCHEMA public TO %s", role),
+		fmt.Sprintf("GRANT SELECT ON ALL TABLES IN SCHEMA public TO %s", role),
+		fmt.Sprintf("GRANT INSERT ON compute_allocation_usage_evidence_sets TO %s", role),
 		// E1 immutable replay uses SELECT .. FOR SHARE. PostgreSQL
 		// requires one UPDATE-able column, but its append-only trigger
 		// denies all actual UPDATE attempts.
-		"GRANT UPDATE (recorded_at) ON compute_allocation_usage_evidence_sets TO %s",
-		"GRANT UPDATE (updated_at) ON compute_evidence_policy_fences TO %s",
+		fmt.Sprintf("GRANT UPDATE (recorded_at) ON compute_allocation_usage_evidence_sets TO %s", role),
+		fmt.Sprintf("GRANT UPDATE (updated_at) ON compute_evidence_policy_fences TO %s", role),
 		// The existing Provider operation/Workload safety SELECT .. FOR
 		// SHARE clauses also require a minimal UPDATE-column privilege.
 		// These are distinct from policy-administration capabilities.
-		"GRANT UPDATE (updated_at) ON compute_operations TO %s",
-		"GRANT UPDATE (updated_at) ON compute_workloads TO %s",
-		"GRANT UPDATE (updated_at) ON compute_allocations TO %s",
-	} {
-		if _, err := admin.ExecContext(ctx, fmt.Sprintf(grant, role)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// A SECURITY DEFINER trigger reads the issuer ledger. The E1 writer
-	// must not inherit global SELECT from the ordinary evidence/read fixture.
-	if _, err := admin.ExecContext(ctx, fmt.Sprintf(
-		"REVOKE SELECT ON public.compute_e1_final_authorizations FROM %s", role)); err != nil {
-		t.Fatalf("remove issuer ledger visibility from writer fixture: %v", err)
+		fmt.Sprintf("GRANT UPDATE (updated_at) ON compute_operations TO %s", role),
+		fmt.Sprintf("GRANT UPDATE (updated_at) ON compute_workloads TO %s", role),
+		fmt.Sprintf("GRANT UPDATE (updated_at) ON compute_allocations TO %s", role),
+		// A SECURITY DEFINER trigger reads the issuer ledger. The E1 writer
+		// must not inherit global SELECT from the ordinary evidence/read fixture.
+		fmt.Sprintf("REVOKE SELECT ON public.compute_e1_final_authorizations FROM %s", role),
+	); err != nil {
+		t.Fatal(err)
 	}
 	parsed, err := url.Parse(os.Getenv("DATABASE_URL"))
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
@@ -139,22 +140,22 @@ func TestE1WriterRoleRejectsSetRolePolicyAdministratorMembership(t *testing.T) {
 		t.Fatal(err)
 	}
 	grantRole := "e1_policy_admin_" + randomSuffix(t)
-	if _, err := admin.ExecContext(ctx, fmt.Sprintf("CREATE ROLE %s NOLOGIN", grantRole)); err != nil {
+	if err := pgtest.ExecCatalog(ctx, admin, fmt.Sprintf("CREATE ROLE %s NOLOGIN", grantRole)); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = admin.ExecContext(context.Background(), fmt.Sprintf("REVOKE %s FROM %s", grantRole, login))
-		_, _ = admin.ExecContext(context.Background(), fmt.Sprintf("DROP OWNED BY %s", grantRole))
-		_, _ = admin.ExecContext(context.Background(), fmt.Sprintf("DROP ROLE %s", grantRole))
+		cleanup, stop := context.WithTimeout(context.Background(), 15*time.Second)
+		defer stop()
+		if err := pgtest.CleanupRole(cleanup, admin, grantRole, fmt.Sprintf("REVOKE %s FROM %s", grantRole, login)); err != nil {
+			t.Errorf("drop role %s: %v", grantRole, err)
+		}
 	})
-	_, err := admin.ExecContext(ctx, fmt.Sprintf("GRANT UPDATE(revision) ON compute_evidence_policy_fences TO %s", grantRole))
-	if err != nil {
-		t.Fatal(err)
-	}
-	// PostgreSQL 16 SET ROLE membership does not have to inherit privileges.
-	// A user who can switch to a policy administrator is not an E1 writer.
-	_, err = admin.ExecContext(ctx, fmt.Sprintf("GRANT %s TO %s WITH INHERIT FALSE, SET TRUE", grantRole, login))
-	if err != nil {
+	if err := pgtest.ExecCatalog(ctx, admin,
+		fmt.Sprintf("GRANT UPDATE(revision) ON compute_evidence_policy_fences TO %s", grantRole),
+		// PostgreSQL 16 SET ROLE membership does not have to inherit privileges.
+		// A user who can switch to a policy administrator is not an E1 writer.
+		fmt.Sprintf("GRANT %s TO %s WITH INHERIT FALSE, SET TRUE", grantRole, login),
+	); err != nil {
 		t.Fatal(err)
 	}
 	if err := verifyEvidenceWriterPrivileges(ctx, writer); !errors.Is(err, ErrEvidencePolicyUntrusted) {
@@ -194,22 +195,22 @@ func TestE1WriterRejectsInheritedIssuerGrantWithoutSetRole(t *testing.T) {
 		t.Fatal(err)
 	}
 	issuerRole := "e1_inherited_issuer_" + randomSuffix(t)
-	if _, err := admin.ExecContext(ctx, fmt.Sprintf("CREATE ROLE %s NOLOGIN", issuerRole)); err != nil {
+	if err := pgtest.ExecCatalog(ctx, admin, fmt.Sprintf("CREATE ROLE %s NOLOGIN", issuerRole)); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = admin.ExecContext(context.Background(), fmt.Sprintf("REVOKE %s FROM %s", issuerRole, login))
-		_, _ = admin.ExecContext(context.Background(), fmt.Sprintf("DROP OWNED BY %s", issuerRole))
-		_, _ = admin.ExecContext(context.Background(), fmt.Sprintf("DROP ROLE %s", issuerRole))
+		cleanup, stop := context.WithTimeout(context.Background(), 15*time.Second)
+		defer stop()
+		if err := pgtest.CleanupRole(cleanup, admin, issuerRole, fmt.Sprintf("REVOKE %s FROM %s", issuerRole, login)); err != nil {
+			t.Errorf("drop role %s: %v", issuerRole, err)
+		}
 	})
-	if _, err := admin.ExecContext(ctx, fmt.Sprintf(
-		"GRANT INSERT ON public.compute_e1_final_authorizations TO %s", issuerRole)); err != nil {
-		t.Fatal(err)
-	}
-	// PG16 supports membership without SET ROLE. Effective inherited DML
-	// is still forbidden to the E1 runtime writer.
-	if _, err := admin.ExecContext(ctx, fmt.Sprintf(
-		"GRANT %s TO %s WITH INHERIT TRUE, SET FALSE", issuerRole, login)); err != nil {
+	if err := pgtest.ExecCatalog(ctx, admin,
+		fmt.Sprintf("GRANT INSERT ON public.compute_e1_final_authorizations TO %s", issuerRole),
+		// PG16 supports membership without SET ROLE. Effective inherited DML
+		// is still forbidden to the E1 runtime writer.
+		fmt.Sprintf("GRANT %s TO %s WITH INHERIT TRUE, SET FALSE", issuerRole, login),
+	); err != nil {
 		t.Fatal(err)
 	}
 	var inheritedInsert, maySetRole bool
@@ -261,11 +262,13 @@ func TestE1WriterRejectsDirectOrColumnIssuerReadGrants(t *testing.T) {
 			statement := fmt.Sprintf(
 				"GRANT %s ON public.compute_e1_final_authorizations TO %s",
 				tc.privilege, login)
-			if _, err := admin.ExecContext(ctx, statement); err != nil {
+			if err := pgtest.ExecCatalog(ctx, admin, statement); err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() {
-				if _, err := admin.ExecContext(context.Background(), fmt.Sprintf(
+				cleanup, stop := context.WithTimeout(context.Background(), 15*time.Second)
+				defer stop()
+				if err := pgtest.ExecCatalogCleanup(cleanup, admin, fmt.Sprintf(
 					"REVOKE %s ON public.compute_e1_final_authorizations FROM %s",
 					tc.privilege, login)); err != nil {
 					t.Errorf("restore issuer ACL: %v", err)
@@ -299,12 +302,14 @@ func TestE1WriterRejectsSessionReplicationRoleSetPrivilege(t *testing.T) {
 	// A credentialed direct SQL writer could subsequently set 'replica'
 	// and bypass ordinary FINAL INSERT triggers. The role must be rejected
 	// before accepting it for any E1 evidence-writing connection.
-	if _, err := admin.ExecContext(ctx, fmt.Sprintf(
+	if err := pgtest.ExecCatalog(ctx, admin, fmt.Sprintf(
 		"GRANT SET ON PARAMETER session_replication_role TO %s", login)); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if _, err := admin.ExecContext(context.Background(), fmt.Sprintf(
+		cleanup, stop := context.WithTimeout(context.Background(), 15*time.Second)
+		defer stop()
+		if err := pgtest.ExecCatalogCleanup(cleanup, admin, fmt.Sprintf(
 			"REVOKE SET ON PARAMETER session_replication_role FROM %s", login)); err != nil {
 			t.Errorf("restore E1 writer replication parameter privileges: %v", err)
 		}
@@ -332,12 +337,14 @@ func TestE1WriterRejectsSessionReplicationRoleAlterSystemPrivilege(t *testing.T)
 	if err := writer.QueryRowContext(ctx, "SELECT current_user").Scan(&login); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := admin.ExecContext(ctx, fmt.Sprintf(
+	if err := pgtest.ExecCatalog(ctx, admin, fmt.Sprintf(
 		"GRANT ALTER SYSTEM ON PARAMETER session_replication_role TO %s", login)); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if _, err := admin.ExecContext(context.Background(), fmt.Sprintf(
+		cleanup, stop := context.WithTimeout(context.Background(), 15*time.Second)
+		defer stop()
+		if err := pgtest.ExecCatalogCleanup(cleanup, admin, fmt.Sprintf(
 			"REVOKE ALTER SYSTEM ON PARAMETER session_replication_role FROM %s", login)); err != nil {
 			t.Errorf("restore E1 writer ALTER SYSTEM privilege: %v", err)
 		}

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/avaargsh/compute-control-panel/internal/pgtest"
 )
 
 // A migration checksum does not prove that a required trigger remained
@@ -81,12 +83,14 @@ func TestE1WriterRejectsReplicaSessionMode(t *testing.T) {
 	if err := writer.QueryRowContext(ctx, "SELECT current_user").Scan(&login); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := admin.ExecContext(ctx,
+	if err := pgtest.ExecCatalog(ctx, admin,
 		fmt.Sprintf("GRANT SET ON PARAMETER session_replication_role TO %s", login)); err != nil {
 		t.Fatalf("grant test-only parameter SET: %v", err)
 	}
 	t.Cleanup(func() {
-		if _, err := admin.ExecContext(context.Background(),
+		cleanup, stop := context.WithTimeout(context.Background(), 15*time.Second)
+		defer stop()
+		if err := pgtest.ExecCatalogCleanup(cleanup, admin,
 			fmt.Sprintf("REVOKE SET ON PARAMETER session_replication_role FROM %s", login)); err != nil {
 			t.Errorf("revoke test-only parameter SET: %v", err)
 		}
