@@ -20,7 +20,7 @@ func TestRestrictedDRAJournalSerializesConcurrentSourceRevocation(t *testing.T) 
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 
-	verifier, _, receipt := journalReceiptFixture(t)
+	verifier, receipt, asOf := liveJournalReceiptFixture(t)
 	candidate := releaseCandidateFixture()
 	seedTrustedDRAReceiptSource(t, admin, verifier, receipt, candidate)
 
@@ -55,7 +55,7 @@ func TestRestrictedDRAJournalSerializesConcurrentSourceRevocation(t *testing.T) 
 		err   error
 	}
 	done := make(chan outcome, 1)
-	asOf := time.Date(2026, 11, 10, 10, 1, 0, 0, time.UTC)
+
 	go func() {
 		added, err := journal.VerifyAndRecord(ctx, verifier, candidate, receipt, asOf)
 		done <- outcome{added: added, err: err}
