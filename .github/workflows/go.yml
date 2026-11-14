@@ -68,6 +68,7 @@ jobs:
           --set=ON_ERROR_STOP=1
           --command="CREATE ROLE ccp_provider_audit_owner NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
           --command="CREATE ROLE ccp_kueue_job_binding LOGIN PASSWORD 'kueue-binding-ci-only' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
+          --command="CREATE ROLE ccp_dra_receipt_ingest LOGIN PASSWORD 'dra-ingest-ci-only' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
       - name: Apply PostgreSQL migrations (checksummed runner, run twice for idempotency)
         env:
           DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable

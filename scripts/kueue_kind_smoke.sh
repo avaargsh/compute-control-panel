@@ -227,7 +227,8 @@ pg_boot_pid=""
   docker exec -e PGPASSWORD=compute-ci "$pg_name" \
     psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
     -c "CREATE ROLE ccp_provider_audit_owner NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS" \
-    -c "CREATE ROLE ccp_kueue_job_binding LOGIN PASSWORD 'kueue-binding-ci-only' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
+    -c "CREATE ROLE ccp_kueue_job_binding LOGIN PASSWORD 'kueue-binding-ci-only' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS" \
+    -c "CREATE ROLE ccp_dra_receipt_ingest LOGIN PASSWORD 'dra-ingest-ci-only' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
   DATABASE_URL="postgres://postgres:compute-ci@127.0.0.1:${pg_port}/postgres?sslmode=disable" \
     go run ./cmd/migrate
 } >"$dir/migrate.log" 2>&1 &

@@ -3,6 +3,7 @@ package provider
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestProjectAdmissionWithoutPlacementStaysNotReady(t *testing.T) {
@@ -71,5 +72,46 @@ func TestProjectAdmissionWithoutPlacementRejectsPlacementAndMissingPod(t *testin
 				t.Fatalf("failed projection still carried a readiness phase: %+v", got)
 			}
 		})
+	}
+}
+
+// The integration of Kueue admission without placement (#99) and release
+// correlation (#98) must not reinterpret admitted/reserved quota as a
+// previously placed, device-assigned Allocation. Even fabricated later Pod,
+// quota and Claim-clear observations do not upgrade this historical stage.
+func TestAdmittedUnplacedPodCannotBeSplicedIntoReleaseEvidence(t *testing.T) {
+	candidate := releaseCandidateFixture()
+	job := &candidate.PriorQueue.Job
+	job.KueueAdmitted = true
+	job.KueueAdmissionCondition.Status = "True"
+	job.KueuePodSetAssignmentsJSON = `[{"name":"main","resourceUsage":{"cpu":"2"}}]`
+	job.PodScheduled = false
+	job.PodNodeName = ""
+	candidate.PriorQueue.Stage = KueueAdmitted
+
+	projection, err := ProjectAdmissionWithoutPlacement(*job)
+	if err != nil {
+		t.Fatalf("expected real admission-without-placement state: %v", err)
+	}
+	if projection.Phase != "NOT_READY" || projection.Allocated ||
+		projection.Active || projection.Ready || projection.Costable || projection.Released {
+		t.Fatalf("unplaced admission incorrectly promoted: %+v", projection)
+	}
+
+	release, err := CorrelateReleaseEvidence(candidate)
+	if !errors.Is(err, ErrUncorrelatedReleaseEvidence) ||
+		release != (ReleaseEvidenceCorrelation{}) {
+		t.Fatalf("unplaced admission correlated to release: %+v err=%v", release, err)
+	}
+	authority, private := unprepareTestAuthority()
+	verifier, err := NewDRAUnprepareVerifier(authority, 10*time.Minute, 30*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signed := unprepareTestReceipt(private)
+	result, err := verifier.Correlate(candidate, signed, time.Date(2026, 11, 10, 10, 1, 0, 0, time.UTC))
+	if !errors.Is(err, ErrUncorrelatedDRAUnprepare) ||
+		result != (DRAUnprepareCorrelation{}) {
+		t.Fatalf("unplaced admission with signed claim event correlated: %+v err=%v", result, err)
 	}
 }
