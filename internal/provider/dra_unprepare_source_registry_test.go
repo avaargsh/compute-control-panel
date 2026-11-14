@@ -155,7 +155,7 @@ func TestRestrictedDRAJournalRequiresExactSourceScopeAndFreshness(t *testing.T) 
 	}
 	defer db.Close()
 	candidate := releaseCandidateFixture()
-	asOf := time.Date(2026, 11, 10, 10, 1, 0, 0, time.UTC)
+	asOf := time.Now().UTC()
 	for _, tc := range []struct {
 		name       string
 		tenant     string
