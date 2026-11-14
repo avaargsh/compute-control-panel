@@ -49,6 +49,7 @@ func TestDRAReceiptCanonicalIngestRoleHasExactNarrowGrants(t *testing.T) {
 	}
 	defer pool.Close()
 	verifier, _, receipt := journalReceiptFixture(t)
+	seedTrustedDRAReceiptSource(t, admin, verifier, receipt, releaseCandidateFixture())
 	first, err := journal.VerifyAndRecord(ctx, verifier, releaseCandidateFixture(), receipt,
 		time.Date(2026, 11, 10, 10, 1, 0, 0, time.UTC))
 	if err != nil || !first {
