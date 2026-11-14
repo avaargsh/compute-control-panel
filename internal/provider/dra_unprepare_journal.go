@@ -102,6 +102,11 @@ func (j *DRAUnprepareReceiptJournal) VerifyAndRecord(
 	if err != nil {
 		return false, err
 	}
+	if j.restricted {
+		if err := verifyRegisteredDRAUnprepareSource(ctx, session, verifier, correlated.Release, signed, asOf); err != nil {
+			return false, err
+		}
+	}
 	recordJSON, err := json.Marshal(draReceiptJournalRecord{
 		Release:       correlated.Release,
 		Event:         correlated.Event,
