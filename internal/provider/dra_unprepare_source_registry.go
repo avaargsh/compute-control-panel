@@ -18,6 +18,9 @@ var ErrDRAReceiptSourceUntrusted = errors.New("DRA receipt signer is not registe
 // restricted journal's EXACT write connection. A caller-supplied Ed25519
 // verifier cannot bootstrap its own trust; its public key and freshness
 // policy must be no weaker than the independent DBA registry record.
+// FOR UPDATE on the source key must be held until the journal INSERT commits,
+// serializing concurrent revocation FK KEY SHARE locks. This function must
+// ONLY be called within the restricted journal's write transaction.
 //
 // A registry row attests only to a provisioned public key and scope. A real
 // driver transport, actual RPC result, device removal and liability end still
@@ -43,6 +46,7 @@ func verifyRegisteredDRAUnprepareSource(
 		    SELECT 1 FROM public.dra_unprepare_source_revocations r
 		    WHERE r.cluster_id=k.cluster_id AND r.source_id=k.source_id AND r.key_id=k.key_id
 		  )
+		FOR UPDATE OF k
 	`, e.ClusterID, e.SourceID, e.KeyID, release.TenantID,
 		release.ProviderID, e.Driver, e.CompletedAt, asOf,
 	).Scan(&key, &maximumAgeSeconds, &futureSkewSeconds)
