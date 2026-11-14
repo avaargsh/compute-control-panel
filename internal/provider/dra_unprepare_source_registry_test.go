@@ -115,12 +115,12 @@ func TestRestrictedDRAJournalRequiresExactSourceScopeAndFreshness(t *testing.T) 
 	candidate := releaseCandidateFixture()
 	asOf := time.Date(2026, 11, 10, 10, 1, 0, 0, time.UTC)
 	for _, tc := range []struct {
-		name string
-		tenant string
-		provider string
-		validFrom time.Time
+		name       string
+		tenant     string
+		provider   string
+		validFrom  time.Time
 		validUntil time.Time
-		maxAge int
+		maxAge     int
 		futureSkew int
 	}{
 		{"cross tenant", "tenant-wrong", candidate.Delete.ProviderID, asOf.Add(-time.Hour), asOf.Add(time.Hour), 600, 30},
