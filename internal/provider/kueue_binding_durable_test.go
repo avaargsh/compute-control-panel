@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func TestDurableKueueBindingConstructionFailClosed(t *testing.T) {
@@ -221,6 +223,44 @@ func TestDurableKueueBindingCanonicalRoleAndShadow(t *testing.T) {
 	if postgresSQLState(err) != "42501" {
 		t.Fatalf("pin identity column was not denied: %s %v", postgresSQLState(err), err)
 	}
+}
+
+// Test retries only the transient PostgreSQL catalog tuple-update collision
+// seen when package-level race tests concurrently GRANT on shared ACL catalogs.
+func TestRetryKueueCatalogGrantOnlyForTupleUpdate(t *testing.T) {
+    conflict := &pgconn.PgError{Code: "XX000", Message: "tuple concurrently updated"}
+    unrelated := &pgconn.PgError{Code: "XX000", Message: "corrupted catalog"}
+    cases := []struct {
+        name string
+        failures []error
+        attempts int
+        wantErr error
+    }{
+        {"one transient conflict", []error{conflict, nil}, 2, nil},
+        {"two transient conflicts", []error{conflict, conflict, nil}, 3, nil},
+        {"different internal failure", []error{unrelated, nil}, 1, unrelated},
+        {"non-pg failure", []error{errors.New("denied"), nil}, 1, nil},
+    }
+    for _, tc := range cases {
+        t.Run(tc.name, func(t *testing.T) {
+            calls := 0
+            err := retryKueueCatalogGrant(context.Background(), func(context.Context) error {
+                result := tc.failures[calls]
+                calls++
+                return result
+            })
+            if calls != tc.attempts {
+                t.Fatalf("calls=%d want=%d", calls, tc.attempts)
+            }
+            if tc.name == "non-pg failure" {
+                if err == nil || err.Error() != "denied" {
+                    t.Fatalf("unrelated error lost: %v", err)
+                }
+            } else if !errors.Is(err, tc.wantErr) {
+                t.Fatalf("err=%v want=%v", err, tc.wantErr)
+            }
+        })
+    }
 }
 
 const kueueBindingTestPassword = "kueue-binding-test"
