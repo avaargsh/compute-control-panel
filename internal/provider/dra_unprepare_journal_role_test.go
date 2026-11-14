@@ -141,9 +141,9 @@ func TestDRAJournalSchemaRejectsInPlaceGuardBodyTamper(t *testing.T) {
 }
 
 // A DBA can drop or weaken one replay constraint without changing the
- // journal table name, immutable triggers, function source or role grants.
- // Restricted ingestion must refuse that drift before a signed receipt can
- // become a second claim-device assertion.
+// journal table name, immutable triggers, function source or role grants.
+// Restricted ingestion must refuse that drift before a signed receipt can
+// become a second claim-device assertion.
 func TestDRAJournalSchemaRejectsMissingReplayConstraints(t *testing.T) {
 	admin := openProviderPostgresDB(t)
 	if !postgresCurrentUserIsSuperuser(t, admin) {
