@@ -40,10 +40,10 @@ func NewDRAUnprepareReceiptJournal(db *sql.DB) (*DRAUnprepareReceiptJournal, err
 
 type draReceiptJournalRecord struct {
 	Release       ReleaseEvidenceCorrelation `json:"release"`
-	Event         DRAUnprepareEvent           `json:"event"`
-	PayloadSHA256 string                      `json:"payload_sha256"`
-	KeySHA256     string                      `json:"key_sha256"`
-	Signature     []byte                      `json:"signature"`
+	Event         DRAUnprepareEvent          `json:"event"`
+	PayloadSHA256 string                     `json:"payload_sha256"`
+	KeySHA256     string                     `json:"key_sha256"`
+	Signature     []byte                     `json:"signature"`
 }
 
 func draJournalDigest(domain string, payload []byte) string {
