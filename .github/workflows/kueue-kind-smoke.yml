@@ -27,6 +27,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # Use the audited Go binary; do not silently download another toolchain.
+  GOTOOLCHAIN: local
+
 jobs:
   disposable-kind:
     runs-on: ubuntu-24.04
@@ -35,8 +39,12 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6 immutable commit
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6 immutable commit
         with:
-          go-version: '1.27.3'
+          go-version: '1.27.4'
           cache: false
+      - name: Assert patched Go toolchain
+        run: |
+          test "$(go env GOVERSION)" = "go1.27.4"
+          go version
       - name: Install kind v0.30.0 (module-verified)
         run: |
           go install sigs.k8s.io/kind@v0.30.0
