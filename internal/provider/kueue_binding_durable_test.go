@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/avaargsh/compute-control-panel/internal/pgtest"
 )
 
 func TestDurableKueueBindingConstructionFailClosed(t *testing.T) {
@@ -94,7 +94,7 @@ func TestDurableKueueBindingRejectsOverPrivilegedRole(t *testing.T) {
 	broad := kueueTestIdent(t, "ccp_kbroad_")
 	createKueueBindingRole(t, admin, broad)
 	grantKueueBindingPrivileges(t, admin, broad)
-	if err := grantKueueBindingPrivilege(ctx, admin, "GRANT SELECT ON public.compute_providers TO "+broad); err != nil {
+	if err := pgtest.ExecCatalog(ctx, admin, "GRANT SELECT ON public.compute_providers TO "+broad); err != nil {
 		t.Fatal(err)
 	}
 	_, _, err = OpenDurablePostgresKueueJobBindingStore(ctx, kueueBindingDSN(t, broad, kueueBindingTestPassword, ""))
@@ -104,7 +104,7 @@ func TestDurableKueueBindingRejectsOverPrivilegedRole(t *testing.T) {
 
 	narrow := kueueTestIdent(t, "ccp_kmiss_")
 	createKueueBindingRole(t, admin, narrow)
-	if err := grantKueueBindingPrivilege(ctx, admin, "GRANT SELECT ON public.kueue_job_create_pins, public.kueue_job_delete_tombstones TO "+narrow); err != nil {
+	if err := pgtest.ExecCatalog(ctx, admin, "GRANT SELECT ON public.kueue_job_create_pins, public.kueue_job_delete_tombstones TO "+narrow); err != nil {
 		t.Fatal(err)
 	}
 	_, _, err = OpenDurablePostgresKueueJobBindingStore(ctx, kueueBindingDSN(t, narrow, kueueBindingTestPassword, ""))
@@ -120,7 +120,7 @@ func TestDurableKueueBindingCanonicalRoleAndShadow(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	if _, err := admin.ExecContext(ctx, "ALTER ROLE "+kueueBindingRoleName+" PASSWORD '"+kueueBindingTestPassword+"'"); err != nil {
+	if err := pgtest.ExecCatalog(ctx, admin, "ALTER ROLE "+kueueBindingRoleName+" PASSWORD '"+kueueBindingTestPassword+"'"); err != nil {
 		t.Fatalf("binding role %s is not provisioned: %v", kueueBindingRoleName, err)
 	}
 	dsn := kueueBindingDSN(t, kueueBindingRoleName, kueueBindingTestPassword, "")
@@ -225,83 +225,6 @@ func TestDurableKueueBindingCanonicalRoleAndShadow(t *testing.T) {
 	}
 }
 
-// Test retries only the transient PostgreSQL catalog tuple-update collision
-// seen when package-level race tests concurrently GRANT on shared ACL catalogs.
-func TestRetryKueueCatalogGrantOnlyForTupleUpdate(t *testing.T) {
-	conflict := &pgconn.PgError{Code: "XX000", Message: "tuple concurrently updated"}
-	unrelated := &pgconn.PgError{Code: "XX000", Message: "unexpected catalog corruption"}
-
-	calls := 0
-	err := retryKueueCatalogGrant(context.Background(), func(context.Context) error {
-		calls++
-		if calls < 3 {
-			return conflict
-		}
-		return nil
-	})
-	if err != nil || calls != 3 {
-		t.Fatalf("transient catalog grant did not recover: calls=%d err=%v", calls, err)
-	}
-
-	calls = 0
-	err = retryKueueCatalogGrant(context.Background(), func(context.Context) error {
-		calls++
-		return unrelated
-	})
-	if !errors.Is(err, unrelated) || calls != 1 {
-		t.Fatalf("unrelated SQLSTATE XX000 was retried or ignored: calls=%d err=%v", calls, err)
-	}
-
-	calls = 0
-	err = retryKueueCatalogGrant(context.Background(), func(context.Context) error {
-		calls++
-		return conflict
-	})
-	if !errors.Is(err, conflict) || calls != 5 {
-		t.Fatalf("persistent catalog failure did not fail closed: calls=%d err=%v", calls, err)
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	calls = 0
-	err = retryKueueCatalogGrant(ctx, func(context.Context) error {
-		calls++
-		return nil
-	})
-	if !errors.Is(err, context.Canceled) || calls != 0 {
-		t.Fatalf("cancelled grant executed: calls=%d err=%v", calls, err)
-	}
-}
-
-// retryKueueCatalogGrant is restricted to a disposable test-role grant.
-// Only the specific concurrent PostgreSQL catalog-tuple conflict is retried;
-// permission errors and unrelated internal errors must fail immediately.
-func retryKueueCatalogGrant(ctx context.Context, execute func(context.Context) error) error {
-	for attempt := 0; ; attempt++ {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		err := execute(ctx)
-		if err == nil || attempt >= 4 ||
-			postgresSQLState(err) != "XX000" ||
-			!strings.Contains(err.Error(), "tuple concurrently updated") {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(time.Duration(attempt+1) * 25 * time.Millisecond):
-		}
-	}
-}
-
-func grantKueueBindingPrivilege(ctx context.Context, admin *sql.DB, statement string) error {
-	return retryKueueCatalogGrant(ctx, func(ctx context.Context) error {
-		_, err := admin.ExecContext(ctx, statement)
-		return err
-	})
-}
-
 const kueueBindingTestPassword = "kueue-binding-test"
 
 func postgresCurrentUserIsSuperuser(t *testing.T, db *sql.DB) bool {
@@ -334,14 +257,13 @@ func createKueueBindingRole(t *testing.T, admin *sql.DB, role string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if _, err := admin.ExecContext(ctx, `CREATE ROLE `+role+` LOGIN PASSWORD '`+kueueBindingTestPassword+`' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`); err != nil {
+	if err := pgtest.ExecCatalog(ctx, admin, `CREATE ROLE `+role+` LOGIN PASSWORD '`+kueueBindingTestPassword+`' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		cleanup, stop := context.WithTimeout(context.Background(), 15*time.Second)
 		defer stop()
-		_, _ = admin.ExecContext(cleanup, "DROP OWNED BY "+role)
-		if _, err := admin.ExecContext(cleanup, "DROP ROLE "+role); err != nil {
+		if err := pgtest.CleanupRole(cleanup, admin, role); err != nil {
 			t.Errorf("drop role %s: %v", role, err)
 		}
 	})
@@ -351,18 +273,16 @@ func grantKueueBindingPrivileges(t *testing.T, admin *sql.DB, role string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	for _, statement := range []string{
-		"GRANT USAGE ON SCHEMA public TO " + role,
-		"GRANT SELECT, INSERT ON public.kueue_job_create_pins TO " + role,
-		"GRANT UPDATE (updated_at) ON public.kueue_job_create_pins TO " + role,
-		"GRANT SELECT, INSERT ON public.kueue_job_delete_tombstones TO " + role,
-		"GRANT UPDATE (acknowledged, updated_at) ON public.kueue_job_delete_tombstones TO " + role,
-		"GRANT EXECUTE ON FUNCTION public.kueue_job_create_pin_guard() TO " + role,
-		"GRANT EXECUTE ON FUNCTION public.kueue_job_delete_tombstone_guard() TO " + role,
-	} {
-		if err := grantKueueBindingPrivilege(ctx, admin, statement); err != nil {
-			t.Fatalf("%s: %v", statement, err)
-		}
+	if err := pgtest.ExecCatalog(ctx, admin,
+		"GRANT USAGE ON SCHEMA public TO "+role,
+		"GRANT SELECT, INSERT ON public.kueue_job_create_pins TO "+role,
+		"GRANT UPDATE (updated_at) ON public.kueue_job_create_pins TO "+role,
+		"GRANT SELECT, INSERT ON public.kueue_job_delete_tombstones TO "+role,
+		"GRANT UPDATE (acknowledged, updated_at) ON public.kueue_job_delete_tombstones TO "+role,
+		"GRANT EXECUTE ON FUNCTION public.kueue_job_create_pin_guard() TO "+role,
+		"GRANT EXECUTE ON FUNCTION public.kueue_job_delete_tombstone_guard() TO "+role,
+	); err != nil {
+		t.Fatal(err)
 	}
 }
 
