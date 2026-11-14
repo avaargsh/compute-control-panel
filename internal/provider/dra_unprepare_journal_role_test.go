@@ -106,7 +106,6 @@ func TestRestrictedDRAJournalRefusesBroadRoleAndRuntimePrivilegeDrift(t *testing
 	}
 }
 
-
 // Replacing only the guard's PL/pgSQL body preserves trigger OIDs,
 // tgtype/tgenabled, proconfig and SECURITY INVOKER. Catalog attestation must
 // reject a no-op body even before any attempted UPDATE/DELETE/TRUNCATE.
