@@ -1155,6 +1155,50 @@ kubectl -n "$ns" get job "$admission_job_name" -o json | jq '
     spec: .spec
   }' > "$dir/admission-successor-template.json"
 
+# Deliberately allow the SAME admitted Job's Pod to bind in the real
+# disposable scheduler, then re-read it from a fresh CLI process through its
+# independently persisted PostgreSQL CREATE pin. Pod binding does not attest
+# actual GPU/DRA device assignment. Restore the NoSchedule taint before the
+# original UID-fenced DELETE/successor test; NoSchedule does not evict the Pod.
+echo "admission: exercise real node binding, keep device proof unverified"
+for n in "${smoke_nodes[@]}"; do
+  kubectl taint node "$n" 'ccp-kueue-smoke/unplaceable=true:NoSchedule-' >/dev/null
+done
+admission_pod_placed() {
+  pods_json "$admission_job_uid" | jq -e --arg uid "$admission_pod_uid" '
+    [.items[] | select(.metadata.uid == $uid and
+      (.metadata.resourceVersion | type == "string" and length > 0) and
+      (.spec.nodeName | type == "string" and length > 0) and
+      any(.status.conditions[]?; .type == "PodScheduled" and .status == "True"))]
+    | length == 1' >/dev/null
+}
+wait_for 'same admitted Pod UID bound by disposable scheduler' admission_pod_placed
+admission_bound_node="$(pods_json "$admission_job_uid" | jq -er --arg uid "$admission_pod_uid" '
+  [.items[] | select(.metadata.uid == $uid and .spec.nodeName != "") | .spec.nodeName]
+  | if length == 1 then .[0] else empty end')"
+admission_placed_report() {
+  run_admission "$dir/admission-inspect-placed.json" admission inspect placed || return 1
+  jq -e --arg job "$admission_job_uid" --arg pod "$admission_pod_uid" \
+    --arg workload "$admission_workload_uid" --arg node "$admission_bound_node" --arg ns "$ns" '
+    .phase == "inspect-placed" and .projection == "NOT_READY" and .stage == "POD_PLACED" and
+    .result == "RESOURCE_PRESENT" and .quota_reserved == true and .admitted == true and
+    .cluster_queue == "ccp-smoke" and .workload_namespace == $ns and
+    .job_uid == $job and .pod_uid == $pod and .workload_uid == $workload and
+    (.job_resource_version | type == "string" and length > 0) and
+    (.pod_resource_version | type == "string" and length > 0) and
+    (.workload_resource_version | type == "string" and length > 0) and
+    .pod_scheduled == true and .node_bound == true and .node_name == $node and
+    .allocated == false and .active == false and .ready == false and
+    .costable == false and .released == false and .release_attested == false and
+    .absence_observed == false and .operation_id == "ccp-kind-admission-unplaced"
+  ' "$dir/admission-inspect-placed.json" >/dev/null
+}
+wait_for 'fresh process UID-pinned placed Pod stays NOT_READY' admission_placed_report
+echo "admission_placed_without_device_proof=$(jq -c '{projection,stage,job_uid,workload_uid,pod_uid,node_name,node_bound,allocated,ready,costable,released}' "$dir/admission-inspect-placed.json")"
+for n in "${smoke_nodes[@]}"; do
+  kubectl taint node "$n" ccp-kueue-smoke/unplaceable=true:NoSchedule >/dev/null
+done
+
 echo "admission: UID-fenced DELETE, then a fresh process Inspects absence"
 if ! run_admission "$dir/admission-delete.json" admission delete; then
   cat "$dir/admission-delete.json.err" >&2 || true
