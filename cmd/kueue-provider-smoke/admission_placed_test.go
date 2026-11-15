@@ -15,22 +15,22 @@ func placedObservationFixture() (provider.KueueCreatePin, provider.KueueJobColle
 	}
 	e := provider.KueueJobEvidence{
 		TenantID: req.TenantID, WorkloadID: req.WorkloadID, DesiredGeneration: req.DesiredGeneration,
-		Job: provider.KubernetesResourceRef{Namespace: smokeNamespace, Name: pin.Name, UID: pin.UID, ResourceVersion: "101"},
+		Job:         provider.KubernetesResourceRef{Namespace: smokeNamespace, Name: pin.Name, UID: pin.UID, ResourceVersion: "101"},
 		JobTenantID: req.TenantID, JobWorkloadID: req.WorkloadID, JobDesiredGeneration: req.DesiredGeneration,
-		KueueWorkload: provider.KubernetesResourceRef{Namespace: smokeNamespace, Name: "kueue-workload", UID: "kueue-uid-a", ResourceVersion: "102"},
-		KueueOwnerJobUID: pin.UID,
+		KueueWorkload:      provider.KubernetesResourceRef{Namespace: smokeNamespace, Name: "kueue-workload", UID: "kueue-uid-a", ResourceVersion: "102"},
+		KueueOwnerJobUID:   pin.UID,
 		KueueQuotaReserved: true, KueueAdmitted: true, KueueClusterQueue: "ccp-smoke",
-		KueueQuotaCondition: provider.KueueConditionEvidence{Status: "True"},
-		KueueAdmissionCondition: provider.KueueConditionEvidence{Status: "True"},
+		KueueQuotaCondition:        provider.KueueConditionEvidence{Status: "True"},
+		KueueAdmissionCondition:    provider.KueueConditionEvidence{Status: "True"},
 		KueuePodSetAssignmentsJSON: `[{"name":"main","resourceUsage":{"cpu":"100m"}}]`,
-		Pod: provider.KubernetesResourceRef{Namespace: smokeNamespace, Name: "pod-a", UID: "pod-uid-a", ResourceVersion: "103"},
-		PodOwnerJobUID: pin.UID, PodScheduled: true, PodNodeName: "ccp-kind-node",
+		Pod:                        provider.KubernetesResourceRef{Namespace: smokeNamespace, Name: "pod-a", UID: "pod-uid-a", ResourceVersion: "103"},
+		PodOwnerJobUID:             pin.UID, PodScheduled: true, PodNodeName: "ccp-kind-node",
 	}
 	return pin, provider.KueueJobCollection{
-		Stage: provider.KueuePodPlaced,
+		Stage:    provider.KueuePodPlaced,
 		Evidence: e,
 		Provenance: provider.KueueEvidenceProvenance{
-			Source: "kubernetes-https-readonly-unattested",
+			Source:         "kubernetes-https-readonly-unattested",
 			AdapterVersion: "test-only", ObservedAt: time.Now().UTC(),
 		},
 	}
@@ -60,17 +60,33 @@ func TestPinnedPlacedObservationStaysNotReady(t *testing.T) {
 
 func TestPinnedPlacedObservationFailsClosedOnIdentityOrReadDrift(t *testing.T) {
 	tests := []struct {
-		name string
+		name  string
 		alter func(*provider.KueueCreatePin, *provider.KueueJobCollection, *provider.KueueJobCollection)
 	}{
-		{"missing durable pin", func(pin *provider.KueueCreatePin, _, _ *provider.KueueJobCollection) { pin.UID = "" }},
-		{"untrusted operation pin", func(pin *provider.KueueCreatePin, _, _ *provider.KueueJobCollection) { pin.Request.OperationID = "other" }},
-		{"foreign pinned tenant", func(pin *provider.KueueCreatePin, _, _ *provider.KueueJobCollection) { pin.Request.TenantID = "tenant-b" }},
-		{"same name new Job UID", func(_ *provider.KueueCreatePin, _, second *provider.KueueJobCollection) { second.Evidence.Job.UID = "new-job-uid" }},
-		{"Pod UID replaced", func(_ *provider.KueueCreatePin, _, second *provider.KueueJobCollection) { second.Evidence.Pod.UID = "new-pod-uid" }},
-		{"Pod RV changed", func(_ *provider.KueueCreatePin, _, second *provider.KueueJobCollection) { second.Evidence.Pod.ResourceVersion = "104" }},
-		{"Kueue Workload RV changed", func(_ *provider.KueueCreatePin, _, second *provider.KueueJobCollection) { second.Evidence.KueueWorkload.ResourceVersion = "104" }},
-		{"Job RV changed", func(_ *provider.KueueCreatePin, _, second *provider.KueueJobCollection) { second.Evidence.Job.ResourceVersion = "105" }},
+		{"missing durable pin", func(pin *provider.KueueCreatePin, _, _ *provider.KueueJobCollection) {
+			pin.UID = ""
+		}},
+		{"untrusted operation pin", func(pin *provider.KueueCreatePin, _, _ *provider.KueueJobCollection) {
+			pin.Request.OperationID = "other"
+		}},
+		{"foreign pinned tenant", func(pin *provider.KueueCreatePin, _, _ *provider.KueueJobCollection) {
+			pin.Request.TenantID = "tenant-b"
+		}},
+		{"same name new Job UID", func(_ *provider.KueueCreatePin, _, second *provider.KueueJobCollection) {
+			second.Evidence.Job.UID = "new-job-uid"
+		}},
+		{"Pod UID replaced", func(_ *provider.KueueCreatePin, _, second *provider.KueueJobCollection) {
+			second.Evidence.Pod.UID = "new-pod-uid"
+		}},
+		{"Pod RV changed", func(_ *provider.KueueCreatePin, _, second *provider.KueueJobCollection) {
+			second.Evidence.Pod.ResourceVersion = "104"
+		}},
+		{"Kueue Workload RV changed", func(_ *provider.KueueCreatePin, _, second *provider.KueueJobCollection) {
+			second.Evidence.KueueWorkload.ResourceVersion = "104"
+		}},
+		{"Job RV changed", func(_ *provider.KueueCreatePin, _, second *provider.KueueJobCollection) {
+			second.Evidence.Job.ResourceVersion = "105"
+		}},
 		{"second read unbound", func(_ *provider.KueueCreatePin, _, second *provider.KueueJobCollection) {
 			second.Stage = provider.KueueAdmitted
 			second.Evidence.PodScheduled = false
