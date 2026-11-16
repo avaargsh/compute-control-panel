@@ -205,3 +205,61 @@ func TestDRAPoolInventoryResourceSliceDNSSubdomainName(t *testing.T) {
 		})
 	}
 }
+
+
+// A typed Kubernetes ResourceSliceList establishes the resource kind for its
+// items. The API may omit TypeMeta from individual objects; explicit
+// contradictory item TypeMeta or a wrong list TypeMeta must still fail closed.
+func TestDRAPoolInventoryTypedListOptionalItemTypeMeta(t *testing.T) {
+	tests := []struct {
+		name string
+		change func(map[string]any)
+		allow bool
+	}{
+		{name: "item omits both apiVersion and kind", allow: true, change: func(v map[string]any) {
+			item := draFirstSlice(v)
+			delete(item, "apiVersion")
+			delete(item, "kind")
+		}},
+		{name: "item omits kind only", allow: true, change: func(v map[string]any) {
+			delete(draFirstSlice(v), "kind")
+		}},
+		{name: "item omits apiVersion only", allow: true, change: func(v map[string]any) {
+			delete(draFirstSlice(v), "apiVersion")
+		}},
+		{name: "explicit wrong item kind rejected", change: func(v map[string]any) {
+			draFirstSlice(v)["kind"] = "ResourceClaim"
+		}},
+		{name: "explicit wrong item apiVersion rejected", change: func(v map[string]any) {
+			draFirstSlice(v)["apiVersion"] = "v1"
+		}},
+		{name: "wrong top-level list kind rejected", change: func(v map[string]any) {
+			v["kind"] = "ResourceClaimList"
+			delete(draFirstSlice(v), "kind")
+			delete(draFirstSlice(v), "apiVersion")
+		}},
+		{name: "wrong top-level list apiVersion rejected", change: func(v map[string]any) {
+			v["apiVersion"] = "v1"
+			delete(draFirstSlice(v), "kind")
+			delete(draFirstSlice(v), "apiVersion")
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := draSliceList(t, tc.change)
+			var list draResourceSliceList
+			if err := json.Unmarshal([]byte(raw), &list); err != nil {
+				t.Fatal(err)
+			}
+			pool, ref, generation, count, err := currentDRAPool(list, DRAPoolInventoryQuery{Pod: podDRAQuery()})
+			if tc.allow {
+				if err != nil || len(pool) != 1 || ref.UID != "slice-uid-a" ||
+					ref.Name != "gpu-slice-a" || generation != 4 || count != 1 {
+					t.Fatalf("valid typed ResourceSliceList rejected: ref=%+v generation=%d count=%d err=%v", ref, generation, count, err)
+				}
+			} else if err == nil || pool != nil || ref != (KubernetesResourceRef{}) {
+				t.Fatalf("accepted wrong explicit GVK or list header: ref=%+v err=%v", ref, err)
+			}
+		})
+	}
+}
