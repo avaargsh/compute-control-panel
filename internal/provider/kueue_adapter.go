@@ -62,7 +62,7 @@ type KueueJobAdapter struct {
 	queueName string
 	// workloadPriorityClass is optional. Empty keeps the queued Job unlabeled.
 	// Kueue copies kueue.x-k8s.io/priority-class onto the Workload it creates.
-	workloadPriorityClass string
+	workloadPriorityClass     string
 	resourceClaimTemplateName string
 }
 
