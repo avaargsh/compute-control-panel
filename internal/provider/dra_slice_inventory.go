@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"sort"
+	"strings"
 )
 
 // DRAPoolInventoryQuery comes from a separately authorized, UID-pinned
@@ -54,6 +55,21 @@ type draResourceSliceList struct {
 	Items []draResourceSlice `json:"items"`
 }
 
+// ResourceSlice names are Kubernetes DNS subdomains (up to 253 bytes), not
+// one 63-byte DNS label. The example driver publishes names containing its
+// dotted domain, such as node-gpu.example.com-suffix. Keep each label strict.
+func validResourceSliceName(name string) bool {
+	if len(name) == 0 || len(name) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(name, ".") {
+		if !validKubeName(label) {
+			return false
+		}
+	}
+	return true
+}
+
 // currentDRAPool rejects incomplete generations, duplicated inventory identities,
 // and unsupported placement modes. The highest generation (not the first matching
 // slice) is authoritative. No device quantity or GPU readiness is derived.
@@ -95,7 +111,7 @@ func currentDRAPool(
 		}
 		ref := refFromKube(item.Metadata)
 		if item.APIVersion != "resource.k8s.io/v1" || item.Kind != "ResourceSlice" ||
-			item.Metadata.Namespace != "" || !validKubeName(ref.Name) ||
+			item.Metadata.Namespace != "" || !validResourceSliceName(ref.Name) ||
 			!validDRAIdentity(ref.UID) || !validDRAIdentity(ref.ResourceVersion) ||
 			sliceNames[ref.Name] || sliceUIDs[ref.UID] ||
 			item.Spec.Pool.ResourceSliceCount <= 0 ||
