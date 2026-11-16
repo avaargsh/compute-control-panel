@@ -206,15 +206,14 @@ func TestDRAPoolInventoryResourceSliceDNSSubdomainName(t *testing.T) {
 	}
 }
 
-
 // A typed Kubernetes ResourceSliceList establishes the resource kind for its
 // items. The API may omit TypeMeta from individual objects; explicit
 // contradictory item TypeMeta or a wrong list TypeMeta must still fail closed.
 func TestDRAPoolInventoryTypedListOptionalItemTypeMeta(t *testing.T) {
 	tests := []struct {
-		name string
+		name   string
 		change func(map[string]any)
-		allow bool
+		allow  bool
 	}{
 		{name: "item omits both apiVersion and kind", allow: true, change: func(v map[string]any) {
 			item := draFirstSlice(v)
