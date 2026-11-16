@@ -154,6 +154,28 @@ done
 slice_uid="$(printf '%s\n' "$slice_json" | jq -r .metadata.uid)"
 echo "simulated_dra_resource_slice=$(printf '%s\n' "$slice_json" | jq -c '{uid:.metadata.uid,rv:.metadata.resourceVersion,driver:.spec.driver,pool:.spec.pool.name,node:.spec.nodeName,deviceNames:[.spec.devices[].name]}')"
 
+# Kueue v0.19 accepts DRA claims from ResourceClaimTemplates. Pre-created
+# ResourceClaims make the Workload inadmissible, even if the scheduler could
+# allocate such a Claim for a standalone Pod.
+if [[ "$mode" == setup-kueue ]]; then
+  kubectl apply --server-side -f - <<YAML
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  name: $claim
+  namespace: $ns
+spec:
+  spec:
+    devices:
+      requests:
+      - name: gpu
+        exactly:
+          deviceClassName: gpu.example.com
+          count: 1
+YAML
+  exit 0
+fi
+# Standalone mode retains the existing direct-Claim smoke for comparison.
 kubectl apply --server-side -f - <<YAML
 apiVersion: resource.k8s.io/v1
 kind: ResourceClaim
@@ -168,9 +190,6 @@ spec:
         deviceClassName: gpu.example.com
         count: 1
 YAML
-# The integrated lane lets the durable CCP Job adapter create the consumer.
-# No independent consumer Pod is created in this mode.
-if [[ "$mode" == setup-kueue ]]; then exit 0; fi
 kubectl apply --server-side -f - <<YAML
 apiVersion: v1
 kind: Pod
