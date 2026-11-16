@@ -1291,6 +1291,12 @@ if ! wait_for 'stable same-workload Job/Pod/Claim/ResourceSlice API evidence' si
       node:.spec.nodeName}' >&2 || true
   kubectl -n "$ns" get resourceclaim "$CCP_KUEUE_DRA_CLAIM" -o json |
     jq '{uid:.metadata.uid,rv:.metadata.resourceVersion,status:.status}' >&2 || true
+  kubectl get resourceslices -o json |
+    jq '[.items[] | select(.spec.driver == "gpu.example.com") |
+      {uid:.metadata.uid,rv:.metadata.resourceVersion,name:.metadata.name,
+       node:.spec.nodeName,nodeSelector:.spec.nodeSelector,
+       perDeviceNodeSelection:.spec.perDeviceNodeSelection,allNodes:.spec.allNodes,
+       pool:.spec.pool,devices:[.spec.devices[]?.name]}]' >&2 || true
   exit 1
 fi
 cat "$dir/m1-single-workload-dra.json"
