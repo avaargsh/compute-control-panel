@@ -111,7 +111,11 @@ func currentDRAPool(
 			continue
 		}
 		ref := refFromKube(item.Metadata)
-		if item.APIVersion != "resource.k8s.io/v1" || item.Kind != "ResourceSlice" {
+		// The typed ResourceSliceList returned by this fixed API endpoint
+		// determines each item's resource kind. Kubernetes list items may omit
+		// optional TypeMeta; explicit contradictory GVK remains invalid.
+		if (item.APIVersion != "" && item.APIVersion != "resource.k8s.io/v1") ||
+			(item.Kind != "" && item.Kind != "ResourceSlice") {
 			return reject("unexpected ResourceSlice item API version/kind")
 		}
 		if item.Metadata.Namespace != "" {
