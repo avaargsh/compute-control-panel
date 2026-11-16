@@ -63,7 +63,7 @@ type KueueJobAdapter struct {
 	// workloadPriorityClass is optional. Empty keeps the queued Job unlabeled.
 	// Kueue copies kueue.x-k8s.io/priority-class onto the Workload it creates.
 	workloadPriorityClass string
-	resourceClaimName     string
+	resourceClaimTemplateName string
 }
 
 // NewKueueJobAdapter binds CREATE and Inspect to one namespace and an HTTPS
@@ -169,14 +169,15 @@ func (a *KueueJobAdapter) UseQueuedWorkloadPriorityClass(name string) error {
 	return nil
 }
 
-// UseQueuedResourceClaim makes the queued Job consume one existing namespaced
-// Claim. It neither creates a Claim nor authorizes device readiness. Callers
-// must supply the same configuration after reopening a durable adapter.
-func (a *KueueJobAdapter) UseQueuedResourceClaim(name string) error {
+// UseQueuedResourceClaimTemplate binds the queued Job to a namespaced DRA
+// ResourceClaimTemplate. Kueue v0.19 does not admit workloads referencing a
+// pre-created ResourceClaim. The Pod controller generates a fresh per-Pod Claim;
+// its actual UID must be independently observed, never guessed from the template.
+func (a *KueueJobAdapter) UseQueuedResourceClaimTemplate(name string) error {
 	if a == nil || a.queueName == "" || !validKubeName(name) {
 		return ErrInvalidKueueObservation
 	}
-	a.resourceClaimName = name
+	a.resourceClaimTemplateName = name
 	return nil
 }
 
@@ -423,12 +424,12 @@ func (a *KueueJobAdapter) exactJobSpec(job kubeObject) bool {
 	}
 	container := job.Spec.Template.Spec.Containers[0]
 	claims := job.Spec.Template.Spec.ResourceClaims
-	if a.resourceClaimName == "" {
+	if a.resourceClaimTemplateName == "" {
 		if len(claims) != 0 || (container.Resources != nil && len(container.Resources.Claims) != 0) {
 			return false
 		}
 	} else if len(claims) != 1 || claims[0].Name != "gpu" ||
-		claims[0].ResourceClaimName != a.resourceClaimName || claims[0].ResourceClaimTemplateName != "" ||
+		claims[0].ResourceClaimTemplateName != a.resourceClaimTemplateName || claims[0].ResourceClaimName != "" ||
 		container.Resources == nil || len(container.Resources.Claims) != 1 || container.Resources.Claims[0].Name != "gpu" {
 		return false
 	}
@@ -546,8 +547,8 @@ func (a *KueueJobAdapter) jobBody(req Request, name string) ([]byte, error) {
 			Resources: &kueueBatchResources{Requests: map[string]string{"cpu": "100m", "memory": "32Mi"}},
 		}
 	}
-	if a.resourceClaimName != "" {
-		payload.Spec.Template.Spec.ResourceClaims = []kueueBatchPodClaim{{Name: "gpu", ResourceClaimName: a.resourceClaimName}}
+	if a.resourceClaimTemplateName != "" {
+		payload.Spec.Template.Spec.ResourceClaims = []kueueBatchPodClaim{{Name: "gpu", ResourceClaimTemplateName: a.resourceClaimTemplateName}}
 		payload.Spec.Template.Spec.Containers[0].Resources.Claims = []kueueBatchContainerClaim{{Name: "gpu"}}
 	}
 	body, err := json.Marshal(payload)
