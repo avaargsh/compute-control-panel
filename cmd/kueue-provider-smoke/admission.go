@@ -119,8 +119,8 @@ func openAdmissionAdapter(getenv func(string) string) (*provider.KueueJobAdapter
 	if err != nil {
 		return nil, err
 	}
-	if claim := getenv("CCP_KUEUE_DRA_CLAIM"); claim != "" {
-		if err := adapter.UseQueuedResourceClaim(claim); err != nil {
+	if claimTemplate := getenv("CCP_KUEUE_DRA_TEMPLATE"); claimTemplate != "" {
+		if err := adapter.UseQueuedResourceClaimTemplate(claimTemplate); err != nil {
 			return nil, err
 		}
 	}
