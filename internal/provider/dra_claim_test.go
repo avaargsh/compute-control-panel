@@ -180,6 +180,18 @@ func TestDRAClaimDetectsConcurrentReplacementAndResourceVersionDrift(t *testing.
 		{name: "new resourceVersion with same UID", second: func(v map[string]any) {
 			v["metadata"].(map[string]any)["resourceVersion"] = "151"
 		}},
+		{name: "same resourceVersion but reservation disappears", second: func(v map[string]any) {
+			v["status"].(map[string]any)["reservedFor"] = []any{}
+		}},
+		{name: "same resourceVersion but Pod identity changes", second: func(v map[string]any) {
+			v["status"].(map[string]any)["reservedFor"].([]any)[0].(map[string]any)["uid"] = "pod-successor-uid"
+		}},
+		{name: "same resourceVersion but allocated device changes", second: func(v map[string]any) {
+			draFirstDevice(v)["device"] = "device-successor"
+		}},
+		{name: "same resourceVersion but allocation disappears", second: func(v map[string]any) {
+			v["status"].(map[string]any)["allocation"] = nil
+		}},
 		{name: "claim removed after first GET", status: http.StatusNotFound},
 		{name: "permissions revoked after first GET", status: http.StatusForbidden},
 		{name: "missing UID on second GET", second: func(v map[string]any) {
