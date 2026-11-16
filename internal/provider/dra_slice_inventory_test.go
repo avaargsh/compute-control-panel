@@ -177,8 +177,7 @@ func TestDRAPoolInventoryResourceSliceDNSSubdomainName(t *testing.T) {
 		allow     bool
 	}{
 		{name: "dotted driver domain in generated Slice name", sliceName: "gpu.example.com-worker-1-rf2f7", allow: true},
-		{name: "valid Slice name longer than one DNS label", sliceName: "gpu.example.com-" +
-			"worker-node-with-an-unusually-long-but-otherwise-valid-pool-name-a", allow: true},
+		{name: "valid Slice name longer than one DNS label", sliceName: "resource-slice-name-with-nontrivial-component-1234567890.node-example.com", allow: true},
 		{name: "empty segment", sliceName: "gpu..example.com"},
 		{name: "leading dot", sliceName: ".gpu.example.com"},
 		{name: "uppercase", sliceName: "GPU.example.com"},
