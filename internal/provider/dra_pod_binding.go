@@ -9,10 +9,11 @@ import (
 // ExpectedJobUID and ExpectedNodeName must come from an independently
 // authorized Kubernetes/Kueue observation, never from a tenant request.
 type DRAPodClaimQuery struct {
-	Claim            DRAClaimQuery
-	ExpectedJobUID   string
-	ExpectedNodeName string
-	PodClaimAlias    string
+	Claim             DRAClaimQuery
+	ExpectedJobUID    string
+	ExpectedNodeName  string
+	PodClaimAlias     string
+	ClaimTemplateName string // non-empty only for a controller-generated per-Pod Claim
 }
 
 // DRAPodClaimObservation is a structural association of an actual Pod
@@ -30,7 +31,8 @@ func (q DRAPodClaimQuery) validate() error {
 	if q.Claim.validate() != nil ||
 		!validDRAIdentity(q.ExpectedJobUID) ||
 		!validDRAIdentity(q.ExpectedNodeName) ||
-		!validKubeName(q.PodClaimAlias) {
+		!validKubeName(q.PodClaimAlias) ||
+		(q.ClaimTemplateName != "" && !validKubeName(q.ClaimTemplateName)) {
 		return ErrInvalidDRAObservation
 	}
 	return nil
@@ -40,6 +42,12 @@ type draPodObject struct {
 	APIVersion string   `json:"apiVersion"`
 	Kind       string   `json:"kind"`
 	Metadata   kubeMeta `json:"metadata"`
+	Status     struct {
+		ResourceClaimStatuses []struct {
+			Name              string `json:"name"`
+			ResourceClaimName string `json:"resourceClaimName"`
+		} `json:"resourceClaimStatuses"`
+	} `json:"status"`
 	Spec       struct {
 		NodeName       string `json:"nodeName"`
 		ResourceClaims []struct {
@@ -73,9 +81,22 @@ func exactDRAPodConsumer(p draPodObject, q DRAPodClaimQuery) (string, bool) {
 		return "", false
 	}
 	claim := p.Spec.ResourceClaims[0]
-	if claim.Name != q.PodClaimAlias ||
-		claim.ResourceClaimName != q.Claim.ClaimName ||
-		claim.ResourceClaimTemplateName != "" {
+	if claim.Name != q.PodClaimAlias {
+		return "", false
+	}
+	if q.ClaimTemplateName == "" {
+		// Pre-created Claim readers remain available for standalone Pod tests.
+		// Kueue-managed DRA admission must use the template path below.
+		if claim.ResourceClaimName != q.Claim.ClaimName || claim.ResourceClaimTemplateName != "" {
+			return "", false
+		}
+	} else if claim.ResourceClaimName != "" ||
+		claim.ResourceClaimTemplateName != q.ClaimTemplateName ||
+		len(p.Status.ResourceClaimStatuses) != 1 ||
+		p.Status.ResourceClaimStatuses[0].Name != q.PodClaimAlias ||
+		p.Status.ResourceClaimStatuses[0].ResourceClaimName != q.Claim.ClaimName {
+		// A matching name discovered by LIST is insufficient; Kubernetes
+		// must bind its own generated Claim name in the exact Pod status.
 		return "", false
 	}
 	consumer := ""
