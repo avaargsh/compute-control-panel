@@ -1282,7 +1282,17 @@ CCP_KUEUE_DRA_DEVICE="$(jq -er '.status.allocation.devices.results[0].device' <<
 single_workload_dra_report() {
  run_admission "$dir/m1-single-workload-dra.json" admission inspect dra
 }
-wait_for 'stable same-workload Job/Pod/Claim/ResourceSlice API evidence' single_workload_dra_report
+if ! wait_for 'stable same-workload Job/Pod/Claim/ResourceSlice API evidence' single_workload_dra_report; then
+  echo "M1.2 DRA read-only admission inspection failed (last result):" >&2
+  cat "$dir/m1-single-workload-dra.json.err" >&2 || true
+  kubectl -n "$ns" get pod "$admission_pod_name" -o json |
+    jq '{uid:.metadata.uid,rv:.metadata.resourceVersion,
+      resourceClaims:.spec.resourceClaims,claimStatuses:.status.resourceClaimStatuses,
+      node:.spec.nodeName}' >&2 || true
+  kubectl -n "$ns" get resourceclaim "$CCP_KUEUE_DRA_CLAIM" -o json |
+    jq '{uid:.metadata.uid,rv:.metadata.resourceVersion,status:.status}' >&2 || true
+  exit 1
+fi
 cat "$dir/m1-single-workload-dra.json"
 for n in "${smoke_nodes[@]}"; do
   kubectl taint node "$n" ccp-kueue-smoke/unplaceable=true:NoSchedule >/dev/null
