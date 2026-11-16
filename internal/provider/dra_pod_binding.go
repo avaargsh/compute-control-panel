@@ -48,7 +48,7 @@ type draPodObject struct {
 			ResourceClaimName string `json:"resourceClaimName"`
 		} `json:"resourceClaimStatuses"`
 	} `json:"status"`
-	Spec       struct {
+	Spec struct {
 		NodeName       string `json:"nodeName"`
 		ResourceClaims []struct {
 			Name                      string `json:"name"`
