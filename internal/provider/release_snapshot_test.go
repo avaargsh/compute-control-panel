@@ -19,10 +19,17 @@ func TestReleaseKubernetesSnapshotRejectsCrossSourceDrift(t *testing.T) {
 		afterPod   string
 		afterClaim string
 		afterQueue string
+		// A required authority is unavailable from the very first sweep.
+		initialPodPresent      bool
+		initialClaimAllocated  bool
+		initialQuotaReserved   bool
 		mutate     func(*KueueQueueBindingEvidence, *DRAPodClaimObservation)
 		valid      bool
 	}{
 		{name: "two stable rounds of three structural source observations", valid: true},
+		{name: "G06 Pod UID still present while other sources appear clear", initialPodPresent: true},
+		{name: "G06 Kueue quota still reserved while other sources appear clear", initialQuotaReserved: true},
+		{name: "G06 ResourceClaim still allocated while other sources appear clear", initialClaimAllocated: true},
 		{name: "Pod returns between source rounds", afterPod: strings.Replace(absentPodList, "[]", "["+priorPodJSON+"]", 1)},
 		{name: "Pod list resourceVersion changes between rounds", afterPod: strings.Replace(absentPodList, "300", "301", 1)},
 		{name: "quota resumes between source rounds", afterQueue: strings.Replace(clearedClusterQueue, "\"reservingWorkloads\":0", "\"reservingWorkloads\":1", 1)},
@@ -56,6 +63,9 @@ func TestReleaseKubernetesSnapshotRejectsCrossSourceDrift(t *testing.T) {
 				case "/api/v1/namespaces/tenant-a/pods":
 					n := podReads.Add(1)
 					value := absentPodList
+					if tc.initialPodPresent {
+						value = strings.Replace(absentPodList, "[]", "["+priorPodJSON+"]", 1)
+					}
 					if n > 2 && tc.afterPod != "" {
 						value = tc.afterPod
 					}
@@ -67,6 +77,9 @@ func TestReleaseKubernetesSnapshotRejectsCrossSourceDrift(t *testing.T) {
 				case "/apis/kueue.x-k8s.io/v1beta1/clusterqueues/cq-a":
 					n := cqReads.Add(1)
 					value := clearedClusterQueue
+					if tc.initialQuotaReserved {
+						value = strings.Replace(clearedClusterQueue, "\"reservingWorkloads\":0", "\"reservingWorkloads\":1", 1)
+					}
 					if n > 2 && tc.afterQueue != "" {
 						value = tc.afterQueue
 					}
@@ -74,6 +87,9 @@ func TestReleaseKubernetesSnapshotRejectsCrossSourceDrift(t *testing.T) {
 				case "/apis/resource.k8s.io/v1/namespaces/tenant-a/resourceclaims/gpu-claim-a":
 					n := claimReads.Add(1)
 					value := claimCleared
+					if tc.initialClaimAllocated {
+						value = claimAllocated
+					}
 					if n > 2 && tc.afterClaim == "allocated" {
 						value = claimAllocated
 					}
