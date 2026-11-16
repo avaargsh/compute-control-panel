@@ -20,9 +20,9 @@ func TestReleaseKubernetesSnapshotRejectsCrossSourceDrift(t *testing.T) {
 		afterClaim string
 		afterQueue string
 		// A required authority is unavailable from the very first sweep.
-		initial    string
-		mutate     func(*KueueQueueBindingEvidence, *DRAPodClaimObservation)
-		valid      bool
+		initial string
+		mutate  func(*KueueQueueBindingEvidence, *DRAPodClaimObservation)
+		valid   bool
 	}{
 		{name: "two stable rounds of three structural source observations", valid: true},
 		{name: "G06 Pod UID still present while other sources appear clear", initial: "pod"},
