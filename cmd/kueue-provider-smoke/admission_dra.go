@@ -69,14 +69,20 @@ func admissionInspectDRA(getenv func(string) string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	inv, err := reader.ObserveDRAPoolInventory(ctx, provider.DRAPoolInventoryQuery{Pod: provider.DRAPodClaimQuery{
+	draQuery := provider.DRAPodClaimQuery{
 		Claim: provider.DRAClaimQuery{Namespace: pin.Namespace, ClaimName: getenv("CCP_KUEUE_DRA_CLAIM"), ExpectedClaimUID: getenv("CCP_KUEUE_DRA_CLAIM_UID"),
 			PodName: first.Evidence.Pod.Name, ExpectedPodUID: first.Evidence.Pod.UID, Request: "gpu", Driver: getenv("CCP_KUEUE_DRA_DRIVER"), Pool: getenv("CCP_KUEUE_DRA_POOL"), Device: getenv("CCP_KUEUE_DRA_DEVICE")},
 		ExpectedJobUID: pin.UID, ExpectedNodeName: first.Evidence.PodNodeName, PodClaimAlias: "gpu",
 		ClaimTemplateName: getenv("CCP_KUEUE_DRA_TEMPLATE"),
-	}})
+	}
+	inv, err := reader.ObserveDRAPoolInventory(ctx, provider.DRAPoolInventoryQuery{Pod: draQuery})
 	if err != nil {
-		return fmt.Errorf("same-workload DRA observation: %w", err)
+		// Disposable smoke diagnostics only: separate the exact Claim,
+		// Pod->Claim and ResourceSlice inventory stages. All probes retain
+		// the same authenticated read-only Kubernetes reader and UID pins.
+		_, claimErr := reader.ObserveDRAClaim(ctx, draQuery.Claim)
+		_, podErr := reader.ObserveDRAPodClaim(ctx, draQuery)
+		return fmt.Errorf("same-workload DRA observation: %w (claim=%v, pod=%v)", err, claimErr, podErr)
 	}
 	second, err := adapter.CollectCreate(ctx, pin.Request)
 	if err != nil {
