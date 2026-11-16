@@ -176,3 +176,99 @@ func TestDRAClaimRequiresLivePodClaimAndContainerConsumer(t *testing.T) {
 		})
 	}
 }
+
+
+// Kubernetes creates the Claim named in Pod.status.resourceClaimStatuses from
+// the Job's ResourceClaimTemplate. A pre-created Claim has no such authoritative
+// binding and Kueue v0.19 refuses its admission into a managed Workload.
+func TestDRAClaimTemplateRequiresGeneratedPodClaimStatus(t *testing.T) {
+	tests := []struct {
+		name string
+		change func(map[string]any)
+		query func(*DRAPodClaimQuery)
+		allow bool
+	}{
+		{name: "exact template and generated Claim status", allow: true},
+		{name: "missing generated status", change: func(v map[string]any) {
+			delete(v, "status")
+		}},
+		{name: "status names another Claim", change: func(v map[string]any) {
+			v["status"].(map[string]any)["resourceClaimStatuses"].([]any)[0].(map[string]any)["resourceClaimName"] = "claim-from-other-pod"
+		}},
+		{name: "status uses wrong Pod alias", change: func(v map[string]any) {
+			v["status"].(map[string]any)["resourceClaimStatuses"].([]any)[0].(map[string]any)["name"] = "other"
+		}},
+		{name: "second generated status is ambiguous", change: func(v map[string]any) {
+			statuses := v["status"].(map[string]any)["resourceClaimStatuses"].([]any)
+			v["status"].(map[string]any)["resourceClaimStatuses"] = append(statuses, map[string]any{"name": "gpu2", "resourceClaimName": "foreign"})
+		}},
+		{name: "template name differs", change: func(v map[string]any) {
+			podDRASpec(v)["resourceClaims"].([]any)[0].(map[string]any)["resourceClaimTemplateName"] = "other-template"
+		}},
+		{name: "pre-created direct Claim mixed with template", change: func(v map[string]any) {
+			podDRASpec(v)["resourceClaims"].([]any)[0].(map[string]any)["resourceClaimName"] = "gpu-claim-a"
+		}},
+		{name: "query has no authenticated template name", query: func(q *DRAPodClaimQuery) {
+			q.ClaimTemplateName = "../forbidden"
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			body := modifiedPodDRAFixture(t, func(v map[string]any) {
+				claim := podDRASpec(v)["resourceClaims"].([]any)[0].(map[string]any)
+				delete(claim, "resourceClaimName")
+				claim["resourceClaimTemplateName"] = "gpu-template"
+				v["status"] = map[string]any{"resourceClaimStatuses": []any{
+					map[string]any{"name": "gpu", "resourceClaimName": "gpu-claim-a"},
+				}}
+				if tc.change != nil {
+					tc.change(v)
+				}
+			})
+			var podReads, claimReads atomic.Int32
+			ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					t.Errorf("unexpected Kubernetes mutation: %s", r.Method)
+					http.Error(w, "forbidden", http.StatusMethodNotAllowed)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/api/v1/namespaces/tenant-a/pods/gpu-pod-a":
+					podReads.Add(1)
+					_, _ = fmt.Fprint(w, body)
+				case "/apis/resource.k8s.io/v1/namespaces/tenant-a/resourceclaims/gpu-claim-a":
+					claimReads.Add(1)
+					_, _ = fmt.Fprint(w, draClaimFixture)
+				default:
+					t.Errorf("unexpected read %s", r.URL.Path)
+					http.NotFound(w, r)
+				}
+			}))
+			defer ts.Close()
+			client := ts.Client()
+			client.Timeout = 3 * time.Second
+			reader, err := NewKubernetesObservationReader(ts.URL, client)
+			if err != nil {
+				t.Fatal(err)
+			}
+			query := podDRAQuery()
+			query.ClaimTemplateName = "gpu-template"
+			if tc.query != nil {
+				tc.query(&query)
+			}
+			got, err := reader.ObserveDRAPodClaim(context.Background(), query)
+			if tc.allow {
+				if err != nil || got.Pod.UID != "pod-uid-a" || got.Claim.Claim.UID != "claim-uid-a" ||
+					podReads.Load() != 2 || claimReads.Load() != 2 {
+					t.Fatalf("generated Claim binding not established: %+v err=%v reads=%d/%d", got, err, podReads.Load(), claimReads.Load())
+				}
+			} else if err == nil || got != (DRAPodClaimObservation{}) {
+				t.Fatalf("unproven generated Claim accepted: %+v err=%v", got, err)
+			}
+			if !tc.allow && claimReads.Load() != 0 {
+				t.Fatalf("untrusted template/status reached Claim reader: %d", claimReads.Load())
+			}
+		})
+	}
+}
