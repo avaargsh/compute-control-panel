@@ -111,13 +111,24 @@ func currentDRAPool(
 			continue
 		}
 		ref := refFromKube(item.Metadata)
-		if item.APIVersion != "resource.k8s.io/v1" || item.Kind != "ResourceSlice" ||
-			item.Metadata.Namespace != "" || !validResourceSliceName(ref.Name) ||
-			!validDRAIdentity(ref.UID) || !validDRAIdentity(ref.ResourceVersion) ||
-			sliceNames[ref.Name] || sliceUIDs[ref.UID] ||
-			item.Spec.Pool.ResourceSliceCount <= 0 ||
+		if item.APIVersion != "resource.k8s.io/v1" || item.Kind != "ResourceSlice" {
+			return reject("unexpected ResourceSlice item API version/kind")
+		}
+		if item.Metadata.Namespace != "" {
+			return reject("unexpected namespace on cluster-scoped ResourceSlice")
+		}
+		if !validResourceSliceName(ref.Name) {
+			return reject("invalid ResourceSlice DNS subdomain name")
+		}
+		if !validDRAIdentity(ref.UID) || !validDRAIdentity(ref.ResourceVersion) {
+			return reject("invalid ResourceSlice UID or resourceVersion")
+		}
+		if sliceNames[ref.Name] || sliceUIDs[ref.UID] {
+			return reject("duplicate ResourceSlice name or UID")
+		}
+		if item.Spec.Pool.ResourceSliceCount <= 0 ||
 			(expectedCount >= 0 && expectedCount != item.Spec.Pool.ResourceSliceCount) {
-			return reject("slice identity or pool count mismatch")
+			return reject("ResourceSlice count mismatch")
 		}
 		expectedCount = item.Spec.Pool.ResourceSliceCount
 		sliceNames[ref.Name] = true
