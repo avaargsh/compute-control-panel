@@ -33,6 +33,74 @@ Authority: [GPU consolidation](../migration/GPU-COMPUTE-PLATFORM-CONSOLIDATION.m
 6. For G08 compute cost per successful busy GPU hour and report queue wait, allocated-to-busy ratio, preemption waste and p95 reclaim latency. Compare only matching GPU, region and workload input.
 7. Record exact commands, expected vs actual observations, exit codes and cleanup results. Mark every unexecuted case UNKNOWN, never PASS.
 
+## Executed scope and next executable slice
+
+The merged [#108](https://github.com/avaargsh/compute-control-panel/pull/108) at
+`745848e6` adds a **disposable-kind, UID-pinned Pod placement** observation.
+Its exact feature-head `2965129` passed [Go/race/PG](https://github.com/avaargsh/compute-control-panel/actions/runs/43721009082)
+and [real-controller kind smoke](https://github.com/avaargsh/compute-control-panel/actions/runs/43721009084).
+The smoke uses a real Kubernetes scheduler and Kueue controller, but no authenticated
+device driver or physical GPU allocation: `POD_PLACED` is still `NOT_READY`.
+This is a **partial G01 observation**, not a G01–G08 PASS or a release certificate.
+
+Next implementation should target **G06 three-way release** with a disposable,
+pinned DRA-capable cluster and an authenticated source adapter. This is the
+smallest missing proof that closes the dangerous distinction between
+"Job no longer visible" and "GPU cost liability can safely end":
+
+1. Persist the target Provider Job/Pod and ResourceClaim **UIDs**, tenant,
+   Allocation generation, Provider operation/fence and claim-owner binding before DELETE.
+2. Collect three independent, timestamped authorities: exact Provider/Pod
+   UID absence, exact Kueue Workload reservation release, and exact ResourceClaim
+   device deallocation. Include source identity, resourceVersion and adapter version.
+3. Inject missing or stale evidence **one authority at a time**. Every gap,
+   conflicting UID, changed generation, unreachable source or unconfirmed
+   deallocation must leave `RELEASED=false` and cost finality blocked.
+4. Recreate a same-name Job/Claim with a new UID. Verify old-UID cleanup
+   cannot delete, adopt, or mistake the successor for the old target.
+5. Restart the observer/controller between DELETE and Inspect; replay the
+   same events and verify monotonic fencing with no duplicate finality.
+6. Attach an exact-head run manifest and raw read-only API/Provider traces.
+   A simulated DRA driver may prove **API claim-state correctness only**;
+   physical GPU/device release remains UNKNOWN without hardware-driver evidence.
+
+When G06 is not executable because the driver or authenticated source does not
+exist, record `UNKNOWN`, do not change the scope to a fake-green test.
+
+### Release evidence manifest extension
+
+The following statuses are deliberately nullable: `null` means missing or
+unverified, **never** success. The three sources must refer to the same
+tenant, Allocation generation and original target UIDs.
+
+```yaml
+release_proof:
+  provider_target:
+    uid: null
+    exact_uid_absent: null
+    observed_at: null
+    source_identity: null
+  kueue:
+    workload_uid: null
+    reservation_released: null
+    resource_version: null
+    observed_at: null
+    source_identity: null
+  device:
+    resourceclaim_uid: null
+    device_deallocated: null
+    resource_version: null
+    observed_at: null
+    source_identity: null
+  successor_uid_if_any: null
+  allocation_released: false
+  liability_closeout_authorized: false
+```
+
+Do not promote the final two fields on the basis of one or two of the
+three authorities. Financial posting and provider-liability closeout are
+additional policy/authorization decisions under #8, #32 and #39.
+
 ## Evidence manifest required per case
 
 ```yaml
