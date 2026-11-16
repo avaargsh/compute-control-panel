@@ -165,3 +165,45 @@ func TestDRAPoolInventoryRequiresCompleteCurrentGeneration(t *testing.T) {
 		})
 	}
 }
+
+
+// Kubernetes ResourceSlice metadata.name is a DNS subdomain, not a single
+// DNS label. The official DRA example driver publishes names containing the
+// dotted driver domain; rejecting such slices loses valid inventory proof.
+func TestDRAPoolInventoryResourceSliceDNSSubdomainName(t *testing.T) {
+	cases := []struct {
+		name      string
+		sliceName string
+		allow     bool
+	}{
+		{name: "dotted driver domain in generated Slice name", sliceName: "gpu.example.com-worker-1-rf2f7", allow: true},
+		{name: "valid Slice name longer than one DNS label", sliceName: "gpu.example.com-" +
+			"worker-node-with-an-unusually-long-but-otherwise-valid-pool-name-a", allow: true},
+		{name: "empty segment", sliceName: "gpu..example.com"},
+		{name: "leading dot", sliceName: ".gpu.example.com"},
+		{name: "uppercase", sliceName: "GPU.example.com"},
+		{name: "path separator", sliceName: "gpu.example.com/other"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := draSliceList(t, func(v map[string]any) {
+				draFirstSlice(v)["metadata"].(map[string]any)["name"] = tc.sliceName
+			})
+			var list draResourceSliceList
+			if err := json.Unmarshal([]byte(raw), &list); err != nil {
+				t.Fatal(err)
+			}
+			slices, ref, generation, count, err := currentDRAPool(
+				list, DRAPoolInventoryQuery{Pod: podDRAQuery()},
+			)
+			if tc.allow {
+				if err != nil || len(slices) != 1 || ref.Name != tc.sliceName ||
+					ref.UID != "slice-uid-a" || generation != 4 || count != 1 {
+					t.Fatalf("valid Slice DNS subdomain rejected: ref=%+v err=%v", ref, err)
+				}
+			} else if err == nil || len(slices) != 0 || ref != (KubernetesResourceRef{}) {
+				t.Fatalf("malformed Slice name accepted: ref=%+v err=%v", ref, err)
+			}
+		})
+	}
+}
