@@ -118,6 +118,8 @@ func TestReleaseEvidenceCorrelationRejectsCrossAllocationSplicing(t *testing.T) 
 		{name: "Provider absence belongs to different generation", mutate: func(e *ReleaseEvidenceCandidate) { e.ProviderAbsence.DesiredGeneration = 3 }},
 		{name: "Provider absence wrong UID", mutate: func(e *ReleaseEvidenceCandidate) { e.ProviderAbsence.TargetResourceUID = "other-job-uid" }},
 		{name: "Provider absent but resource UID also present", mutate: func(e *ReleaseEvidenceCandidate) { e.ProviderAbsence.ResourceUID = "still-live-uid" }},
+		{name: "Provider absence resourceVersion contains NUL", mutate: func(e *ReleaseEvidenceCandidate) { e.ProviderAbsence.ResourceVersion = "rv\x00injected" }},
+		{name: "Provider absence resourceVersion has surrounding whitespace", mutate: func(e *ReleaseEvidenceCandidate) { e.ProviderAbsence.ResourceVersion = " rv " }},
 		{name: "Provider observation lacks timestamp", mutate: func(e *ReleaseEvidenceCandidate) { e.ProviderAbsence.ObservedAt = time.Time{} }},
 		{name: "Provider observation has unresolved reason", mutate: func(e *ReleaseEvidenceCandidate) { e.ProviderAbsence.ReasonCode = "UNKNOWN" }},
 		{name: "Kueue prior from different tenant", mutate: func(e *ReleaseEvidenceCandidate) { e.PriorQueue.Job.TenantID = "tenant-b" }},

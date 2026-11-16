@@ -3,8 +3,10 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"sort"
+	"strings"
 )
 
 // DRAPoolInventoryQuery comes from a separately authorized, UID-pinned
@@ -54,19 +56,34 @@ type draResourceSliceList struct {
 	Items []draResourceSlice `json:"items"`
 }
 
+// ResourceSlice names are Kubernetes DNS subdomains (up to 253 bytes), not
+// one 63-byte DNS label. The example driver publishes names containing its
+// dotted domain, such as node-gpu.example.com-suffix. Keep each label strict.
+func validResourceSliceName(name string) bool {
+	if len(name) == 0 || len(name) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(name, ".") {
+		if !validKubeName(label) {
+			return false
+		}
+	}
+	return true
+}
+
 // currentDRAPool rejects incomplete generations, duplicated inventory identities,
 // and unsupported placement modes. The highest generation (not the first matching
 // slice) is authoritative. No device quantity or GPU readiness is derived.
 func currentDRAPool(
 	list draResourceSliceList, query DRAPoolInventoryQuery,
 ) ([]draResourceSlice, KubernetesResourceRef, int64, int, error) {
-	reject := func() ([]draResourceSlice, KubernetesResourceRef, int64, int, error) {
-		return nil, KubernetesResourceRef{}, 0, 0, ErrInvalidDRAObservation
+	reject := func(reason string) ([]draResourceSlice, KubernetesResourceRef, int64, int, error) {
+		return nil, KubernetesResourceRef{}, 0, 0, fmt.Errorf("%w: ResourceSlice pool %s", ErrInvalidDRAObservation, reason)
 	}
 	if list.APIVersion != "resource.k8s.io/v1" || list.Kind != "ResourceSliceList" ||
 		list.Metadata.ResourceVersion == "" || list.Metadata.Continue != "" ||
 		len(list.Items) == 0 {
-		return reject()
+		return reject("invalid list header or pagination")
 	}
 	driver := query.Pod.Claim.Driver
 	poolName := query.Pod.Claim.Pool
@@ -79,7 +96,7 @@ func currentDRAPool(
 		}
 	}
 	if newest < 0 {
-		return reject()
+		return reject("driver/pool not found")
 	}
 	var pool []draResourceSlice
 	expectedCount := -1
@@ -94,20 +111,35 @@ func currentDRAPool(
 			continue
 		}
 		ref := refFromKube(item.Metadata)
-		if item.APIVersion != "resource.k8s.io/v1" || item.Kind != "ResourceSlice" ||
-			item.Metadata.Namespace != "" || !validKubeName(ref.Name) ||
-			!validDRAIdentity(ref.UID) || !validDRAIdentity(ref.ResourceVersion) ||
-			sliceNames[ref.Name] || sliceUIDs[ref.UID] ||
-			item.Spec.Pool.ResourceSliceCount <= 0 ||
+		// The typed ResourceSliceList returned by this fixed API endpoint
+		// determines each item's resource kind. Kubernetes list items may omit
+		// optional TypeMeta; explicit contradictory GVK remains invalid.
+		if (item.APIVersion != "" && item.APIVersion != "resource.k8s.io/v1") ||
+			(item.Kind != "" && item.Kind != "ResourceSlice") {
+			return reject("unexpected ResourceSlice item API version/kind")
+		}
+		if item.Metadata.Namespace != "" {
+			return reject("unexpected namespace on cluster-scoped ResourceSlice")
+		}
+		if !validResourceSliceName(ref.Name) {
+			return reject("invalid ResourceSlice DNS subdomain name")
+		}
+		if !validDRAIdentity(ref.UID) || !validDRAIdentity(ref.ResourceVersion) {
+			return reject("invalid ResourceSlice UID or resourceVersion")
+		}
+		if sliceNames[ref.Name] || sliceUIDs[ref.UID] {
+			return reject("duplicate ResourceSlice name or UID")
+		}
+		if item.Spec.Pool.ResourceSliceCount <= 0 ||
 			(expectedCount >= 0 && expectedCount != item.Spec.Pool.ResourceSliceCount) {
-			return reject()
+			return reject("ResourceSlice count mismatch")
 		}
 		expectedCount = item.Spec.Pool.ResourceSliceCount
 		sliceNames[ref.Name] = true
 		sliceUIDs[ref.UID] = true
 		for _, device := range item.Spec.Devices {
 			if !validKubeName(device.Name) || deviceNames[device.Name] {
-				return reject()
+				return reject("duplicate or invalid device name")
 			}
 			deviceNames[device.Name] = true
 			if device.Name != deviceName {
@@ -119,7 +151,7 @@ func currentDRAPool(
 			if item.Spec.NodeName != query.Pod.ExpectedNodeName ||
 				item.Spec.AllNodes || item.Spec.PerDeviceNodeSelection ||
 				len(item.Spec.NodeSelector) != 0 {
-				return reject()
+				return reject("device node topology unsupported or mismatched")
 			}
 			selected = ref
 			found++
@@ -127,7 +159,7 @@ func currentDRAPool(
 		pool = append(pool, item)
 	}
 	if found != 1 || expectedCount != len(pool) {
-		return reject()
+		return reject("allocated device absent/ambiguous or pool generation incomplete")
 	}
 	sort.Slice(pool, func(i, j int) bool { return pool[i].Metadata.Name < pool[j].Metadata.Name })
 	return pool, selected, newest, expectedCount, nil
@@ -150,25 +182,31 @@ func (r *KubernetesObservationReader) ObserveDRAPoolInventory(
 	}
 	podClaim, err := r.ObserveDRAPodClaim(ctx, query.Pod)
 	if err != nil {
-		return reject()
+		return DRAPoolInventoryObservation{}, fmt.Errorf("%w: initial Pod/Claim association: %v", ErrInvalidDRAObservation, err)
 	}
 	var first, second draResourceSliceList
 	const endpoint = "/apis/resource.k8s.io/v1/resourceslices"
-	if r.read(ctx, endpoint, &first) != nil {
-		return reject()
+	if err := r.read(ctx, endpoint, &first); err != nil {
+		return DRAPoolInventoryObservation{}, fmt.Errorf("%w: first ResourceSlice list read: %v", ErrInvalidDRAObservation, err)
 	}
 	current, slice, generation, count, err := currentDRAPool(first, query)
-	if err != nil || r.read(ctx, endpoint, &second) != nil {
-		return reject()
+	if err != nil {
+		return DRAPoolInventoryObservation{}, fmt.Errorf("%w: first pool: %v", ErrInvalidDRAObservation, err)
+	}
+	if err := r.read(ctx, endpoint, &second); err != nil {
+		return DRAPoolInventoryObservation{}, fmt.Errorf("%w: second ResourceSlice list read: %v", ErrInvalidDRAObservation, err)
 	}
 	again, secondSlice, secondGeneration, secondCount, err := currentDRAPool(second, query)
-	if err != nil || slice != secondSlice || generation != secondGeneration ||
+	if err != nil {
+		return DRAPoolInventoryObservation{}, fmt.Errorf("%w: second pool: %v", ErrInvalidDRAObservation, err)
+	}
+	if slice != secondSlice || generation != secondGeneration ||
 		count != secondCount || !reflect.DeepEqual(current, again) {
-		return reject()
+		return DRAPoolInventoryObservation{}, fmt.Errorf("%w: ResourceSlice list changed between reads", ErrInvalidDRAObservation)
 	}
 	finalPodClaim, err := r.ObserveDRAPodClaim(ctx, query.Pod)
 	if err != nil || finalPodClaim != podClaim {
-		return reject()
+		return DRAPoolInventoryObservation{}, fmt.Errorf("%w: Pod/Claim changed after inventory read: %v", ErrInvalidDRAObservation, err)
 	}
 	return DRAPoolInventoryObservation{
 		PodClaim:               podClaim,

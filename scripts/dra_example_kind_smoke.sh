@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Independent DRA simulated-device smoke inside the existing disposable kind.
+# DRA simulated-device setup or standalone smoke in the disposable kind.
 # Proves real Kubernetes DRA API allocation + kubelet example-driver injection.
 # Does NOT prove physical GPU, Kueue quota for THIS Pod, or CCP RELEASED.
 set -Eeuo pipefail
@@ -10,7 +10,10 @@ set -Eeuo pipefail
 }
 for tool in kubectl jq; do command -v "$tool" >/dev/null || exit 2; done
 
+mode="${1:-standalone}"
+[[ "$mode" == standalone || "$mode" == setup-kueue ]] || { echo "unknown DRA smoke mode" >&2; exit 2; }
 ns="ccp-dra-smoke"
+[[ "$mode" != setup-kueue ]] || ns="ccp-kueue-smoke"
 claim="ccp-example-gpu"
 pod="ccp-dra-consumer"
 # v0.2.0 resolved by real kind/Kubelet imageID at PR head 67ee16dc.
@@ -26,7 +29,7 @@ failure() {
   return "$rc"
 }
 trap failure ERR
-kubectl create namespace "$ns"
+if [[ "$mode" == standalone ]]; then kubectl create namespace "$ns"; else kubectl get namespace "$ns" >/dev/null; fi
 
 # Official Kubernetes DRA tutorial example-driver v0.2.0, scoped to kind only.
 # Names/permissions follow the upstream tutorial; it simulates, not drives, GPUs.
@@ -151,6 +154,28 @@ done
 slice_uid="$(printf '%s\n' "$slice_json" | jq -r .metadata.uid)"
 echo "simulated_dra_resource_slice=$(printf '%s\n' "$slice_json" | jq -c '{uid:.metadata.uid,rv:.metadata.resourceVersion,driver:.spec.driver,pool:.spec.pool.name,node:.spec.nodeName,deviceNames:[.spec.devices[].name]}')"
 
+# Kueue v0.19 accepts DRA claims from ResourceClaimTemplates. Pre-created
+# ResourceClaims make the Workload inadmissible, even if the scheduler could
+# allocate such a Claim for a standalone Pod.
+if [[ "$mode" == setup-kueue ]]; then
+  kubectl apply --server-side -f - <<YAML
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  name: $claim
+  namespace: $ns
+spec:
+  spec:
+    devices:
+      requests:
+      - name: gpu
+        exactly:
+          deviceClassName: gpu.example.com
+          count: 1
+YAML
+  exit 0
+fi
+# Standalone mode retains the existing direct-Claim smoke for comparison.
 kubectl apply --server-side -f - <<YAML
 apiVersion: resource.k8s.io/v1
 kind: ResourceClaim
@@ -164,7 +189,8 @@ spec:
       exactly:
         deviceClassName: gpu.example.com
         count: 1
----
+YAML
+kubectl apply --server-side -f - <<YAML
 apiVersion: v1
 kind: Pod
 metadata:

@@ -62,7 +62,8 @@ type KueueJobAdapter struct {
 	queueName string
 	// workloadPriorityClass is optional. Empty keeps the queued Job unlabeled.
 	// Kueue copies kueue.x-k8s.io/priority-class onto the Workload it creates.
-	workloadPriorityClass string
+	workloadPriorityClass     string
+	resourceClaimTemplateName string
 }
 
 // NewKueueJobAdapter binds CREATE and Inspect to one namespace and an HTTPS
@@ -165,6 +166,18 @@ func (a *KueueJobAdapter) UseQueuedWorkloadPriorityClass(name string) error {
 		return ErrInvalidKueueObservation
 	}
 	a.workloadPriorityClass = name
+	return nil
+}
+
+// UseQueuedResourceClaimTemplate binds the queued Job to a namespaced DRA
+// ResourceClaimTemplate. Kueue v0.19 does not admit workloads referencing a
+// pre-created ResourceClaim. The Pod controller generates a fresh per-Pod Claim;
+// its actual UID must be independently observed, never guessed from the template.
+func (a *KueueJobAdapter) UseQueuedResourceClaimTemplate(name string) error {
+	if a == nil || a.queueName == "" || !validKubeName(name) {
+		return ErrInvalidKueueObservation
+	}
+	a.resourceClaimTemplateName = name
 	return nil
 }
 
@@ -386,11 +399,13 @@ func exactSuspendedJobSpec(job kubeObject) bool {
 		job.Spec.Completions == nil || *job.Spec.Completions != 1 ||
 		job.Metadata.Labels["kueue.x-k8s.io/queue-name"] != "" ||
 		job.Spec.Template.Spec.RestartPolicy != "Never" ||
-		len(job.Spec.Template.Spec.Containers) != 1 {
+		len(job.Spec.Template.Spec.Containers) != 1 ||
+		len(job.Spec.Template.Spec.ResourceClaims) != 0 {
 		return false
 	}
 	container := job.Spec.Template.Spec.Containers[0]
-	return container.Name == "ccp-suspended" && container.Image == kueueSuspendedJobImage
+	return container.Name == "ccp-suspended" && container.Image == kueueSuspendedJobImage &&
+		(container.Resources == nil || len(container.Resources.Claims) == 0)
 }
 
 // exactJobSpec preserves the immutable submitted shape while allowing the
@@ -408,6 +423,16 @@ func (a *KueueJobAdapter) exactJobSpec(job kubeObject) bool {
 		return false
 	}
 	container := job.Spec.Template.Spec.Containers[0]
+	claims := job.Spec.Template.Spec.ResourceClaims
+	if a.resourceClaimTemplateName == "" {
+		if len(claims) != 0 || (container.Resources != nil && len(container.Resources.Claims) != 0) {
+			return false
+		}
+	} else if len(claims) != 1 || claims[0].Name != "gpu" ||
+		claims[0].ResourceClaimTemplateName != a.resourceClaimTemplateName || claims[0].ResourceClaimName != "" ||
+		container.Resources == nil || len(container.Resources.Claims) != 1 || container.Resources.Claims[0].Name != "gpu" {
+		return false
+	}
 	return container.Name == "ccp-queued" && container.Image == kueueSuspendedJobImage &&
 		len(container.Command) == 0 && len(container.Args) == 0 &&
 		container.Resources != nil && len(container.Resources.Requests) == 2 &&
@@ -458,9 +483,20 @@ type kueueBatchPodTemplate struct {
 	Spec kueueBatchPodSpec `json:"spec"`
 }
 
+type kueueBatchPodClaim struct {
+	Name                      string `json:"name"`
+	ResourceClaimName         string `json:"resourceClaimName,omitempty"`
+	ResourceClaimTemplateName string `json:"resourceClaimTemplateName,omitempty"`
+}
+
+type kueueBatchContainerClaim struct {
+	Name string `json:"name"`
+}
+
 type kueueBatchPodSpec struct {
-	RestartPolicy string                `json:"restartPolicy"`
-	Containers    []kueueBatchContainer `json:"containers"`
+	ResourceClaims []kueueBatchPodClaim  `json:"resourceClaims,omitempty"`
+	RestartPolicy  string                `json:"restartPolicy"`
+	Containers     []kueueBatchContainer `json:"containers"`
 }
 
 type kueueBatchContainer struct {
@@ -472,8 +508,9 @@ type kueueBatchContainer struct {
 }
 
 type kueueBatchResources struct {
-	Requests map[string]string `json:"requests,omitempty"`
-	Limits   map[string]string `json:"limits,omitempty"`
+	Claims   []kueueBatchContainerClaim `json:"claims,omitempty"`
+	Requests map[string]string          `json:"requests,omitempty"`
+	Limits   map[string]string          `json:"limits,omitempty"`
 }
 
 func (a *KueueJobAdapter) jobBody(req Request, name string) ([]byte, error) {
@@ -509,6 +546,10 @@ func (a *KueueJobAdapter) jobBody(req Request, name string) ([]byte, error) {
 			Name: "ccp-queued", Image: kueueSuspendedJobImage,
 			Resources: &kueueBatchResources{Requests: map[string]string{"cpu": "100m", "memory": "32Mi"}},
 		}
+	}
+	if a.resourceClaimTemplateName != "" {
+		payload.Spec.Template.Spec.ResourceClaims = []kueueBatchPodClaim{{Name: "gpu", ResourceClaimTemplateName: a.resourceClaimTemplateName}}
+		payload.Spec.Template.Spec.Containers[0].Resources.Claims = []kueueBatchContainerClaim{{Name: "gpu"}}
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

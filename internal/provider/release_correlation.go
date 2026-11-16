@@ -76,6 +76,7 @@ func validReleaseDeletePair(c, d operation.Operation, obs operation.Observation)
 		obs.ErrorCode == "" && obs.ReasonCode == "" &&
 		obs.ResourceVersion != "" &&
 		obs.ResourceVersion == strings.TrimSpace(obs.ResourceVersion) &&
+		!strings.ContainsRune(obs.ResourceVersion, 0) &&
 		!obs.ObservedAt.IsZero()
 }
 

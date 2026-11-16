@@ -53,7 +53,7 @@ func parseAdmissionArgs(args []string) (phase, subject string, err error) {
 			return phase, "", nil
 		}
 	case "inspect":
-		if len(rest) == 1 && (rest[0] == "create" || rest[0] == "delete" || rest[0] == "placed") {
+		if len(rest) == 1 && (rest[0] == "create" || rest[0] == "delete" || rest[0] == "placed" || rest[0] == "dra") {
 			return phase, rest[0], nil
 		}
 	}
@@ -115,7 +115,16 @@ func openQueuedBindingAdapter(getenv func(string) string, localQueue string) (*p
 }
 
 func openAdmissionAdapter(getenv func(string) string) (*provider.KueueJobAdapter, error) {
-	return openQueuedBindingAdapter(getenv, admissionLocalQueue)
+	adapter, err := openQueuedBindingAdapter(getenv, admissionLocalQueue)
+	if err != nil {
+		return nil, err
+	}
+	if claimTemplate := getenv("CCP_KUEUE_DRA_TEMPLATE"); claimTemplate != "" {
+		if err := adapter.UseQueuedResourceClaimTemplate(claimTemplate); err != nil {
+			return nil, err
+		}
+	}
+	return adapter, nil
 }
 
 func openAdmissionPinStore(getenv func(string) string) (*sql.DB, *provider.PostgresKueueJobBindingStore, error) {
@@ -249,6 +258,9 @@ func admissionDelete(getenv func(string) string, out io.Writer) error {
 }
 
 func admissionInspect(getenv func(string) string, out io.Writer, subject string) error {
+	if subject == "dra" {
+		return admissionInspectDRA(getenv, out)
+	}
 	db, store, err := openAdmissionPinStore(getenv)
 	if err != nil {
 		return err
