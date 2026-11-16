@@ -73,6 +73,7 @@ func admissionInspectDRA(getenv func(string) string, out io.Writer) error {
 		Claim: provider.DRAClaimQuery{Namespace: pin.Namespace, ClaimName: getenv("CCP_KUEUE_DRA_CLAIM"), ExpectedClaimUID: getenv("CCP_KUEUE_DRA_CLAIM_UID"),
 			PodName: first.Evidence.Pod.Name, ExpectedPodUID: first.Evidence.Pod.UID, Request: "gpu", Driver: getenv("CCP_KUEUE_DRA_DRIVER"), Pool: getenv("CCP_KUEUE_DRA_POOL"), Device: getenv("CCP_KUEUE_DRA_DEVICE")},
 		ExpectedJobUID: pin.UID, ExpectedNodeName: first.Evidence.PodNodeName, PodClaimAlias: "gpu",
+		ClaimTemplateName: getenv("CCP_KUEUE_DRA_TEMPLATE"),
 	}})
 	if err != nil {
 		return fmt.Errorf("same-workload DRA observation: %w", err)
