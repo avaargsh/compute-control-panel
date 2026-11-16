@@ -177,16 +177,15 @@ func TestDRAClaimRequiresLivePodClaimAndContainerConsumer(t *testing.T) {
 	}
 }
 
-
 // Kubernetes creates the Claim named in Pod.status.resourceClaimStatuses from
 // the Job's ResourceClaimTemplate. A pre-created Claim has no such authoritative
 // binding and Kueue v0.19 refuses its admission into a managed Workload.
 func TestDRAClaimTemplateRequiresGeneratedPodClaimStatus(t *testing.T) {
 	tests := []struct {
-		name string
+		name   string
 		change func(map[string]any)
-		query func(*DRAPodClaimQuery)
-		allow bool
+		query  func(*DRAPodClaimQuery)
+		allow  bool
 	}{
 		{name: "exact template and generated Claim status", allow: true},
 		{name: "missing generated status", change: func(v map[string]any) {
