@@ -166,7 +166,6 @@ func TestDRAPoolInventoryRequiresCompleteCurrentGeneration(t *testing.T) {
 	}
 }
 
-
 // Kubernetes ResourceSlice metadata.name is a DNS subdomain, not a single
 // DNS label. The official DRA example driver publishes names containing the
 // dotted driver domain; rejecting such slices loses valid inventory proof.
