@@ -53,7 +53,7 @@ func parseAdmissionArgs(args []string) (phase, subject string, err error) {
 			return phase, "", nil
 		}
 	case "inspect":
-		if len(rest) == 1 && (rest[0] == "create" || rest[0] == "delete") {
+		if len(rest) == 1 && (rest[0] == "create" || rest[0] == "delete" || rest[0] == "placed") {
 			return phase, rest[0], nil
 		}
 	}
@@ -265,6 +265,8 @@ func admissionInspect(getenv func(string) string, out io.Writer, subject string)
 		return err
 	}
 	switch subject {
+	case "placed":
+		return admissionInspectPlaced(ctx, adapter, pin, out)
 	case "delete":
 		remove := admissionDeleteRequest(smokeNamespace+"/"+pin.Name, pin.UID)
 		var obs operation.Observation
