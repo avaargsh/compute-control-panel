@@ -143,8 +143,10 @@ func (r *KubernetesObservationReader) ObserveDRAClaim(
 
 	// A single GET can race with Claim deallocation or same-name recreation.
 	// Re-read the same identity after checking its reservation/device tuple.
-	// Compare resourceVersion as an opaque string: it is only meaningful for
-	// this exact Claim, and is not an ordering or GPU preparation guarantee.
+	// Compare resourceVersion as an opaque string, then revalidate the
+	// exact reservation and device tuple. A contradictory second response
+	// cannot inherit the first GET's allocation merely by repeating its RV.
+	// Neither check proves driver preparation or physical GPU ownership.
 	var current draClaimV1
 	if err := r.read(ctx, path, &current); err != nil {
 		return DRAClaimObservation{}, fmt.Errorf("%w: final Claim read: %v", ErrInvalidDRAObservation, err)
@@ -153,7 +155,12 @@ func (r *KubernetesObservationReader) ObserveDRAClaim(
 		current.Metadata.Namespace != claim.Metadata.Namespace ||
 		current.Metadata.Name != claim.Metadata.Name ||
 		current.Metadata.UID != claim.Metadata.UID ||
-		current.Metadata.ResourceVersion != claim.Metadata.ResourceVersion {
+		current.Metadata.ResourceVersion != claim.Metadata.ResourceVersion ||
+		len(current.Status.ReservedFor) != 1 ||
+		current.Status.ReservedFor[0] != owner ||
+		current.Status.Allocation == nil ||
+		len(current.Status.Allocation.Devices.Results) != 1 ||
+		current.Status.Allocation.Devices.Results[0] != device {
 		return DRAClaimObservation{}, ErrInvalidDRAObservation
 	}
 	return DRAClaimObservation{
