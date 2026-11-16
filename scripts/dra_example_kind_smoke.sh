@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Independent DRA simulated-device smoke inside the existing disposable kind.
+# DRA simulated-device setup or standalone smoke in the disposable kind.
 # Proves real Kubernetes DRA API allocation + kubelet example-driver injection.
 # Does NOT prove physical GPU, Kueue quota for THIS Pod, or CCP RELEASED.
 set -Eeuo pipefail
@@ -10,7 +10,10 @@ set -Eeuo pipefail
 }
 for tool in kubectl jq; do command -v "$tool" >/dev/null || exit 2; done
 
+mode="${1:-standalone}"
+[[ "$mode" == standalone || "$mode" == setup-kueue ]] || { echo "unknown DRA smoke mode" >&2; exit 2; }
 ns="ccp-dra-smoke"
+[[ "$mode" != setup-kueue ]] || ns="ccp-kueue-smoke"
 claim="ccp-example-gpu"
 pod="ccp-dra-consumer"
 # v0.2.0 resolved by real kind/Kubelet imageID at PR head 67ee16dc.
@@ -26,7 +29,7 @@ failure() {
   return "$rc"
 }
 trap failure ERR
-kubectl create namespace "$ns"
+if [[ "$mode" == standalone ]]; then kubectl create namespace "$ns"; else kubectl get namespace "$ns" >/dev/null; fi
 
 # Official Kubernetes DRA tutorial example-driver v0.2.0, scoped to kind only.
 # Names/permissions follow the upstream tutorial; it simulates, not drives, GPUs.
@@ -164,7 +167,11 @@ spec:
       exactly:
         deviceClassName: gpu.example.com
         count: 1
----
+YAML
+# The integrated lane lets the durable CCP Job adapter create the consumer.
+# No independent consumer Pod is created in this mode.
+if [[ "$mode" == setup-kueue ]]; then exit 0; fi
+kubectl apply --server-side -f - <<YAML
 apiVersion: v1
 kind: Pod
 metadata:

@@ -28,7 +28,7 @@ cleanup() {
     kubectl --request-timeout=10s -n kueue-system logs deploy/kueue-controller-manager --tail=80 || true
   fi
   if [[ "$status" -ne 0 ]]; then
-    for f in "$dir"/durable-*.json "$dir"/durable-*.err "$dir"/journal-*.json "$dir"/journal-*.err "$dir"/admission-*.json "$dir"/admission-*.err "$dir"/preempt-*.json "$dir"/preempt-*.err "$dir"/pg-boot.log "$dir"/migrate.log; do
+    for f in "$dir"/durable-*.json "$dir"/durable-*.err "$dir"/journal-*.json "$dir"/journal-*.err "$dir"/admission-*.json "$dir"/admission-*.err "$dir"/m1-*.json "$dir"/m1-*.err "$dir"/preempt-*.json "$dir"/preempt-*.err "$dir"/pg-boot.log "$dir"/migrate.log; do
       [[ -f "$f" ]] || continue
       echo "----- $(basename "$f") -----" >&2
       tail -n 40 "$f" >&2 || true
@@ -1057,6 +1057,47 @@ echo "journal_delete_uid=$journal_uid journal_successor_uid=$journal_successor_u
 # keeps its Pod unscheduled after Kueue reserves quota. CCP records that as
 # NOT_READY. The UID-fenced DELETE then Inspects absence and leaves a
 # same-name successor in place. This is not Allocation RELEASED.
+# Reuse the existing simulated driver, but create no standalone DRA Pod.
+bash scripts/dra_example_kind_smoke.sh setup-kueue
+export CCP_KUEUE_DRA_CLAIM="ccp-example-gpu"
+export CCP_KUEUE_DRA_CLAIM_UID
+CCP_KUEUE_DRA_CLAIM_UID="$(kubectl -n "$ns" get resourceclaim "$CCP_KUEUE_DRA_CLAIM" -o jsonpath='{.metadata.uid}')"
+[[ -n "$CCP_KUEUE_DRA_CLAIM_UID" ]] || exit 1
+# Only read permissions are added for the existing disposable observer client.
+kubectl apply -f - <<YAML
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: ccp-dra-observer, namespace: $ns}
+rules:
+- apiGroups: ['']
+  resources: [pods]
+  verbs: [get]
+- apiGroups: [resource.k8s.io]
+  resources: [resourceclaims]
+  verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: ccp-dra-observer, namespace: $ns}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: ccp-dra-observer}
+subjects:
+- {kind: ServiceAccount, name: ccp-kueue-lifecycle, namespace: $ns}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: ccp-dra-inventory-observer}
+rules:
+- apiGroups: [resource.k8s.io]
+  resources: [resourceslices]
+  verbs: [list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: ccp-dra-inventory-observer}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: ccp-dra-inventory-observer}
+subjects:
+- {kind: ServiceAccount, name: ccp-kueue-lifecycle, namespace: $ns}
+YAML
 binding_role_dsn="postgres://ccp_kueue_job_binding:kueue-binding-ci-only@127.0.0.1:${pg_port}/postgres?sslmode=disable"
 run_admission() {
   local outfile="$1"
@@ -1195,6 +1236,22 @@ admission_placed_report() {
 }
 wait_for 'fresh process UID-pinned placed Pod stays NOT_READY' admission_placed_report
 echo "admission_placed_without_device_proof=$(jq -c '{projection,stage,job_uid,workload_uid,pod_uid,node_name,node_bound,allocated,ready,costable,released}' "$dir/admission-inspect-placed.json")"
+# Observe the SAME durably pinned Job-owned Pod and Claim before teardown.
+# Kueue CPU/memory quota and DRA allocation are independent API conditions.
+admission_pod_name="$(pods_json "$admission_job_uid" | jq -er --arg uid "$admission_pod_uid" '[.items[] | select(.metadata.uid == $uid) | .metadata.name] | if length == 1 then .[0] else empty end')"
+kubectl -n "$ns" wait --for=condition=Ready "pod/$admission_pod_name" --timeout=240s
+claim_allocation="$(kubectl -n "$ns" get resourceclaim "$CCP_KUEUE_DRA_CLAIM" -o json)"
+printf '%s\n' "$claim_allocation" | jq -e --arg uid "$CCP_KUEUE_DRA_CLAIM_UID" '
+ .metadata.uid == $uid and (.status.allocation.devices.results | length == 1)' >/dev/null
+export CCP_KUEUE_DRA_DRIVER CCP_KUEUE_DRA_POOL CCP_KUEUE_DRA_DEVICE
+CCP_KUEUE_DRA_DRIVER="$(jq -er '.status.allocation.devices.results[0].driver' <<< "$claim_allocation")"
+CCP_KUEUE_DRA_POOL="$(jq -er '.status.allocation.devices.results[0].pool' <<< "$claim_allocation")"
+CCP_KUEUE_DRA_DEVICE="$(jq -er '.status.allocation.devices.results[0].device' <<< "$claim_allocation")"
+single_workload_dra_report() {
+ run_admission "$dir/m1-single-workload-dra.json" admission inspect dra
+}
+wait_for 'stable same-workload Job/Pod/Claim/ResourceSlice API evidence' single_workload_dra_report
+cat "$dir/m1-single-workload-dra.json"
 for n in "${smoke_nodes[@]}"; do
   kubectl taint node "$n" ccp-kueue-smoke/unplaceable=true:NoSchedule >/dev/null
 done
@@ -1264,10 +1321,6 @@ export CCP_RELIST_API_HOST="$api_host"
 export CCP_RELIST_API_PORT="$api_port"
 bash scripts/kueue_relist_kind_smoke.sh
 echo "PASS: disposable CPU-only Kueue quota-denial/QuotaReserved/Admitted, exact Workload/Pod/Job UID+RV and node binding, teardown observation, Postgres pin/tombstone SIGKILL recovery, real kind + Postgres ComputeOperation UNKNOWN -> fenced Inspect-first CREATE SUCCEEDED and DELETE TARGET_ABSENT after process SIGKILL, and admitted-but-unplaced queued Job projected NOT_READY through the ccp_kueue_job_binding login. TARGET_ABSENT is not Allocation RELEASED, Kueue quota release, or device release. This is NOT GPU/DRA device release, a production quota-release attestation, Provider retirement, Allocation RELEASED or cost finality."
-# Independent official DRA example-driver lane. This creates a simulated GPU
-# ResourceSlice/Claim/Pod *separate* from the queued CCP Job to keep authority
-# and attribution claims explicit; never promote Allocation READY/RELEASED.
-bash scripts/dra_example_kind_smoke.sh
 # Kueue withinClusterQueue preemption. Separate file; reuses run_admission.
 . scripts/kueue_preemption_kind_smoke.sh
 
