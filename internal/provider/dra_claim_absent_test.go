@@ -22,12 +22,12 @@ const unrelatedClaimItem = "{\"metadata\":{\"namespace\":\"tenant-a\",\"name\":\
 func TestDRAClaimUIDAbsentRequiresStableCompleteNamespaceList(t *testing.T) {
 	withItems := func(items string) string { return strings.Replace(absentClaimList, "[]", "["+items+"]", 1) }
 	tests := []struct {
-		name     string
-		first    string
-		second   string
-		status   int
-		mutate   func(*DRAClaimObservation)
-		valid    bool
+		name   string
+		first  string
+		second string
+		status int
+		mutate func(*DRAClaimObservation)
+		valid  bool
 	}{
 		{name: "old Claim absent from two complete snapshots", valid: true},
 		{name: "unrelated Claim allowed in complete snapshot", first: withItems(unrelatedClaimItem), second: withItems(unrelatedClaimItem), valid: true},
@@ -45,7 +45,7 @@ func TestDRAClaimUIDAbsentRequiresStableCompleteNamespaceList(t *testing.T) {
 		{name: "nil items not a complete LIST", first: strings.Replace(absentClaimList, "\"items\":[]", "\"items\":null", 1)},
 		{name: "malformed item", first: withItems("{\"metadata\":{\"namespace\":\"tenant-a\",\"name\":\"other-claim\",\"uid\":\"other-uid\"}}")},
 		{name: "foreign namespace in namespace LIST", first: withItems(strings.Replace(unrelatedClaimItem, "tenant-a", "tenant-b", 1))},
-		{name: "duplicate identity", first: withItems(unrelatedClaimItem+","+unrelatedClaimItem)},
+		{name: "duplicate identity", first: withItems(unrelatedClaimItem + "," + unrelatedClaimItem)},
 		{name: "HTTP forbidden", status: http.StatusForbidden},
 		{name: "HTTP 404 is not a complete list", status: http.StatusNotFound},
 		{name: "malformed prior UID", mutate: func(p *DRAClaimObservation) { p.Claim.UID = "" }},
