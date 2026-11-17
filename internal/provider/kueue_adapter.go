@@ -746,9 +746,10 @@ func (a *KueueJobAdapter) deleteConflictReason(req Request, name string, meta ku
 }
 
 type kueueDeleteOptions struct {
-	APIVersion    string                   `json:"apiVersion"`
-	Kind          string                   `json:"kind"`
-	Preconditions kueueDeletePreconditions `json:"preconditions"`
+	PropagationPolicy string                   `json:"propagationPolicy,omitempty"`
+	APIVersion        string                   `json:"apiVersion"`
+	Kind              string                   `json:"kind"`
+	Preconditions     kueueDeletePreconditions `json:"preconditions"`
 }
 
 type kueueDeletePreconditions struct {
@@ -780,11 +781,16 @@ func kueueDeleteResponseAccepted(raw []byte, namespace, name, uid string) bool {
 }
 
 func (a *KueueJobAdapter) deleteJob(ctx context.Context, req Request, name, uid string) (Acknowledgement, error) {
-	body, err := json.Marshal(kueueDeleteOptions{
-		APIVersion:    "v1",
-		Kind:          "DeleteOptions",
-		Preconditions: kueueDeletePreconditions{UID: uid},
-	})
+	options := kueueDeleteOptions{
+		APIVersion: "v1", Kind: "DeleteOptions", Preconditions: kueueDeletePreconditions{UID: uid},
+	}
+	if a.queueName != "" {
+		// batch/v1 defaults to orphaning dependents for API DELETE calls.
+		// Queued Jobs own live Pods, so request asynchronous owner GC and
+		// retain separate Pod/Claim/quota observations for release evidence.
+		options.PropagationPolicy = "Background"
+	}
+	body, err := json.Marshal(options)
 	if err != nil {
 		return Acknowledgement{}, ErrInvalidRequest
 	}
