@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -40,10 +41,32 @@ type draResourceSlice struct {
 			Generation         int64  `json:"generation"`
 			ResourceSliceCount int    `json:"resourceSliceCount"`
 		} `json:"pool"`
-		Devices []struct {
-			Name string `json:"name"`
-		} `json:"devices"`
+		Devices []draResourceSliceDevice `json:"devices"`
 	} `json:"spec"`
+}
+
+// Keep each complete device object for the second-read comparison. Inspecting
+// only name would discard capacity, attributes and future API fields before
+// comparing snapshots. These fields remain opaque inventory, not readiness.
+type draResourceSliceDevice struct {
+	Name     string `json:"name"`
+	contents map[string]any
+}
+
+func (d *draResourceSliceDevice) UnmarshalJSON(data []byte) error {
+	var contents map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(&contents); err != nil {
+		return err
+	}
+	name, ok := contents["name"].(string)
+	if !ok {
+		return ErrInvalidDRAObservation
+	}
+	d.Name = name
+	d.contents = contents
+	return nil
 }
 
 type draResourceSliceList struct {
