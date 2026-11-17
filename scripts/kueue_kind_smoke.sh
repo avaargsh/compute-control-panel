@@ -1095,7 +1095,7 @@ rules:
   verbs: [get]
 - apiGroups: [resource.k8s.io]
   resources: [resourceclaims]
-  verbs: [get]
+  verbs: [get, list]
 - apiGroups: [kueue.x-k8s.io]
   resources: [workloads, localqueues]
   verbs: [get]
@@ -1125,6 +1125,12 @@ roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: ccp-dra-
 subjects:
 - {kind: ServiceAccount, name: ccp-kueue-lifecycle, namespace: $ns}
 YAML
+
+# The evidence reader needs namespace LIST; the kubectl fixture's GET 404
+# alone must never be used to infer DRA device deallocation.
+[[ "$(kubectl auth can-i list resourceclaims.resource.k8s.io --as="system:serviceaccount:$ns:ccp-kueue-lifecycle" -n "$ns")" == "yes" ]] || {
+  echo "disposable lifecycle ServiceAccount lacks read-only ResourceClaim LIST" >&2; exit 1
+}
 export CCP_KUEUE_LOCAL_QUEUE_UID CCP_KUEUE_CLUSTER_QUEUE_UID
 CCP_KUEUE_LOCAL_QUEUE_UID="$(kubectl -n "$ns" get localqueue ccp-smoke -o jsonpath='{.metadata.uid}')"
 CCP_KUEUE_CLUSTER_QUEUE_UID="$(kubectl get clusterqueue ccp-smoke -o jsonpath='{.metadata.uid}')"
@@ -1374,7 +1380,9 @@ single_workload_release_report() {
     .case_id == "M2-SINGLE-WORKLOAD-RELEASE" and .release_status == "UNKNOWN" and
     .job_uid == $job and .pod_owner_job_uid == $job and .pod_uid == $pod and .resourceclaim_uid == $claim and
     .provider_target_absent == true and .pod_absent == true and .quota_cleared == true and
-    .claim_unallocated == null and .api_snapshot_complete == false and
+    .claim_unallocated == null and .claim_uid_absent == true and
+    (.resource_versions.resourceclaim_list | type == "string" and length > 0) and
+    .api_snapshot_complete == false and
     .provider_absence_verified == null and .driver_unprepare_verified == null and
     .physical_gpu_verified == false and .allocation_ready == false and .allocation_released == false and .cost_final == false
   ' "$dir/m2-single-workload-release.json" >/dev/null
@@ -1383,9 +1391,9 @@ if ! wait_for 'same-workload API teardown observations remain UNKNOWN after gene
   cat "$dir/m2-single-workload-release.json.err" >&2 || true
   exit 1
 fi
-# This extra field records the successful kubectl GET --ignore-not-found
-# above. The read-only observer retains its own UNKNOWN unallocation result.
-jq '. + {claim_api_state:"ABSENT"}' "$dir/m2-single-workload-release.json"
+# Read-only ServiceAccount LIST evidence is in the M2 report itself; no
+# kubectl-observed 404 is spliced into the provenance record.
+cat "$dir/m2-single-workload-release.json"
 
 echo "admission: same-name successor stays in place"
 kubectl apply -f "$dir/admission-successor-template.json" >/dev/null
