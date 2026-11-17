@@ -53,7 +53,7 @@ func parseAdmissionArgs(args []string) (phase, subject string, err error) {
 			return phase, "", nil
 		}
 	case "inspect":
-		if len(rest) == 1 && (rest[0] == "create" || rest[0] == "delete" || rest[0] == "placed" || rest[0] == "dra") {
+		if len(rest) == 1 && (rest[0] == "create" || rest[0] == "delete" || rest[0] == "placed" || rest[0] == "dra" || rest[0] == "release") {
 			return phase, rest[0], nil
 		}
 	}
@@ -258,6 +258,9 @@ func admissionDelete(getenv func(string) string, out io.Writer) error {
 }
 
 func admissionInspect(getenv func(string) string, out io.Writer, subject string) error {
+	if subject == "release" {
+		return admissionInspectRelease(getenv, out)
+	}
 	if subject == "dra" {
 		return admissionInspectDRA(getenv, out)
 	}

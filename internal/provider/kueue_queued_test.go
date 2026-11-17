@@ -116,3 +116,81 @@ func TestQueuedServiceAccountAdapterRequiresDurableBindingStore(t *testing.T) {
 		t.Fatalf("queued constructor accepted unreachable binding database: %v", err)
 	}
 }
+
+func TestQueuedKueueDeleteRequestsUIDFencedBackgroundGC(t *testing.T) {
+	api := &kueueAPI{t: t, jobs: make(map[string]kubeObject)}
+	server := httptest.NewTLSServer(http.HandlerFunc(api.serve))
+	defer server.Close()
+	client := server.Client()
+	client.Timeout = 3 * time.Second
+	adapter, err := NewQueuedKueueJobAdapterWithBindings(server.URL, "tenant-a", "ccp-smoke", client, NewMemoryKueueJobBindingStore())
+	if err != nil {
+		t.Fatal(err)
+	}
+	create := kueueAdapterRequest()
+	if _, err := adapter.Apply(context.Background(), create); err != nil {
+		t.Fatal(err)
+	}
+	present, err := adapter.Inspect(context.Background(), create)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remove := kueueDeleteRequest(create, present)
+	if _, err := adapter.Apply(context.Background(), remove); err != nil {
+		t.Fatal(err)
+	}
+	deletes := 0
+	for _, call := range api.snapshot() {
+		if call.method != http.MethodDelete {
+			continue
+		}
+		deletes++
+		var body struct {
+			PropagationPolicy string `json:"propagationPolicy"`
+			Preconditions     struct {
+				UID string `json:"uid"`
+			} `json:"preconditions"`
+		}
+		if err := json.Unmarshal(call.body, &body); err != nil {
+			t.Fatal(err)
+		}
+		if body.PropagationPolicy != "Background" || body.Preconditions.UID != present.ResourceUID {
+			t.Fatalf("queued Job DELETE must request GC with its exact UID: %s", call.body)
+		}
+	}
+	if deletes != 1 {
+		t.Fatalf("expected one fenced DELETE, got %d", deletes)
+	}
+	if _, err := adapter.Apply(context.Background(), remove); err != nil {
+		t.Fatal(err)
+	}
+	if api.deleteCount() != 1 {
+		t.Fatal("acknowledged replay issued another DELETE")
+	}
+}
+
+func TestSuspendedJobDeletePreservesDefaultPropagation(t *testing.T) {
+	adapter, api, server := newKueueAdapterFixture(t, &kueueAPI{})
+	defer server.Close()
+	create, present := createSuspendedJob(t, adapter, api)
+	if _, err := adapter.Apply(context.Background(), kueueDeleteRequest(create, present)); err != nil {
+		t.Fatal(err)
+	}
+	deletes := 0
+	for _, call := range api.snapshot() {
+		if call.method != http.MethodDelete {
+			continue
+		}
+		deletes++
+		var body map[string]json.RawMessage
+		if err := json.Unmarshal(call.body, &body); err != nil {
+			t.Fatal(err)
+		}
+		if _, exists := body["propagationPolicy"]; exists {
+			t.Fatalf("suspended Job propagation contract changed: %s", call.body)
+		}
+	}
+	if deletes != 1 {
+		t.Fatalf("expected one suspended Job DELETE, got %d", deletes)
+	}
+}
