@@ -147,5 +147,11 @@ func admissionInspectRelease(getenv func(string) string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	commit, err := checkedSmokeSourceCommit(getenv)
+	if err != nil {
+		return err
+	}
+	report["ccp_commit"] = commit
+	report["ccp_commit_source"] = "CI_CHECKOUT_UNATTESTED"
 	return writeDurable(out, report)
 }
