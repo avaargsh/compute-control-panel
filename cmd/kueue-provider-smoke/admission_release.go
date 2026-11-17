@@ -97,6 +97,10 @@ func admissionInspectRelease(getenv func(string) string, out io.Writer) error {
 	if err := requireDisposableSmoke(getenv); err != nil {
 		return err
 	}
+	commit, err := checkedSmokeSourceCommit(getenv)
+	if err != nil {
+		return err
+	}
 	file, err := os.Open(getenv("CCP_KUEUE_RELEASE_SEED"))
 	if err != nil {
 		return fmt.Errorf("read disposable release seed: %w", err)
@@ -147,5 +151,7 @@ func admissionInspectRelease(getenv func(string) string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	report["ccp_commit"] = commit
+	report["ccp_commit_source"] = "CI_CHECKOUT_UNATTESTED"
 	return writeDurable(out, report)
 }
