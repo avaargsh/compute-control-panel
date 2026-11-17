@@ -33,12 +33,12 @@ func TestAdviseFailsClosedOnStaleUntrustedAndMismatchedEvidence(t *testing.T) {
 	now := time.Now()
 	d, b, p := fixtures(now)
 	for name, change := range map[string]func(){
-		"stale benchmark":         func() { b.ObservedAt = now.Add(-40 * time.Second) },
-		"unknown pool":            func() { p.PoolID = "different" },
-		"untrusted capacity":      func() { p.Attested = false },
-		"stale capacity revision": func() { p.Revision = 0 },
-		"untrusted benchmark":     func() { b.Attested = false },
-        "different workload shape": func() { b.WorkloadShape = "short-context-c1" },
+		"stale benchmark":          func() { b.ObservedAt = now.Add(-40 * time.Second) },
+		"unknown pool":             func() { p.PoolID = "different" },
+		"untrusted capacity":       func() { p.Attested = false },
+		"stale capacity revision":  func() { p.Revision = 0 },
+		"untrusted benchmark":      func() { b.Attested = false },
+		"different workload shape": func() { b.WorkloadShape = "short-context-c1" },
 	} {
 		d, b, p = fixtures(now)
 		change()
