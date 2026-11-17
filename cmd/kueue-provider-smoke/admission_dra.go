@@ -69,6 +69,17 @@ func admissionInspectDRA(getenv func(string) string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	queue, err := reader.ObserveQueueBinding(ctx, provider.KueueQueueBindingQuery{
+		Job:            provider.KubernetesJobQuery{Namespace: pin.Namespace, JobName: pin.Name, ExpectedJobUID: pin.UID, TenantID: pin.Request.TenantID, WorkloadID: pin.Request.WorkloadID, DesiredGeneration: pin.Request.DesiredGeneration},
+		LocalQueueName: admissionLocalQueue, LocalQueueUID: getenv("CCP_KUEUE_LOCAL_QUEUE_UID"),
+		ClusterQueueName: admissionLocalQueue, ClusterQueueUID: getenv("CCP_KUEUE_CLUSTER_QUEUE_UID"),
+	})
+	if err != nil {
+		return err
+	}
+	if queue.Job != first.Evidence || queue.Stage != first.Stage {
+		return provider.ErrUncorrelatedReleaseEvidence
+	}
 	draQuery := provider.DRAPodClaimQuery{
 		Claim: provider.DRAClaimQuery{Namespace: pin.Namespace, ClaimName: getenv("CCP_KUEUE_DRA_CLAIM"), ExpectedClaimUID: getenv("CCP_KUEUE_DRA_CLAIM_UID"),
 			PodName: first.Evidence.Pod.Name, ExpectedPodUID: first.Evidence.Pod.UID, Request: "gpu", Driver: getenv("CCP_KUEUE_DRA_DRIVER"), Pool: getenv("CCP_KUEUE_DRA_POOL"), Device: getenv("CCP_KUEUE_DRA_DEVICE")},
@@ -101,5 +112,6 @@ func admissionInspectDRA(getenv func(string) string, out io.Writer) error {
 	if obs.Result != operation.ResourcePresent || obs.ResourceUID != pin.UID || obs.ResourceID != pin.Namespace+"/"+pin.Name {
 		return provider.ErrInvalidDRAObservation
 	}
+	evidence["release_seed"] = admissionReleaseSeed{Pin: pin, Queue: queue, PodClaim: inv.PodClaim}
 	return writeDurable(out, evidence)
 }

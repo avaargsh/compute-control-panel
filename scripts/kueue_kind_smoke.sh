@@ -28,7 +28,7 @@ cleanup() {
     kubectl --request-timeout=10s -n kueue-system logs deploy/kueue-controller-manager --tail=80 || true
   fi
   if [[ "$status" -ne 0 ]]; then
-    for f in "$dir"/durable-*.json "$dir"/durable-*.err "$dir"/journal-*.json "$dir"/journal-*.err "$dir"/admission-*.json "$dir"/admission-*.err "$dir"/m1-*.json "$dir"/m1-*.err "$dir"/preempt-*.json "$dir"/preempt-*.err "$dir"/pg-boot.log "$dir"/migrate.log; do
+    for f in "$dir"/durable-*.json "$dir"/durable-*.err "$dir"/journal-*.json "$dir"/journal-*.err "$dir"/admission-*.json "$dir"/admission-*.err "$dir"/m1-*.json "$dir"/m1-*.err "$dir"/m2-*.json "$dir"/m2-*.err "$dir"/preempt-*.json "$dir"/preempt-*.err "$dir"/pg-boot.log "$dir"/migrate.log; do
       [[ -f "$f" ]] || continue
       echo "----- $(basename "$f") -----" >&2
       tail -n 40 "$f" >&2 || true
@@ -1088,6 +1088,9 @@ rules:
 - apiGroups: [resource.k8s.io]
   resources: [resourceclaims]
   verbs: [get]
+- apiGroups: [kueue.x-k8s.io]
+  resources: [workloads, localqueues]
+  verbs: [get]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -1103,6 +1106,9 @@ rules:
 - apiGroups: [resource.k8s.io]
   resources: [resourceslices]
   verbs: [list]
+- apiGroups: [kueue.x-k8s.io]
+  resources: [clusterqueues]
+  verbs: [get]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -1111,6 +1117,10 @@ roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: ccp-dra-
 subjects:
 - {kind: ServiceAccount, name: ccp-kueue-lifecycle, namespace: $ns}
 YAML
+export CCP_KUEUE_LOCAL_QUEUE_UID CCP_KUEUE_CLUSTER_QUEUE_UID
+CCP_KUEUE_LOCAL_QUEUE_UID="$(kubectl -n "$ns" get localqueue ccp-smoke -o jsonpath='{.metadata.uid}')"
+CCP_KUEUE_CLUSTER_QUEUE_UID="$(kubectl get clusterqueue ccp-smoke -o jsonpath='{.metadata.uid}')"
+[[ -n "$CCP_KUEUE_LOCAL_QUEUE_UID" && -n "$CCP_KUEUE_CLUSTER_QUEUE_UID" ]] || exit 1
 binding_role_dsn="postgres://ccp_kueue_job_binding:kueue-binding-ci-only@127.0.0.1:${pg_port}/postgres?sslmode=disable"
 run_admission() {
   local outfile="$1"
@@ -1299,7 +1309,9 @@ if ! wait_for 'stable same-workload Job/Pod/Claim/ResourceSlice API evidence' si
        pool:.spec.pool,devices:[.spec.devices[]?.name]}]' >&2 || true
   exit 1
 fi
-cat "$dir/m1-single-workload-dra.json"
+export CCP_KUEUE_RELEASE_SEED="$dir/m2-release-seed.json"
+jq -e '.release_seed' "$dir/m1-single-workload-dra.json" > "$CCP_KUEUE_RELEASE_SEED"
+jq 'del(.release_seed)' "$dir/m1-single-workload-dra.json"
 for n in "${smoke_nodes[@]}"; do
   kubectl taint node "$n" ccp-kueue-smoke/unplaceable=true:NoSchedule >/dev/null
 done
@@ -1331,6 +1343,35 @@ if kubectl -n "$ns" get job "$admission_job_name" >/dev/null 2>&1; then
   echo "Inspect-first absence left the original Job name in place" >&2
   exit 1
 fi
+
+# Observe controller GC of the exact generated Claim after the pinned Job
+# DELETE. Its absence leaves the existing unallocation contract unproven.
+generated_claim_absent() {
+  local body
+  body="$(kubectl --request-timeout=10s -n "$ns" get resourceclaim "$CCP_KUEUE_DRA_CLAIM" --ignore-not-found -o json)" || return 1
+  [[ -z "$body" ]]
+}
+wait_for 'generated Claim collected after the same Job-owned Pod teardown' generated_claim_absent
+single_workload_release_report() {
+  run_admission "$dir/m2-single-workload-release.json" admission inspect release || return 1
+  jq -e --slurpfile prior "$dir/m1-single-workload-dra.json" \
+    --arg job "$admission_job_uid" --arg pod "$admission_pod_uid" --arg claim "$CCP_KUEUE_DRA_CLAIM_UID" '
+    .device.driver == $prior[0].device.driver and .device.pool == $prior[0].device.pool and .device.device == $prior[0].device.device and
+    .case_id == "M2-SINGLE-WORKLOAD-RELEASE" and .release_status == "UNKNOWN" and
+    .job_uid == $job and .pod_owner_job_uid == $job and .pod_uid == $pod and .resourceclaim_uid == $claim and
+    .provider_target_absent == true and .pod_absent == true and .quota_cleared == true and
+    .claim_unallocated == null and .api_snapshot_complete == false and
+    .provider_absence_verified == null and .driver_unprepare_verified == null and
+    .physical_gpu_verified == false and .allocation_ready == false and .allocation_released == false and .cost_final == false
+  ' "$dir/m2-single-workload-release.json" >/dev/null
+}
+if ! wait_for 'same-workload API teardown observations remain UNKNOWN after generated Claim GC' single_workload_release_report; then
+  cat "$dir/m2-single-workload-release.json.err" >&2 || true
+  exit 1
+fi
+# This extra field records the successful kubectl GET --ignore-not-found
+# above. The read-only observer retains its own UNKNOWN unallocation result.
+jq '. + {claim_api_state:"ABSENT"}' "$dir/m2-single-workload-release.json"
 
 echo "admission: same-name successor stays in place"
 kubectl apply -f "$dir/admission-successor-template.json" >/dev/null
