@@ -4,9 +4,17 @@ set -Eeuo pipefail
 if [[ "$CCP_DISPOSABLE_KIND_SMOKE" != "1" ]]; then
   echo "Explicit CCP_DISPOSABLE_KIND_SMOKE=1 required" >&2; exit 2
 fi
-for tool in kind kubectl jq go docker curl; do
+for tool in kind kubectl jq go docker curl git; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 2; }
 done
+
+# This identifies the exact source checkout compiled and executed by CI.
+# It is audit/reproduction metadata, NOT an independently attested build.
+CCP_SMOKE_SOURCE_COMMIT="$(git rev-parse --verify HEAD)"
+export CCP_SMOKE_SOURCE_COMMIT
+[[ "$CCP_SMOKE_SOURCE_COMMIT" =~ ^[a-f0-9]{40}$ ]] || {
+  echo "missing or malformed disposable checkout revision" >&2; exit 2
+}
 
 dir="$(mktemp -d)"
 export KUBECONFIG="$dir/kubeconfig"
@@ -1310,6 +1318,9 @@ if ! wait_for 'stable same-workload Job/Pod/Claim/ResourceSlice API evidence' si
   exit 1
 fi
 export CCP_KUEUE_RELEASE_SEED="$dir/m2-release-seed.json"
+jq -e --arg sha "$CCP_SMOKE_SOURCE_COMMIT" '
+  .ccp_commit == $sha and .ccp_commit_source == "CI_CHECKOUT_UNATTESTED"' \
+  "$dir/m1-single-workload-dra.json" >/dev/null
 jq -e '.release_seed' "$dir/m1-single-workload-dra.json" > "$CCP_KUEUE_RELEASE_SEED"
 jq 'del(.release_seed)' "$dir/m1-single-workload-dra.json"
 for n in "${smoke_nodes[@]}"; do
@@ -1355,7 +1366,10 @@ wait_for 'generated Claim collected after the same Job-owned Pod teardown' gener
 single_workload_release_report() {
   run_admission "$dir/m2-single-workload-release.json" admission inspect release || return 1
   jq -e --slurpfile prior "$dir/m1-single-workload-dra.json" \
-    --arg job "$admission_job_uid" --arg pod "$admission_pod_uid" --arg claim "$CCP_KUEUE_DRA_CLAIM_UID" '
+    --arg job "$admission_job_uid" --arg pod "$admission_pod_uid" --arg claim "$CCP_KUEUE_DRA_CLAIM_UID" \
+    --arg sha "$CCP_SMOKE_SOURCE_COMMIT" '
+    .ccp_commit == $sha and .ccp_commit == $prior[0].ccp_commit and
+    .ccp_commit_source == "CI_CHECKOUT_UNATTESTED" and
     .device.driver == $prior[0].device.driver and .device.pool == $prior[0].device.pool and .device.device == $prior[0].device.device and
     .case_id == "M2-SINGLE-WORKLOAD-RELEASE" and .release_status == "UNKNOWN" and
     .job_uid == $job and .pod_owner_job_uid == $job and .pod_uid == $pod and .resourceclaim_uid == $claim and
