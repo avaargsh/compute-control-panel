@@ -96,6 +96,29 @@ func TestDRAPoolInventoryRequiresCompleteCurrentGeneration(t *testing.T) {
 		{name: "pool differs from Claim", first: func(v map[string]any) { draSliceSpec(v)["pool"].(map[string]any)["name"] = "different-pool" }},
 		{name: "inventory RV changed after first list", second: func(v map[string]any) { draFirstSlice(v)["metadata"].(map[string]any)["resourceVersion"] = "460" }},
 		{name: "inventory generation changed after first list", second: func(v map[string]any) { draSliceSpec(v)["pool"].(map[string]any)["generation"] = float64(5) }},
+
+		{name: "device attributes changed with stable UID RV and tuple", first: func(v map[string]any) {
+			draSliceSpec(v)["devices"].([]any)[0].(map[string]any)["attributes"] = map[string]any{"example.com/model": map[string]any{"string": "model-a"}}
+		}, second: func(v map[string]any) {
+			draSliceSpec(v)["devices"].([]any)[0].(map[string]any)["attributes"] = map[string]any{"example.com/model": map[string]any{"string": "model-b"}}
+		}},
+		{name: "device capacity changed with stable UID RV and tuple", first: func(v map[string]any) {
+			draSliceSpec(v)["devices"].([]any)[0].(map[string]any)["capacity"] = map[string]any{"example.com/memory": map[string]any{"value": "8Gi"}}
+		}, second: func(v map[string]any) {
+			draSliceSpec(v)["devices"].([]any)[0].(map[string]any)["capacity"] = map[string]any{"example.com/memory": map[string]any{"value": "16Gi"}}
+		}},
+		{name: "device field removed with stable UID RV and tuple", first: func(v map[string]any) {
+			draSliceSpec(v)["devices"].([]any)[0].(map[string]any)["bindsToNode"] = true
+		}, second: func(v map[string]any) {}},
+		{name: "new device field changes with stable UID RV and tuple", first: func(v map[string]any) {
+			draSliceSpec(v)["devices"].([]any)[0].(map[string]any)["futureField"] = "first"
+		}, second: func(v map[string]any) {
+			draSliceSpec(v)["devices"].([]any)[0].(map[string]any)["futureField"] = "second"
+		}},
+		{name: "stable complete device content", first: func(v map[string]any) {
+			draSliceSpec(v)["devices"].([]any)[0].(map[string]any)["attributes"] = map[string]any{"example.com/model": map[string]any{"string": "model-a"}}
+			draSliceSpec(v)["devices"].([]any)[0].(map[string]any)["capacity"] = map[string]any{"example.com/memory": map[string]any{"value": "8Gi"}}
+		}, want: true},
 		{name: "list forbidden", status: http.StatusForbidden},
 	}
 	for _, tc := range tests {

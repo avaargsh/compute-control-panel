@@ -11,6 +11,7 @@ on:
       - 'cmd/kueue-observe/**'
       - 'cmd/kueue-provider-smoke/**'
       - 'internal/provider/kueue_*.go'
+      - 'internal/provider/dra_*.go'
   push:
     branches: [main]
     paths:
@@ -22,6 +23,7 @@ on:
       - 'cmd/kueue-observe/**'
       - 'cmd/kueue-provider-smoke/**'
       - 'internal/provider/kueue_*.go'
+      - 'internal/provider/dra_*.go'
   workflow_dispatch:
 
 permissions:
