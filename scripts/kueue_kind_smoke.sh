@@ -1412,4 +1412,6 @@ bash scripts/kueue_relist_kind_smoke.sh
 echo "PASS: disposable CPU-only Kueue quota-denial/QuotaReserved/Admitted, exact Workload/Pod/Job UID+RV and node binding, teardown observation, Postgres pin/tombstone SIGKILL recovery, real kind + Postgres ComputeOperation UNKNOWN -> fenced Inspect-first CREATE SUCCEEDED and DELETE TARGET_ABSENT after process SIGKILL, and admitted-but-unplaced queued Job projected NOT_READY through the ccp_kueue_job_binding login. TARGET_ABSENT is not Allocation RELEASED, Kueue quota release, or device release. This is NOT GPU/DRA device release, a production quota-release attestation, Provider retirement, Allocation RELEASED or cost finality."
 # Kueue withinClusterQueue preemption. Separate file; reuses run_admission.
 . scripts/kueue_preemption_kind_smoke.sh
-
+# Exercise independent per-tenant Kueue DRA device-count quota and readmission.
+# This is disposable API evidence only, not authenticated GPU release.
+bash scripts/kueue_dra_quota_kind_smoke.sh
