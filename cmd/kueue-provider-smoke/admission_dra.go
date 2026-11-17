@@ -41,6 +41,10 @@ func singleWorkloadDRAEvidence(pin provider.KueueCreatePin, first, second provid
 }
 
 func admissionInspectDRA(getenv func(string) string, out io.Writer) error {
+	commit, err := checkedSmokeSourceCommit(getenv)
+	if err != nil {
+		return err
+	}
 	adapter, err := openAdmissionAdapter(getenv)
 	if err != nil {
 		return err
@@ -113,5 +117,7 @@ func admissionInspectDRA(getenv func(string) string, out io.Writer) error {
 		return provider.ErrInvalidDRAObservation
 	}
 	evidence["release_seed"] = admissionReleaseSeed{Pin: pin, Queue: queue, PodClaim: inv.PodClaim}
+	evidence["ccp_commit"] = commit
+	evidence["ccp_commit_source"] = "CI_CHECKOUT_UNATTESTED"
 	return writeDurable(out, evidence)
 }
