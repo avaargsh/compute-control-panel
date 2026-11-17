@@ -46,7 +46,7 @@ func observeAdmissionRelease(ctx context.Context, reader *provider.KubernetesObs
 		"job_uid": pin.UID, "pod_uid": p.Pod.UID, "pod_owner_job_uid": job.PodOwnerJobUID, "pod_node": p.NodeName,
 		"kueue_workload_uid": job.KueueWorkload.UID, "resourceclaim_uid": p.Claim.Claim.UID,
 		"device": p.Claim.Device, "provider_target_absent": true, "provider_absence_verified": nil, "driver_unprepare_verified": nil,
-		"pod_absent": nil, "quota_cleared": nil, "claim_unallocated": nil, "api_snapshot_complete": false,
+		"pod_absent": nil, "quota_cleared": nil, "claim_unallocated": nil, "claim_uid_absent": nil, "api_snapshot_complete": false,
 		"physical_gpu_verified": false, "allocation_ready": false, "allocation_released": false, "cost_final": false,
 	}
 	versions := map[string]string{"provider_observation": absence.ResourceVersion}
@@ -86,6 +86,16 @@ func observeAdmissionRelease(ctx context.Context, reader *provider.KubernetesObs
 			versions["resourceclaim"] = claim.CurrentClaim.ResourceVersion
 		} else {
 			failures["claim"] = claimErr.Error()
+			// Once a generated Claim is GC'd, GET 404 cannot prove it was
+			// unallocated. A separate stable LIST may attest only API UID
+			// absence; driver Unprepare and release finality remain UNKNOWN.
+			absent, absentErr := reader.ObserveDRAClaimUIDAbsent(ctx, p.Claim)
+			if absentErr == nil {
+				report["claim_uid_absent"] = true
+				versions["resourceclaim_list"] = absent.ClaimListResourceVersion
+			} else {
+				failures["claim_list"] = absentErr.Error()
+			}
 		}
 	}
 	report["resource_versions"] = versions
