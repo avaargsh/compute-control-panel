@@ -20,7 +20,9 @@ func TestValidatePDReplicaClaims(t *testing.T) {
 	}{
 		{"half pair", func(_ *PDJobSetQuery, r *[]PDReplicaClaimQuery) { *r = (*r)[:1] }},
 		{"duplicate device", func(_ *PDJobSetQuery, r *[]PDReplicaClaimQuery) { (*r)[1].Pod.Claim.Device = (*r)[0].Pod.Claim.Device }},
-		{"duplicate pod", func(_ *PDJobSetQuery, r *[]PDReplicaClaimQuery) { (*r)[1].Pod.Claim.ExpectedPodUID = (*r)[0].Pod.Claim.ExpectedPodUID }},
+		{"duplicate pod", func(_ *PDJobSetQuery, r *[]PDReplicaClaimQuery) {
+			(*r)[1].Pod.Claim.ExpectedPodUID = (*r)[0].Pod.Claim.ExpectedPodUID
+		}},
 		{"duplicate ordinal", func(_ *PDJobSetQuery, r *[]PDReplicaClaimQuery) { (*r)[1].Phase = "prefill" }},
 		{"shared device", func(_ *PDJobSetQuery, r *[]PDReplicaClaimQuery) { (*r)[0].Pod.Claim.ShareID = "shared" }},
 		{"cross tenant", func(_ *PDJobSetQuery, r *[]PDReplicaClaimQuery) { (*r)[0].Pod.Claim.Namespace = "other" }},
