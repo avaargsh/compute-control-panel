@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/avaargsh/compute-control-panel/internal/capacity/pd"
+	"github.com/avaargsh/compute-control-panel/internal/operation"
 )
 
 // PDStagingSnapshot is a read-only, NON-DISPATCHABLE view of one promoted
@@ -51,21 +52,45 @@ func singleGPUStagingShape(p pd.Proposal) bool {
 //
 // This short-lived snapshot MUST NOT be cached as an execution permit: the
 // fence can be revoked immediately after this read-only transaction commits.
+// ReadCurrentPDStagingSnapshot returns NON-DISPATCHABLE current authority
+// only while the canonical CREATE Operation remains PENDING. It does not
+// authorize an external Kubernetes POST.
 func (r *Repository) ReadCurrentPDStagingSnapshot(
 	ctx context.Context, owner PDIntentOwner, intentID string,
 ) (PDStagingSnapshot, error) {
-	reject := func() (PDStagingSnapshot, error) {
-		return PDStagingSnapshot{}, ErrPDPromotionBlocked
-	}
 	if r == nil || r.db == nil || !validPDIntentOwner(owner) || !validPDIntentDigest(intentID) {
-		return reject()
+		return PDStagingSnapshot{}, ErrPDPromotionBlocked
 	}
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return PDStagingSnapshot{}, err
 	}
 	defer tx.Rollback()
+	snapshot, err := readCurrentPDStagingSnapshotTx(ctx, tx, owner, intentID, operation.Pending)
+	if err != nil {
+		return PDStagingSnapshot{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return PDStagingSnapshot{}, err
+	}
+	return snapshot, nil
+}
 
+// readCurrentPDStagingSnapshotTx verifies exact immutable proposal, independent
+// current source fence, canonical promotion, provider and Operation phase in
+// the caller's transaction. The lease writer locks Workload before calling
+// this helper, then transitions the matching Operation in the SAME transaction.
+func readCurrentPDStagingSnapshotTx(
+	ctx context.Context, tx *sql.Tx, owner PDIntentOwner, intentID string,
+	expectedStatus operation.Status,
+) (PDStagingSnapshot, error) {
+	reject := func() (PDStagingSnapshot, error) {
+		return PDStagingSnapshot{}, ErrPDPromotionBlocked
+	}
+	if tx == nil || !validPDIntentOwner(owner) || !validPDIntentDigest(intentID) ||
+		(expectedStatus != operation.Pending && expectedStatus != operation.Leased) {
+		return reject()
+	}
 	var workload, providerID, poolID string
 	var gen int64
 	var raw []byte
@@ -100,13 +125,13 @@ func (r *Repository) ReadCurrentPDStagingSnapshot(
 	  AND i.owner_service=$4 AND i.owner_resource_type=$5 AND i.owner_resource_id=$6
 	  AND w.desired_state='ACTIVE' AND w.desired_generation=i.target_generation
 	  AND w.latest_allocation_id=a.allocation_id AND a.phase='PENDING'
-	  AND op.operation_kind='CREATE' AND op.status='PENDING'
+	  AND op.operation_kind='CREATE' AND op.status=$7
 	  AND op.provider_request_digest='sha256:' || i.intent_id
 	  AND op.idempotency_key='pd-create-' || i.intent_id
 	  AND p.state='REGISTERED'
 	FOR SHARE OF i,f,pr,w,p,a,op`,
 		intentID, owner.TenantID, owner.ProjectID, owner.Service,
-		owner.ResourceType, owner.ResourceID,
+		owner.ResourceType, owner.ResourceID, expectedStatus,
 	).Scan(&workload, &gen, &raw, &providerID, &poolID,
 		&intentUntil, &fenceUntil, &databaseNow)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -149,8 +174,7 @@ func (r *Repository) ReadCurrentPDStagingSnapshot(
 	if !current {
 		return reject()
 	}
-	if err := tx.Commit(); err != nil {
-		return PDStagingSnapshot{}, err
+	return PDStagingSnapshot{}, err
 	}
 	return PDStagingSnapshot{
 		Promotion: promotion, Proposal: candidate,
