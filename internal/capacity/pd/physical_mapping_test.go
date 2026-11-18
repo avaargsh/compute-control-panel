@@ -3,7 +3,6 @@ package pd
 import (
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestBindScheduledDevicesAuthenticatesExactPhysicalUIDAndResourceSlice(t *testing.T) {
