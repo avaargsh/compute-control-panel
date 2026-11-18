@@ -61,13 +61,13 @@ func validPDJobSetCreateRequest(req Request, plan PDJobSetPlan) bool {
 }
 
 type pdJobSetMeta struct {
-	Name            string            `json:"name"`
-	Namespace       string            `json:"namespace"`
-	UID             string            `json:"uid,omitempty"`
-	ResourceVersion string            `json:"resourceVersion,omitempty"`
-	DeletionTimestamp *string         `json:"deletionTimestamp,omitempty"`
-	Labels          map[string]string `json:"labels,omitempty"`
-	Annotations     map[string]string `json:"annotations,omitempty"`
+	Name              string            `json:"name"`
+	Namespace         string            `json:"namespace"`
+	UID               string            `json:"uid,omitempty"`
+	ResourceVersion   string            `json:"resourceVersion,omitempty"`
+	DeletionTimestamp *string           `json:"deletionTimestamp,omitempty"`
+	Labels            map[string]string `json:"labels,omitempty"`
+	Annotations       map[string]string `json:"annotations,omitempty"`
 }
 
 type pdJobSetReplicatedJob struct {
