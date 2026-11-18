@@ -14,8 +14,8 @@ func TestBindScheduledDevicesAuthenticatesExactPhysicalUIDAndResourceSlice(t *te
 	one := e.Inventory.Devices[0]
 	two := e.Inventory.Devices[1]
 	observed := []ScheduledDevice{
-		{Driver: two.Driver, Pool: two.Pool, Device: two.Device, ClaimUID: "claim-uid", PodUID: "pod-uid", NodeUID: two.NodeUID, SliceUID: two.SliceUID, SliceResourceVersion: two.SliceResourceVersion},
-		{Driver: one.Driver, Pool: one.Pool, Device: one.Device, ClaimUID: "claim-uid", PodUID: "pod-uid", NodeUID: one.NodeUID, SliceUID: one.SliceUID, SliceResourceVersion: one.SliceResourceVersion},
+		{Driver: two.Driver, Pool: two.Pool, Device: two.Device, ClaimUID: "claim-uid", ClaimResourceVersion: "17", PodUID: "pod-uid", PodResourceVersion: "21", NodeUID: two.NodeUID, SliceUID: two.SliceUID, SliceResourceVersion: two.SliceResourceVersion},
+		{Driver: one.Driver, Pool: one.Pool, Device: one.Device, ClaimUID: "claim-uid", ClaimResourceVersion: "17", PodUID: "pod-uid", PodResourceVersion: "21", NodeUID: one.NodeUID, SliceUID: one.SliceUID, SliceResourceVersion: one.SliceResourceVersion},
 	}
 	mapped, err := BindScheduledDevices(now, e, policy, observed)
 	if err != nil || len(mapped.Bindings) != 2 || mapped.Bindings[0].PhysicalUID != "gpu-1" || mapped.Bindings[1].PhysicalUID != "gpu-2" ||
@@ -39,7 +39,7 @@ func TestBindScheduledDevicesRejectsCrossSourceDrift(t *testing.T) {
 	makeDevice := func(g PhysicalGPU, claim, pod string) ScheduledDevice {
 		return ScheduledDevice{
 			Driver: g.Driver, Pool: g.Pool, Device: g.Device,
-			ClaimUID: claim, PodUID: pod, NodeUID: g.NodeUID,
+			ClaimUID: claim, ClaimResourceVersion: "17", PodUID: pod, PodResourceVersion: "21", NodeUID: g.NodeUID,
 			SliceUID: g.SliceUID, SliceResourceVersion: g.SliceResourceVersion,
 		}
 	}
@@ -52,6 +52,8 @@ func TestBindScheduledDevicesRejectsCrossSourceDrift(t *testing.T) {
 		"duplicate GPU":            func(_ *TopologyEvidence, d *[]ScheduledDevice) { (*d)[1] = (*d)[0] },
 		"cross Pod Claim reuse":    func(_ *TopologyEvidence, d *[]ScheduledDevice) { (*d)[1].ClaimUID = (*d)[0].ClaimUID },
 		"missing Pod UID":          func(_ *TopologyEvidence, d *[]ScheduledDevice) { (*d)[1].PodUID = "" },
+		"missing Claim RV":         func(_ *TopologyEvidence, d *[]ScheduledDevice) { (*d)[1].ClaimResourceVersion = "" },
+		"missing Pod RV":           func(_ *TopologyEvidence, d *[]ScheduledDevice) { (*d)[1].PodResourceVersion = "" },
 		"GPU still FREE":           func(e *TopologyEvidence, _ *[]ScheduledDevice) { e.Inventory.Devices[0].State = "FREE" },
 		"GPU unhealthy":            func(e *TopologyEvidence, _ *[]ScheduledDevice) { e.Inventory.Devices[0].Healthy = false },
 		"GPU draining":             func(e *TopologyEvidence, _ *[]ScheduledDevice) { e.Inventory.Devices[0].State = "DRAINING" },
@@ -74,5 +76,34 @@ func TestBindScheduledDevicesRejectsCrossSourceDrift(t *testing.T) {
 				t.Fatalf("invalid binding accepted: %+v %v", got, err)
 			}
 		})
+	}
+}
+
+func TestBindScheduledDevicesBindsPodAndClaimResourceVersions(t *testing.T) {
+	now, demand, _, _, _, _ := fixture(t)
+	e, policy, inventoryKey, fabricKey := topologyFixture(t, now, demand.Scope)
+	e.Inventory.Devices[0].State = "ACTIVE"
+	signTopology(t, &e, inventoryKey, fabricKey)
+	gpu := e.Inventory.Devices[0]
+	device := ScheduledDevice{
+		Driver: gpu.Driver, Pool: gpu.Pool, Device: gpu.Device,
+		ClaimUID: "claim-a", ClaimResourceVersion: "40",
+		PodUID: "pod-a", PodResourceVersion: "60",
+		NodeUID: gpu.NodeUID, SliceUID: gpu.SliceUID,
+		SliceResourceVersion: gpu.SliceResourceVersion,
+	}
+	first, err := BindScheduledDevices(now, e, policy, []ScheduledDevice{device})
+	if err != nil || first.EvidenceSHA256 == "" || first.PhysicalReady {
+		t.Fatalf("initial verified identity: %+v %v", first, err)
+	}
+	device.ClaimResourceVersion = "41"
+	second, err := BindScheduledDevices(now, e, policy, []ScheduledDevice{device})
+	if err != nil || second.EvidenceSHA256 == first.EvidenceSHA256 {
+		t.Fatalf("Claim resourceVersion drift reused evidence digest: %+v %v", second, err)
+	}
+	device.PodResourceVersion = "61"
+	third, err := BindScheduledDevices(now, e, policy, []ScheduledDevice{device})
+	if err != nil || third.EvidenceSHA256 == second.EvidenceSHA256 {
+		t.Fatalf("Pod resourceVersion drift reused evidence digest: %+v %v", third, err)
 	}
 }
