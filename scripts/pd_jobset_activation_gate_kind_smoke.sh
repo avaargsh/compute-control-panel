@@ -224,9 +224,9 @@ fi
 if ! grep -qi 'forbidden' <<< "$rejected"; then
   echo "FAIL: staging PATCH failed for a reason other than RBAC: $rejected" >&2; exit 1
 fi
-[[ "$(kubectl -n "$ns" get jobset "$name" -o jsonpath='{.metadata.annotations.kueue\\.x-k8s\\.io/admission-gated-by}')" == "$gate" ]] || {
+if ! kubectl -n "$ns" get jobset "$name" -o json | jq -e --arg gate "$gate" '.metadata.annotations["kueue.x-k8s.io/admission-gated-by"] == $gate' >/dev/null; then
   echo "FAIL: denied staging PATCH still removed the gate" >&2; exit 1
-}
+fi
 # This fixture impersonates the narrowly scoped activation identity. It does
 # NOT impersonate a production policy/permit verifier, which remains a gate.
 kubectl -n "$ns" patch jobset "$name" --as="$activation_actor" --type=json -p="$patch"
