@@ -100,3 +100,37 @@ func TestProposalFencesReplayAndNeverActs(t *testing.T) {
 		t.Fatalf("nonfit proposed: %+v %v", b, e)
 	}
 }
+
+func TestProposalIdentityBindsVerifierKeyAndTrustPolicy(t *testing.T) {
+	now, d, p, policy, top, priv := fixture(t)
+	original, err := Propose(now, d, p, sign(t, p, priv), policy, top, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The same signed benchmark content is not the same evidence after
+	// its independently authorized signer changes.
+	newPublic, newPrivate, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotatedPolicy := policy
+	rotatedPolicy.PublicKey = newPublic
+	rotated, err := Propose(now, d, p, sign(t, p, newPrivate), rotatedPolicy, top, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rotated.IntentID == original.IntentID || rotated.GenerationKey != original.GenerationKey {
+		t.Fatalf("signer rotation must conflict within generation: original %+v, rotated %+v", original, rotated)
+	}
+
+	changedPolicy := policy
+	changedPolicy.ValidUntil = changedPolicy.ValidUntil.Add(time.Minute)
+	reconfigured, err := Propose(now, d, p, sign(t, p, priv), changedPolicy, top, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reconfigured.IntentID == original.IntentID || reconfigured.GenerationKey != original.GenerationKey {
+		t.Fatalf("policy change must conflict within generation: original %+v, changed %+v", original, reconfigured)
+	}
+}
