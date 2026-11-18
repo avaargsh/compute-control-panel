@@ -117,7 +117,7 @@ func TestPromotePDIntentRejectsRevocationAndExpiredAuthorityWithoutPartialMutati
 			case "expired":
 				_, err = db.ExecContext(ctx, "UPDATE public.compute_pd_intent_fences SET valid_until=clock_timestamp()-interval '1 second',fence_version=2 WHERE workload_id=$1", intent.Candidate.Workload)
 			case "provider-draining":
-				_, err = db.ExecContext(ctx, "UPDATE public.compute_providers SET state='DRAINING',version=version+1 WHERE provider_id=$1", intent.ProviderID)
+				_, err = repo.BeginProviderDrain(ctx, intent.ProviderID, 1, "PD_PROMOTION_TEST")
 			}
 			if err != nil {
 				t.Fatal(err)
