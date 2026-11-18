@@ -160,7 +160,7 @@ func Plan(now time.Time, d Demand, p Profile, signature []byte, policy Policy, t
 // not create a workload, hold quota or claim an allocation. A durable consumer
 // must reauthenticate, re-read revisions, enforce CAS and obtain Kueue admission.
 type Proposal struct {
-	IntentID                                                 string
+	IntentID, GenerationKey                                  string
 	Scope                                                    Scope
 	Workload                                                 string
 	Generation, PoolRevision, TopologyRevision, LoadRevision uint64
@@ -184,5 +184,28 @@ func Propose(now time.Time, d Demand, p Profile, signature []byte, policy Policy
 		return Proposal{}, ErrUnproven
 	}
 	hash := sha256.Sum256(append([]byte("ccp/pd-intent/v1\x00"), payload...))
-	return Proposal{IntentID: hex.EncodeToString(hash[:]), Scope: d.Scope, Workload: d.Workload, Generation: d.Generation, PoolRevision: t.PoolRevision, TopologyRevision: t.TopologyRevision, LoadRevision: d.LoadRevision, PrefillReplicas: a.PrefillReplicas, DecodeReplicas: a.DecodeReplicas, GPUsNeeded: a.GPUsNeeded}, nil
+	keyPayload, e := json.Marshal(struct {
+		Tenant, Project, Workload string
+		Generation                uint64
+	}{d.Scope.Tenant, d.Scope.Project, d.Workload, d.Generation})
+	if e != nil {
+		return Proposal{}, ErrUnproven
+	}
+	keyHash := sha256.Sum256(append([]byte("ccp/pd-generation/v1\x00"), keyPayload...))
+	return Proposal{IntentID: hex.EncodeToString(hash[:]), GenerationKey: hex.EncodeToString(keyHash[:]), Scope: d.Scope, Workload: d.Workload, Generation: d.Generation, PoolRevision: t.PoolRevision, TopologyRevision: t.TopologyRevision, LoadRevision: d.LoadRevision, PrefillReplicas: a.PrefillReplicas, DecodeReplicas: a.DecodeReplicas, GPUsNeeded: a.GPUsNeeded}, nil
+}
+
+// RevalidateProposal checks an exact candidate against independently refreshed
+// observations and the next generation read from durable authority. Consumers
+// must perform the generation/revision CAS in the same transaction as acceptance;
+// this pure check cannot prevent a concurrent update after it returns.
+func RevalidateProposal(now time.Time, candidate Proposal, expectedNextGeneration uint64, d Demand, p Profile, signature []byte, policy Policy, t Topology, maxObservationAge time.Duration) error {
+	if expectedNextGeneration == 0 || d.Generation != expectedNextGeneration || candidate.Generation != expectedNextGeneration {
+		return ErrUnproven
+	}
+	actual, err := Propose(now, d, p, signature, policy, t, maxObservationAge)
+	if err != nil || actual != candidate {
+		return ErrUnproven
+	}
+	return nil
 }
