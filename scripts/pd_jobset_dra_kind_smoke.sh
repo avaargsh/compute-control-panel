@@ -54,6 +54,13 @@ YAML
 
 # One JobSet, two replicatedJobs, one per-Pod DRA claim each. Both
 # requests must share one Kueue Workload; no two-job independent admission.
+# The JobSet Deployment may be Available before the admission webhook has
+# bound its listener. A CREATE may be retried only if a *specific* webhook
+# transport failure proves admission never ran; never retry a stale, forbidden,
+# schema-invalid, duplicate, or ambiguous CREATE outcome.
+jobset_yaml="$(mktemp)"
+jobset_err="$(mktemp)"
+trap 'rm -f "$jobset_yaml" "$jobset_err"' EXIT
 {
 cat <<YAML
 apiVersion: jobset.x-k8s.io/v1alpha2
@@ -93,7 +100,34 @@ cat <<YAML
               resourceClaimTemplateName: pd-gpu
 YAML
 done
-} | kubectl create -f -
+} > "$jobset_yaml"
+jobset_created=false
+for attempt in $(seq 1 30); do
+  if kubectl create -f "$jobset_yaml" 2>"$jobset_err"; then
+    jobset_created=true
+    break
+  fi
+  cat "$jobset_err" >&2
+  # This exact failure is a webhook connection/readiness race, not a denial
+  # or an uncertain HTTP 5xx from a webhook that may have created an object.
+  if ! grep -Eq 'failed calling webhook "(mjobset|vjobset)\.kb\.io".*(connect: connection refused|no endpoints available)' "$jobset_err"; then
+    echo "FAIL: JobSet CREATE was not a retryable webhook-readiness error" >&2
+    exit 1
+  fi
+  # Even on a transport error, never issue another POST if a same-name
+  # object might exist. Treat a failed or unauthorized GET as ambiguous.
+  if existing="$(kubectl -n "$ns" get jobset pd-pair 2>&1)"; then
+    echo "FAIL: JobSet already exists after failed CREATE; refusing duplicate" >&2
+    exit 1
+  fi
+  if ! grep -Eqi 'NotFound|not found' <<< "$existing"; then
+    echo "FAIL: could not prove JobSet absent after failed CREATE: $existing" >&2
+    exit 1
+  fi
+  echo "JobSet webhook not listening; retrying verified-unapplied CREATE ($attempt/30)" >&2
+  sleep 2
+done
+[[ "$jobset_created" == true ]] || { echo "FAIL: JobSet webhook never became ready" >&2; exit 1; }
 uid="$(kubectl -n "$ns" get jobset pd-pair -o jsonpath='{.metadata.uid}')"
 cq_uid="$(kubectl get clusterqueue "$q" -o jsonpath='{.metadata.uid}')"
 [[ -n "$uid" && -n "$cq_uid" ]] || exit 1
