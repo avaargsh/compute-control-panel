@@ -95,21 +95,20 @@ func TestPDStagingSnapshotRefusesMultiGPUEstimatesWithoutPhaseCardinality(t *tes
 		t.Fatal("valid one-GPU-per-replica stage refused")
 	}
 	for _, mutate := range []func(*pd.Proposal){
-		func(p *pd.Proposal){p.GPUsNeeded=6},
-		func(p *pd.Proposal){p.PrefillReplicas=0},
-		func(p *pd.Proposal){p.DecodeReplicas=33},
-		func(p *pd.Proposal){p.PoolRevision=0},
-		func(p *pd.Proposal){p.TopologyRevision=0},
-		func(p *pd.Proposal){p.LoadRevision=0},
+		func(p *pd.Proposal) { p.GPUsNeeded = 6 },
+		func(p *pd.Proposal) { p.PrefillReplicas = 0 },
+		func(p *pd.Proposal) { p.DecodeReplicas = 33 },
+		func(p *pd.Proposal) { p.PoolRevision = 0 },
+		func(p *pd.Proposal) { p.TopologyRevision = 0 },
+		func(p *pd.Proposal) { p.LoadRevision = 0 },
 	} {
 		p := proposal
 		mutate(&p)
 		if singleGPUStagingShape(p) {
-			t.Fatalf("unproven PD physical cardinality or revision accepted %+v",p)
+			t.Fatalf("unproven PD physical cardinality or revision accepted %+v", p)
 		}
 	}
 }
-
 
 func TestPDStagingSnapshotRejectsSignedMultiGPUProposals(t *testing.T) {
 	db := openIntegrationDB(t)
@@ -124,9 +123,9 @@ func TestPDStagingSnapshotRejectsSignedMultiGPUProposals(t *testing.T) {
 	}
 	fixturePDRelease(t, ctx, db, intent.Candidate.Workload)
 	if _, created, err := repo.PromotePDIntent(ctx, owner, intent.Candidate.IntentID, "pd-stage-multigpu-negative"); err != nil || !created {
-		t.Fatalf("multi-GPU immutable proposal should still record without dispatch: created=%t err=%v",created,err)
+		t.Fatalf("multi-GPU immutable proposal should still record without dispatch: created=%t err=%v", created, err)
 	}
 	if stage, err := repo.ReadCurrentPDStagingSnapshot(ctx, owner, intent.Candidate.IntentID); !errors.Is(err, ErrPDPromotionBlocked) {
-		t.Fatalf("unsupported multi-GPU proposal was exposed as dispatchable: %+v %v",stage,err)
+		t.Fatalf("unsupported multi-GPU proposal was exposed as dispatchable: %+v %v", stage, err)
 	}
 }
