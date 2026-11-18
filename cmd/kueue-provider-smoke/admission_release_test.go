@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -36,10 +37,10 @@ func admissionReleaseFixture() (provider.KueueCreatePin, admissionReleaseSeed, o
 }
 
 func TestAdmissionReleaseObservationsStayUnknown(t *testing.T) {
-	for _, fault := range []string{"", "claim404", "claim403", "claim allocated", "claim deleting", "claim replaced", "pod present", "quota reserved", "claim RV drift"} {
+	for _, fault := range []string{"", "claim404", "claim404 list403", "claim404 successor", "claim403", "claim allocated", "claim deleting", "claim replaced", "pod present", "quota reserved", "claim RV drift"} {
 		t.Run(fault, func(t *testing.T) {
 			pin, seed, absence := admissionReleaseFixture()
-			var claimReads, writes atomic.Int32
+			var claimReads, claimListReads, writes atomic.Int32
 			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != http.MethodGet {
 					writes.Add(1)
@@ -65,9 +66,25 @@ func TestAdmissionReleaseObservationsStayUnknown(t *testing.T) {
 						reserved = 1
 					}
 					response = map[string]any{"metadata": releaseTestMeta(seed.Queue.ClusterQueue), "status": map[string]any{"reservingWorkloads": reserved, "admittedWorkloads": 0}}
+				case "/apis/resource.k8s.io/v1/namespaces/ccp-kueue-smoke/resourceclaims":
+					claimListReads.Add(1)
+					if fault == "claim403" || fault == "claim404 list403" {
+						w.WriteHeader(http.StatusForbidden)
+						return
+					}
+					items := []any{map[string]any{"metadata": releaseTestMeta(seed.PodClaim.Claim.Claim)}}
+					if fault == "claim404" {
+						items = []any{}
+					}
+					if fault == "claim404 successor" {
+						ref := seed.PodClaim.Claim.Claim
+						ref.UID = "successor-claim"
+						items = []any{map[string]any{"metadata": releaseTestMeta(ref)}}
+					}
+					response = map[string]any{"apiVersion": "resource.k8s.io/v1", "kind": "ResourceClaimList", "metadata": map[string]any{"resourceVersion": "500"}, "items": items}
 				case "/apis/resource.k8s.io/v1/namespaces/ccp-kueue-smoke/resourceclaims/claim-a":
 					n := claimReads.Add(1)
-					if fault == "claim404" {
+					if strings.HasPrefix(fault, "claim404") {
 						w.WriteHeader(http.StatusNotFound)
 						return
 					}
@@ -130,6 +147,14 @@ func TestAdmissionReleaseObservationsStayUnknown(t *testing.T) {
 			}
 			if len(fault) >= 5 && fault[:5] == "claim" && report["claim_unallocated"] != nil {
 				t.Fatalf("unproven Claim counted unallocated: %+v", report)
+			}
+			if fault == "claim404" {
+				versions, ok := report["resource_versions"].(map[string]string)
+				if report["claim_uid_absent"] != true || !ok || versions["resourceclaim_list"] != "500" || claimListReads.Load() != 2 || report["claim_unallocated"] != nil || report["api_snapshot_complete"] != false {
+					t.Fatalf("stable Claim LIST absence must not imply unallocation: %+v reads=%d", report, claimListReads.Load())
+				}
+			} else if report["claim_uid_absent"] != nil {
+				t.Fatalf("Claim absence promoted without a complete UID-pinned LIST: %+v", report)
 			}
 			if writes.Load() != 0 {
 				t.Fatalf("observer issued %d writes", writes.Load())
