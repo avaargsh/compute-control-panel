@@ -105,16 +105,16 @@ for kind in pods resourceclaims.resource.k8s.io; do
   }
 done
 for verb in get patch; do
-  [[ "$(kubectl auth can-i "$verb" jobsets.jobset.x-k8s.io -n "$ns" --as="$activation_actor" --resource-name="$name")" == "yes" ]] || {
+  [[ "$(kubectl auth can-i "$verb" "jobsets.jobset.x-k8s.io/$name" -n "$ns" --as="$activation_actor")" == "yes" ]] || {
     echo "FAIL: scoped activation identity cannot $verb its JobSet" >&2; exit 1
   }
 done
 for verb in create update delete; do
-  [[ "$(kubectl auth can-i "$verb" jobsets.jobset.x-k8s.io -n "$ns" --as="$activation_actor" --resource-name="$name")" == "no" ]] || {
+  [[ "$(kubectl auth can-i "$verb" "jobsets.jobset.x-k8s.io/$name" -n "$ns" --as="$activation_actor")" == "no" ]] || {
     echo "FAIL: activation identity has forbidden $verb authority" >&2; exit 1
   }
 done
-[[ "$(kubectl auth can-i patch jobsets.jobset.x-k8s.io -n "$ns" --as="$activation_actor" --resource-name=pd-pair)" == "no" ]] || {
+[[ "$(kubectl auth can-i patch jobsets.jobset.x-k8s.io/pd-pair -n "$ns" --as="$activation_actor")" == "no" ]] || {
   echo "FAIL: activation identity can patch another JobSet" >&2; exit 1
 }
 
