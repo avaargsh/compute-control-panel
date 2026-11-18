@@ -251,6 +251,10 @@ func (r *Repository) PromotePDIntent(ctx context.Context, owner PDIntentOwner, i
 		return PDPromotion{}, false, fmt.Errorf("PD promotion journal: %w", err)
 	}
 	if err = tx.Commit(); err != nil {
+		var state interface{ SQLState() string }
+		if errors.As(err, &state) && state.SQLState() == "PD001" {
+			return PDPromotion{}, false, fmt.Errorf("%w: %v", ErrPDPromotionBlocked, err)
+		}
 		return PDPromotion{}, false, fmt.Errorf("commit PD promotion: %w", err)
 	}
 	return promotion, true, nil
