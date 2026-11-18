@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -25,9 +24,8 @@ func TestObserveDRAMultiDeviceResourceSlicesAndNodeUID(t *testing.T) {
 		},
 		ExpectedNodeUID:"node-uid-a",
 	}
-	pod:=fmt.Sprintf(`{"apiVersion":"v1","kind":"Pod","metadata":{"namespace":"tenant-a","name":"gpu-pod-a","uid":"pod-uid-a","resourceVersion":"40","ownerReferences":[{"apiVersion":"batch/v1","kind":"Job","uid":"job-a","controller":true}]},"spec":{"nodeName":"node-a","resourceClaims":[{"name":"gpu","resourceClaimTemplateName":"gpu-template"}],"containers":[{"name":"model","resources":{"claims":[{"name":"gpu"}]}}]},"status":{"resourceClaimStatuses":[{"name":"gpu","resourceClaimName":"gpu-claim-a"}]}}`)
+	pod:=`{"apiVersion":"v1","kind":"Pod","metadata":{"namespace":"tenant-a","name":"gpu-pod-a","uid":"pod-uid-a","resourceVersion":"40","ownerReferences":[{"apiVersion":"batch/v1","kind":"Job","uid":"job-a","controller":true}]},"spec":{"nodeName":"node-a","resourceClaims":[{"name":"gpu","resourceClaimTemplateName":"gpu-template"}],"containers":[{"name":"model","resources":{"claims":[{"name":"gpu"}]}}]},"status":{"resourceClaimStatuses":[{"name":"gpu","resourceClaimName":"gpu-claim-a"}]}}`
 	claim:=draModifiedFixture(t,func(v map[string]any){
-		_,_=pod,pod
 		status:=v["status"].(map[string]any)
 		allocation:=status["allocation"].(map[string]any)["devices"].(map[string]any)
 		allocation["results"]=[]any{
