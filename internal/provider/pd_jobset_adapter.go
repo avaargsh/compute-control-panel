@@ -65,8 +65,8 @@ type pdJobSetReplicatedJob struct {
 	Replicas int    `json:"replicas"`
 	Template struct {
 		Spec struct {
-			Parallelism int                   `json:"parallelism"`
-			Completions int                   `json:"completions"`
+			Parallelism  int                   `json:"parallelism"`
+			Completions  int                   `json:"completions"`
 			BackoffLimit int                   `json:"backoffLimit"`
 			Template     kueueBatchPodTemplate `json:"template"`
 		} `json:"spec"`
@@ -74,7 +74,7 @@ type pdJobSetReplicatedJob struct {
 }
 
 type pdJobSetSpec struct {
-	Suspend        bool                     `json:"suspend"`
+	Suspend        bool                    `json:"suspend"`
 	ReplicatedJobs []pdJobSetReplicatedJob `json:"replicatedJobs"`
 }
 
@@ -92,12 +92,15 @@ func (a *PDJobSetAdapter) expected(req Request) pdJobSetObject {
 		APIVersion: "jobset.x-k8s.io/v1alpha2", Kind: "JobSet",
 		Metadata: pdJobSetMeta{
 			Name: pdJobSetName(req), Namespace: a.wire.namespace,
-			Labels: map[string]string{"kueue.x-k8s.io/queue-name": a.localQueue},
+			Labels:      map[string]string{"kueue.x-k8s.io/queue-name": a.localQueue},
 			Annotations: annotations,
 		},
 		Spec: pdJobSetSpec{Suspend: true},
 	}
-	for _, phase := range []struct{ name string; replicas int }{
+	for _, phase := range []struct {
+		name     string
+		replicas int
+	}{
 		{"prefill", a.plan.PrefillReplicas},
 		{"decode", a.plan.DecodeReplicas},
 	} {
@@ -113,7 +116,7 @@ func (a *PDJobSetAdapter) expected(req Request) pdJobSetObject {
 			Name: "ccp-pd-inert", Image: kueueSuspendedJobImage,
 			Resources: &kueueBatchResources{
 				Requests: map[string]string{"cpu": "100m", "memory": "32Mi"},
-				Claims: []kueueBatchContainerClaim{{Name: "gpu"}},
+				Claims:   []kueueBatchContainerClaim{{Name: "gpu"}},
 			},
 		}}
 		obj.Spec.ReplicatedJobs = append(obj.Spec.ReplicatedJobs, job)
@@ -304,14 +307,14 @@ func (a *PDJobSetAdapter) Inspect(ctx context.Context, req Request) (operation.O
 	return operation.Observation{
 		OperationID: req.OperationID, TenantID: req.TenantID,
 		WorkloadID: req.WorkloadID, ProviderID: req.ProviderID,
-		DesiredGeneration: req.DesiredGeneration,
-		Result: operation.ResourcePresent,
-		ResourceID: a.wire.namespace + "/" + obj.Metadata.Name,
-		ResourceUID: obj.Metadata.UID,
+		DesiredGeneration:   req.DesiredGeneration,
+		Result:              operation.ResourcePresent,
+		ResourceID:          a.wire.namespace + "/" + obj.Metadata.Name,
+		ResourceUID:         obj.Metadata.UID,
 		ResourceOperationID: req.OperationID,
-		ResourceGeneration: req.DesiredGeneration,
-		ResourceVersion: obj.Metadata.ResourceVersion,
-		ObservedAt: time.Now().UTC(),
+		ResourceGeneration:  req.DesiredGeneration,
+		ResourceVersion:     obj.Metadata.ResourceVersion,
+		ObservedAt:          time.Now().UTC(),
 	}, nil
 }
 
