@@ -34,3 +34,21 @@ func TestPlanRejectsFragmentedAndAmbiguousIslands(t *testing.T) {
 		t.Fatalf("valid disjoint islands rejected: %+v %v", a, err)
 	}
 }
+
+func TestPlanFindsPackingWhenSmallerPhaseMustGoFirst(t *testing.T) {
+	now, d, p, policy, top, priv := fixture(t)
+	// A 6-GPU prefill worker fits only on island b. Island a must
+	// hold two 5-GPU decode workers; larger-first greedy misses this.
+	d.PrefillTokensPerSecond = 100
+	d.DecodeTokensPerSecond = 100
+	p.PrefillGPUs = 6
+	p.DecodeGPUs = 5
+	top.FreeGPUs = 16
+	top.MaxGPUsPerReplica = 6
+	top.Islands = []Island{{ID: "a", FreeGPUs: 10}, {ID: "b", FreeGPUs: 6}}
+	a, err := Plan(now, d, p, sign(t, p, priv), policy, top, time.Minute)
+	want := Advice{Outcome: Fit, PrefillReplicas: 1, DecodeReplicas: 2, GPUsNeeded: 16}
+	if err != nil || a != want {
+		t.Fatalf("valid placement rejected: got %+v, want %+v, err %v", a, want, err)
+	}
+}
