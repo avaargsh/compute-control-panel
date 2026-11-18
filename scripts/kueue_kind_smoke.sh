@@ -1455,4 +1455,8 @@ kubectl wait --for=condition=Established crd/jobsets.jobset.x-k8s.io --timeout=3
 kubectl wait -n jobset-system deploy/jobset-controller-manager \
   --for=condition=Available --timeout=300s
 bash scripts/pd_jobset_dra_kind_smoke.sh
+# Fail-closed activation gate must hold even with spare paired GPU quota.
+# Feature-gate acceptance is verified against the actual JobSet+Kueue
+# controllers, not assumed from a JobSet annotation or fake HTTPS API.
+bash scripts/pd_jobset_activation_gate_kind_smoke.sh
 
