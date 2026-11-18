@@ -40,7 +40,6 @@ func NewServiceAccountPDJobSetAdapter(
 	}, nil
 }
 
-
 // NewServiceAccountPDJobSetAdapterWithBindings is the explicit test/integration
 // entrypoint for a caller-owned binding store and a projected ServiceAccount.
 // It does not attest the database login; unlike the production constructor,
