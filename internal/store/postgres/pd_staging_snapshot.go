@@ -88,7 +88,8 @@ func readCurrentPDStagingSnapshotTx(
 		return PDStagingSnapshot{}, ErrPDPromotionBlocked
 	}
 	if tx == nil || !validPDIntentOwner(owner) || !validPDIntentDigest(intentID) ||
-		(expectedStatus != operation.Pending && expectedStatus != operation.Leased) {
+		(expectedStatus != operation.Pending && expectedStatus != operation.Leased &&
+			expectedStatus != operation.InFlight) {
 		return reject()
 	}
 	var workload, providerID, poolID string
