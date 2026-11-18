@@ -16,7 +16,9 @@ type ScheduledDevice struct {
 	Pool                 string
 	Device               string
 	ClaimUID             string
+	ClaimResourceVersion string
 	PodUID               string
+	PodResourceVersion   string
 	NodeUID              string
 	SliceUID             string
 	SliceResourceVersion string
@@ -78,8 +80,9 @@ func BindScheduledDevices(now time.Time, evidence TopologyEvidence, policy Topol
 	claimPod := make(map[string]string, len(claims))
 	for _, claim := range claims {
 		for _, id := range []string{
-			claim.Driver, claim.Pool, claim.Device, claim.ClaimUID, claim.PodUID,
-			claim.NodeUID, claim.SliceUID, claim.SliceResourceVersion,
+			claim.Driver, claim.Pool, claim.Device, claim.ClaimUID, claim.ClaimResourceVersion,
+			claim.PodUID, claim.PodResourceVersion, claim.NodeUID,
+			claim.SliceUID, claim.SliceResourceVersion,
 		} {
 			if !validID(id) {
 				return fail()
