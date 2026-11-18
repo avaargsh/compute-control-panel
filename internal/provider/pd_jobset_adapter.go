@@ -65,6 +65,7 @@ type pdJobSetMeta struct {
 	Namespace       string            `json:"namespace"`
 	UID             string            `json:"uid,omitempty"`
 	ResourceVersion string            `json:"resourceVersion,omitempty"`
+	DeletionTimestamp *string         `json:"deletionTimestamp,omitempty"`
 	Labels          map[string]string `json:"labels,omitempty"`
 	Annotations     map[string]string `json:"annotations,omitempty"`
 }
@@ -171,6 +172,7 @@ func (a *PDJobSetAdapter) exact(obj pdJobSetObject, req Request) bool {
 		obj.Metadata.Name == want.Metadata.Name &&
 		obj.Metadata.Namespace == want.Metadata.Namespace &&
 		acceptableJobUID(obj.Metadata.UID) && obj.Metadata.ResourceVersion != "" &&
+		obj.Metadata.DeletionTimestamp == nil &&
 		reflect.DeepEqual(obj.Metadata.Annotations, want.Metadata.Annotations) &&
 		reflect.DeepEqual(obj.Metadata.Labels, want.Metadata.Labels) &&
 		reflect.DeepEqual(obj.Spec, want.Spec)
