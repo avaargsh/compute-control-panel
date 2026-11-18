@@ -117,6 +117,14 @@ for _ in $(seq 1 90); do
 done
 [[ -n "$wl" ]] || { echo "FAIL: paired request did not deny at one-device quota" >&2; exit 1; }
 wl_uid="$(jq -er '.metadata.uid' <<< "$wl")"
+# Denial must not start child Jobs/Pods or allocate Claims. This checks
+# controller behavior, not merely the text of a Kueue condition.
+if ! kubectl -n "$ns" get pods -o json | jq -e '.items | length == 0' >/dev/null; then
+  echo "FAIL: denied paired JobSet created Pods" >&2; exit 1
+fi
+if ! kubectl -n "$ns" get resourceclaims.resource.k8s.io -o json | jq -e '.items | length == 0' >/dev/null; then
+  echo "FAIL: denied paired JobSet created ResourceClaims" >&2; exit 1
+fi
 echo "paired_denial=$(jq -cn --arg uid "$uid" --arg wl "$wl_uid" '{jobset_uid:$uid,workload_uid:$wl,quota:1,admitted:false}')"
 
 # Increase quota on this disposable, UID-pinned fixture only.

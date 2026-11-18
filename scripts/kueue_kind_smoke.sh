@@ -1437,3 +1437,22 @@ echo "PASS: disposable CPU-only Kueue quota-denial/QuotaReserved/Admitted, exact
 # Exercise independent per-tenant Kueue DRA device-count quota and readmission.
 # This is disposable API evidence only, not authenticated GPU release.
 bash scripts/kueue_dra_quota_kind_smoke.sh
+
+# M5.7 real JobSet controller integration. Unlike the existing Go HTTPS mock
+# and Kubernetes Job smoke, this executes the actual JobSet controller and
+# Kueue's single paired Workload with a simulated DRA device quota. This is
+# still NOT a physical GPU/Driver Prepare/Allocation READY/FINAL test.
+#
+# Do this AFTER the existing DRA driver/device-class mapping and quota tests:
+# a fresh JobSet operator is installed only into this disposable kind cluster.
+jobset_release="v0.13.0"
+curl -fLSs --retry 3 --retry-delay 2 -o "$dir/jobset.yaml" \
+  "https://github.com/kubernetes-sigs/jobset/releases/download/$jobset_release/manifests.yaml"
+printf 'jobset_release=%s manifest_sha256=%s\n' \
+  "$jobset_release" "$(sha256sum "$dir/jobset.yaml" | cut -d' ' -f1)"
+kubectl apply --server-side -f "$dir/jobset.yaml"
+kubectl wait --for=condition=Established crd/jobsets.jobset.x-k8s.io --timeout=300s
+kubectl wait -n jobset-system deploy/jobset-controller-manager \
+  --for=condition=Available --timeout=300s
+bash scripts/pd_jobset_dra_kind_smoke.sh
+
