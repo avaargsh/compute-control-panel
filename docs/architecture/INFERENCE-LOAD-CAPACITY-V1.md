@@ -13,6 +13,8 @@ gpus_needed = replicas * benchmark_gpus_per_replica
 observed_free_gpus = allocatable_gpus - already_reserved_gpus
 ```
 
+The ceiling is computed over the exact values represented by the validated binary64 inputs, before converting to native integers. This avoids underestimating replicas when floating-point division rounds a fractional quotient down to an integer, and checks the GPU product against the native integer limit. It can conservatively round up near a decimal boundary; it does not improve the precision of measured rates or replace an uncertainty margin.
+
 This arithmetic is deliberately conservative about evidence (rejects stale, mismatched, future, missing, overcommitted, nonfinite or implausible samples), but is **not a statistical capacity guarantee**. Single-replica performance generally changes with concurrency and batch scheduling; a validated benchmark shape is essential. Unmet p95 TTFT / TPOT gates report `UNMET_BENCHMARK_SLO`. A positive observed capacity comparison reports only `ESTIMATED_FIT`, never Kueue admission.
 
 PD split services require separate prefill/decode benchmark and topology/transfer costs. This v0.1 interface does not treat unified-replica sizing as a complete PD split plan. Next slice: versioned per-phase throughput curves, sustained TTFT/TPOT SLO envelope, NVLink/RDMA topology, queue pressure and worker recovery/scale decisions.
