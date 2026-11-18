@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+
+	"github.com/avaargsh/compute-control-panel/internal/operation"
 	"sync"
 	"testing"
 	"time"
@@ -154,5 +156,31 @@ func TestPromotePDIntentRollbackOnOutboxCollision(t *testing.T) {
 		FROM public.compute_workloads WHERE workload_id=$1`, intent.Candidate.Workload).Scan(&generation, &allocation, &op)
 	if err != nil || generation != 1 || allocation != 0 || op != 0 {
 		t.Fatalf("partial write: %d/%d/%d %v", generation, allocation, op, err)
+	}
+}
+
+// A durable PENDING PD operation must remain non-dispatchable until a
+// separately authenticated paired-JobSet provider writer is integrated.
+// Generic operation claiming would otherwise bypass the M5.7 authority gate.
+func TestPromotedPDOperationRejectsGenericClaim(t *testing.T) {
+	db := openIntegrationDB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	repo, owner, intent := pdPromotionFixture(t, ctx, db)
+	fixturePDRelease(t, ctx, db, intent.Candidate.Workload)
+	promoted, created, err := repo.PromotePDIntent(ctx, owner, intent.Candidate.IntentID, "pd-not-dispatchable")
+	if err != nil || !created {
+		t.Fatalf("promotion failed: %+v %t %v", promoted, created, err)
+	}
+	before, err := repo.GetOperation(ctx, owner.TenantID, promoted.OperationID)
+	if err != nil || before.Status != operation.Pending {
+		t.Fatalf("expected staged pending operation: %+v %v", before, err)
+	}
+	if _, err := repo.ClaimOperation(ctx, owner.TenantID, promoted.OperationID, before.Version, "generic-writer", time.Minute); !errors.Is(err, operation.ErrTransition) {
+		t.Fatalf("generic writer claimed non-dispatchable PD operation: %v", err)
+	}
+	after, err := repo.GetOperation(ctx, owner.TenantID, promoted.OperationID)
+	if err != nil || after.Status != before.Status || after.Version != before.Version || after.FenceToken != before.FenceToken {
+		t.Fatalf("generic claim mutated staged PD operation: before=%+v after=%+v err=%v", before, after, err)
 	}
 }
