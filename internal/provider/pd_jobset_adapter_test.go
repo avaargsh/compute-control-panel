@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -252,5 +253,99 @@ func TestPDJobSetRejectsUnprovenMultiGPUClaimTemplate(t *testing.T) {
 	plan.DecodeGPUsPerReplica = 2
 	if validPDJobSetPlan(plan) {
 		t.Fatal("accepted unverified Decode multi-GPU ClaimTemplate cardinality")
+	}
+}
+
+func TestPDJobSetPinnedControllerDefaultsAreStrictlyNonExecutable(t *testing.T) {
+	plan := pdJobSetTestConfig()
+	req := pdJobSetTestRequest(plan)
+	a, closeServer := pdJobSetTestAdapter(t, &pdJobSetAPI{}, NewMemoryKueueJobBindingStore(), plan)
+	defer closeServer()
+	want := a.expected(req)
+	payload, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var server map[string]any
+	if err := json.Unmarshal(payload, &server); err != nil {
+		t.Fatal(err)
+	}
+	meta := server["metadata"].(map[string]any)
+	meta["uid"], meta["resourceVersion"] = "pinned-uid", "57"
+	spec := server["spec"].(map[string]any)
+	spec["network"] = map[string]any{"enableDNSHostnames": true, "publishNotReadyAddresses": true}
+	spec["startupPolicy"] = map[string]any{"startupPolicyOrder": "AnyOrder"}
+	spec["successPolicy"] = map[string]any{"operator": "All"}
+	for _, phase := range spec["replicatedJobs"].([]any) {
+		job := phase.(map[string]any)
+		job["groupName"] = "default"
+		tmpl := job["template"].(map[string]any)
+		tmpl["metadata"] = map[string]any{}
+		jobSpec := tmpl["spec"].(map[string]any)
+		jobSpec["completionMode"] = "Indexed"
+		pod := jobSpec["template"].(map[string]any)
+		pod["metadata"] = map[string]any{}
+	}
+	serverDefaulted, err := json.Marshal(server)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := parsePDJobSet(serverDefaulted)
+	if err != nil || !reflect.DeepEqual(parsed.Spec, want.Spec) || !a.exact(parsed, req) {
+		t.Fatalf("exact JobSet v0.13 safe defaults rejected: %+v %v", parsed.Spec, err)
+	}
+	// This list is deliberately limited to actual observed defaults, not an
+	// open-ended JSON unknown-field bypass.
+	for _, tc := range []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{"network-disabled", func(v map[string]any) {
+			v["spec"].(map[string]any)["network"].(map[string]any)["enableDNSHostnames"] = false
+		}},
+		{"extra-network-field", func(v map[string]any) {
+			v["spec"].(map[string]any)["network"].(map[string]any)["hostNetwork"] = true
+		}},
+		{"unsanctioned-startup-order", func(v map[string]any) {
+			v["spec"].(map[string]any)["startupPolicy"].(map[string]any)["startupPolicyOrder"] = "InOrder"
+		}},
+		{"unsanctioned-success-policy", func(v map[string]any) {
+			v["spec"].(map[string]any)["successPolicy"].(map[string]any)["operator"] = "Any"
+		}},
+		{"custom-job-group", func(v map[string]any) {
+			v["spec"].(map[string]any)["replicatedJobs"].([]any)[0].(map[string]any)["groupName"] = "other"
+		}},
+		{"executable-job-template-metadata", func(v map[string]any) {
+			j := v["spec"].(map[string]any)["replicatedJobs"].([]any)[0].(map[string]any)
+			j["template"].(map[string]any)["metadata"] = map[string]any{"annotations": map[string]any{"evil": "true"}}
+		}},
+		{"nonindexed-job-completion", func(v map[string]any) {
+			j := v["spec"].(map[string]any)["replicatedJobs"].([]any)[0].(map[string]any)
+			j["template"].(map[string]any)["spec"].(map[string]any)["completionMode"] = "NonIndexed"
+		}},
+		{"pod-template-label-injection", func(v map[string]any) {
+			j := v["spec"].(map[string]any)["replicatedJobs"].([]any)[0].(map[string]any)
+			j["template"].(map[string]any)["spec"].(map[string]any)["template"].(map[string]any)["metadata"] =
+				map[string]any{"labels": map[string]any{"privileged": "true"}}
+		}},
+		{"hostnetwork-pod", func(v map[string]any) {
+			j := v["spec"].(map[string]any)["replicatedJobs"].([]any)[0].(map[string]any)
+			j["template"].(map[string]any)["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)["hostNetwork"] = true
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var cloned map[string]any
+			if err := json.Unmarshal(serverDefaulted, &cloned); err != nil {
+				t.Fatal(err)
+			}
+			tc.mutate(cloned)
+			raw, err := json.Marshal(cloned)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, err := parsePDJobSet(raw); err == nil {
+				t.Fatalf("accepted unsafe webhook spec drift %+v", got.Spec)
+			}
+		})
 	}
 }

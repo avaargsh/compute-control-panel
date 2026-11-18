@@ -39,3 +39,29 @@ func NewServiceAccountPDJobSetAdapter(
 		plan:       plan,
 	}, nil
 }
+
+// NewServiceAccountPDJobSetAdapterWithBindings is the explicit test/integration
+// entrypoint for a caller-owned binding store and a projected ServiceAccount.
+// It does not attest the database login; unlike the production constructor,
+// a memory store is possible. This MUST NOT be used for a real in-cluster
+// operation worker. The disposable Kind Pod uses it to test the exact writer
+// against Kubernetes API defaulting and JobSet/Kueue controllers.
+func NewServiceAccountPDJobSetAdapterWithBindings(
+	apiURL, caPath, tokenPath, namespace, localQueue string,
+	bindings KueueJobBindingStore, plan PDJobSetPlan,
+) (*PDJobSetAdapter, error) {
+	if !validKubeName(namespace) || !validKubeName(localQueue) ||
+		!validPDJobSetPlan(plan) || bindings == nil {
+		return nil, ErrInvalidRequest
+	}
+	client, closeIdle, err := newServiceAccountHTTPClient(caPath, tokenPath)
+	if err != nil {
+		return nil, err
+	}
+	adapter, err := NewPDJobSetAdapterWithBindings(apiURL, namespace, localQueue, client, bindings, plan)
+	if err != nil {
+		closeIdle()
+		return nil, err
+	}
+	return adapter, nil
+}

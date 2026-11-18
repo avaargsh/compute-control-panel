@@ -197,7 +197,11 @@ func parsePDJobSet(raw []byte) (pdJobSetObject, error) {
 	if json.Unmarshal(raw, &envelope) != nil {
 		return pdJobSetObject{}, ErrInvalidKueueObservation
 	}
-	specDecoder := json.NewDecoder(bytes.NewReader(envelope.Spec))
+	normalized, err := normalizePDServerDefaults(envelope.Spec)
+	if err != nil {
+		return pdJobSetObject{}, err
+	}
+	specDecoder := json.NewDecoder(bytes.NewReader(normalized))
 	specDecoder.DisallowUnknownFields()
 	if specDecoder.Decode(&obj.Spec) != nil {
 		return pdJobSetObject{}, ErrInvalidKueueObservation
