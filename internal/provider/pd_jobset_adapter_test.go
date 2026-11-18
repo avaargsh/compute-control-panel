@@ -256,7 +256,6 @@ func TestPDJobSetRejectsUnprovenMultiGPUClaimTemplate(t *testing.T) {
 	}
 }
 
-
 func TestPDJobSetPinnedControllerDefaultsAreStrictlyNonExecutable(t *testing.T) {
 	plan := pdJobSetTestConfig()
 	req := pdJobSetTestRequest(plan)
