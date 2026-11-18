@@ -98,6 +98,12 @@ type pdJobSetObject struct {
 func (a *PDJobSetAdapter) expected(req Request) pdJobSetObject {
 	annotations := kueueJobAnnotations(req)
 	annotations["compute-control-panel.io/pd-intent-id"] = a.plan.IntentID
+	// Defense in depth: Kueue can unsuspend a queued JobSet on admission.
+	// This gate must not be removed until a separate trusted activation
+	// authority, verified feature-gate configuration and controller-backed
+	// no-Pod/no-Claim acceptance are implemented. Its presence alone does
+	// not attest that the cluster enforces AdmissionGatedBy for JobSet.
+	annotations["kueue.x-k8s.io/admission-gated-by"] = "compute-control-panel.io/pd-activation"
 	obj := pdJobSetObject{
 		APIVersion: "jobset.x-k8s.io/v1alpha2", Kind: "JobSet",
 		Metadata: pdJobSetMeta{
