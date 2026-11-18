@@ -27,13 +27,15 @@ func validIslands(t Topology) bool {
 }
 
 // packIslands is a bounded conservative witness search, not Kubernetes
-// scheduling. Larger replicas go first; a failure means this algorithm did not
-// find a packing, not that every possible placement is impossible.
+// scheduling. Trying both phase priorities avoids rejecting simple valid
+// placements missed by larger-first greedy. A failure still means no witness
+// was found, not that every possible placement is impossible.
 func packIslands(islands []Island, sizeA, countA, sizeB, countB int) bool {
-	if sizeA < sizeB {
-		sizeA, sizeB = sizeB, sizeA
-		countA, countB = countB, countA
-	}
+	return packIslandsOrdered(islands, sizeA, countA, sizeB, countB) ||
+		packIslandsOrdered(islands, sizeB, countB, sizeA, countA)
+}
+
+func packIslandsOrdered(islands []Island, sizeA, countA, sizeB, countB int) bool {
 	for _, island := range islands {
 		free := island.FreeGPUs
 		a := min(countA, free/sizeA)
