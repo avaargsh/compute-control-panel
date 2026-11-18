@@ -95,7 +95,7 @@ func readCurrentPDStagingSnapshotTx(
 	var gen int64
 	var raw []byte
 	var intentUntil, fenceUntil, databaseNow time.Time
-	err = tx.QueryRowContext(ctx, `SELECT i.workload_id,i.target_generation,i.candidate,
+	err := tx.QueryRowContext(ctx, `SELECT i.workload_id,i.target_generation,i.candidate,
 	    i.provider_id,pr.pool_id,i.valid_until,f.valid_until,pg_catalog.clock_timestamp()
 	FROM public.compute_pd_intents i
 	JOIN public.compute_pd_intent_fences f
