@@ -15,6 +15,9 @@ import (
 // previous release or Provider state is not currently eligible.
 var ErrPDPromotionBlocked = errors.New("PD promotion denied by generation, release, provider or policy fence")
 
+// This distinct event never grants generic provider dispatch eligibility.
+const pdOperationStagedV1 = "compute.pd.operation.staged.v1"
+
 // PDPromotion binds a previously accepted, immutable PD intent to the same
 // canonical Workload and Operation state machines. It is not readiness proof.
 type PDPromotion struct {
@@ -45,7 +48,7 @@ func readPDPromotion(ctx context.Context, tx *sql.Tx, o PDIntentOwner, workload,
 		  AND w.aggregate_type='compute_workload' AND w.aggregate_id=p.workload_id
 		JOIN public.compute_outbox_events e
 		  ON e.event_id=p.operation_event_id AND e.tenant_id=p.tenant_id
-		  AND e.producer='compute-control-panel' AND e.event_type='compute.operation.pending.v1'
+		  AND e.producer='compute-control-panel' AND e.event_type='compute.pd.operation.staged.v1'
 		  AND e.aggregate_type='compute_operation' AND e.aggregate_id=p.operation_id
 		WHERE p.intent_id=$1 AND p.workload_id=$2 AND p.tenant_id=$3
 		  AND p.project_id=$4 AND EXISTS (
@@ -232,7 +235,7 @@ func (r *Repository) PromotePDIntent(ctx context.Context, owner PDIntentOwner, i
 		(event_id,producer,event_type,schema_version,tenant_id,aggregate_type,aggregate_id,
 		 aggregate_version,occurred_at,correlation_id,causation_id,payload)
 		VALUES($1,$2,$3,1,$4,'compute_operation',$5,1,clock_timestamp(),$6,$7,$8::jsonb)`,
-		promotion.OperationEventID, producerName, operationPendingV1, owner.TenantID,
+		promotion.OperationEventID, producerName, pdOperationStagedV1, owner.TenantID,
 		promotion.OperationID, correlationID, promotion.WorkloadEventID, operationPayload)
 	if err != nil {
 		return PDPromotion{}, false, fmt.Errorf("PD operation outbox: %w", err)
