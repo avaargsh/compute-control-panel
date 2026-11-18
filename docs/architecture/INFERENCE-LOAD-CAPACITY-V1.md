@@ -34,3 +34,14 @@ go test -race ./internal/capacity
 ```
 
 Unverified: production capacity, live GPU benchmark, source attestation, persisted recommendation, Kueue quota, PD topology and Provider release finality.
+
+
+## Signed benchmark evidence candidate
+
+`AdviseSigned` is a separate offline, non-actuating entry point. It verifies an Ed25519 signature over the domain prefix `ccp/unified-benchmark/v1\\x00` (one NUL byte) followed by Go `json.Marshal(BenchmarkClaim)` bytes. The signed typed claim covers verifier key ID, run ID, raw artifact SHA-256, evaluator commit, pool/model/GPU/shape identity, single-replica GPU count, attempt/success/TPOT coverage, observed wall time, observation end time (Unix milliseconds), rates and p95 metrics. No external caller can set an attestation flag through this entry point. Invalid UTF-8 identities, malformed digests, invalid numeric values, stale/future observations, wrong signatures and mismatched policy scope fail closed.
+
+The trusted policy is supplied independently by infrastructure code, never from the report or HTTP request. It pins the authorized verifier key, evaluator commit and exact benchmark scope, sets a half-open validity window and maximum evidence age, and requires positive minimum attempts, success-rate and observed-wall-time thresholds. The v1 acceptance rule requires every successful request to contribute a TPOT sample. Pool evidence has a separate maximum age and still requires the existing independent attested observation; benchmark signing cannot certify pool capacity. This is in-process Go encoding, not yet a cross-language canonical wire specification. The old `Advise` remains a pure internal calculator with trusted-adapter input and must not be exposed directly to untrusted callers.
+
+The XPUlink offline evaluator currently produces input/output tokens per **whole run wall time**, not isolated PD phase throughput. Its current JSON summary does not identify verified single-replica deployment configuration or TPOT sample count. An independently trusted verifier must validate raw artifact bytes, run grouping, execution configuration, full successful-request TPOT coverage and exact measured values before signing; a summary alone is insufficient. Never reinterpret those wall rates as separate Prefill/Decode device rates. The claim digest is a signed commitment, not proof that this code fetched or checked the raw artifact.
+
+Before live integration: provision independently administered keys/policies and revocation, establish artifact retrieval and digest recomputation and source authentication, prove deployment/configuration binding and cross-language encoding, implement independently authenticated pool observation, add real GPU matched-run and PD topology evidence. No new ingress, storage schema, signer service, admission, scaling, release or finance path is enabled.
