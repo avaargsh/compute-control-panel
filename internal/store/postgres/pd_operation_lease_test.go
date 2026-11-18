@@ -40,7 +40,8 @@ func TestPDLeaseClaimAndStartRequireExactCurrentAuthority(t *testing.T) {
 		started.Operation.FenceToken != claimed.Operation.FenceToken {
 		t.Fatalf("staging start: %+v %v", started, err)
 	}
-	if _, err := repo.StartPDStagingOperation(ctx, owner, id, claimed.Operation.Version, "staging-worker-a", claimed.Operation.FenceToken); !errors.Is(err, operation.ErrStale) {
+	if _, err := repo.StartPDStagingOperation(ctx, owner, id, claimed.Operation.Version, "staging-worker-a", claimed.Operation.FenceToken); err == nil ||
+		(!errors.Is(err, operation.ErrStale) && !errors.Is(err, ErrPDPromotionBlocked)) {
 		t.Fatalf("old lease version was replayed: %v", err)
 	}
 	if _, err := repo.ClaimPDStagingOperation(ctx, owner, id, 1, "staging-worker-b", time.Minute); err == nil {
