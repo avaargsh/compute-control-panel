@@ -17,8 +17,15 @@ import (
 	"github.com/avaargsh/compute-control-panel/internal/capacity/pd/rawphase"
 )
 
-func pdIntentFixture(t *testing.T, now time.Time, scope pd.Scope, workload, providerID string) pd.VerifiedProposal {
+func pdIntentFixture(t *testing.T, now time.Time, scope pd.Scope, workload, providerID string, gpuOverride ...int) pd.VerifiedProposal {
 	t.Helper()
+	prefillGPUs := 2
+	if len(gpuOverride) > 0 {
+		if len(gpuOverride) != 1 || gpuOverride[0] != 1 {
+			t.Fatal("only the one-GPU staging fixture override is supported")
+		}
+		prefillGPUs = gpuOverride[0]
+	}
 	key := func() (ed25519.PublicKey, ed25519.PrivateKey) {
 		pub, priv, err := ed25519.GenerateKey(nil)
 		if err != nil {
@@ -41,7 +48,7 @@ func pdIntentFixture(t *testing.T, now time.Time, scope pd.Scope, workload, prov
 	fPub, fPriv := key()
 	end := now.UnixMilli()
 	start := end - 1000
-	m := rawphase.Manifest{Version: "pd-raw/v1", RunID: "run", Tenant: scope.Tenant, Project: scope.Project, Pool: scope.Pool, Model: scope.Model, GPU: scope.GPU, Shape: scope.Shape, Fabric: scope.Fabric, EvaluatorCommit: strings.Repeat("a", 40), DeploymentSHA256: strings.Repeat("b", 64), PrefillWorker: "pf", DecodeWorker: "dc", PrefillGPUs: 2, DecodeGPUs: 1, StartMS: start, EndMS: end, Attempts: 1, KVBytesLimit: 100}
+	m := rawphase.Manifest{Version: "pd-raw/v1", RunID: "run", Tenant: scope.Tenant, Project: scope.Project, Pool: scope.Pool, Model: scope.Model, GPU: scope.GPU, Shape: scope.Shape, Fabric: scope.Fabric, EvaluatorCommit: strings.Repeat("a", 40), DeploymentSHA256: strings.Repeat("b", 64), PrefillWorker: "pf", DecodeWorker: "dc", PrefillGPUs: prefillGPUs, DecodeGPUs: 1, StartMS: start, EndMS: end, Attempts: 1, KVBytesLimit: 100}
 	a := rawphase.Attempt{AttemptID: "a", TransferID: "kv", PrefillWorker: "pf", DecodeWorker: "dc", Success: true, PrefillTokens: 100, DecodeTokens: 3, KVBytes: 100, RequestStartMS: start, PrefillStartMS: start, PrefillEndMS: start + 100, TransferStartMS: start + 100, TransferEndMS: start + 200, DecodeStartMS: start + 200, FirstTokenMS: start + 400, LastTokenMS: start + 800}
 	raw, err := json.Marshal(m)
 	if err != nil {
@@ -52,7 +59,7 @@ func pdIntentFixture(t *testing.T, now time.Time, scope pd.Scope, workload, prov
 		t.Fatal(err)
 	}
 	raw = append(append(raw, '\n'), row...)
-	claim := pd.Profile{Scope: scope, KeyID: "benchmark", RunID: m.RunID, ArtifactSHA256: hash(raw), ObservedAtMillis: end, PrefillGPUs: 2, DecodeGPUs: 1, PrefillTokensPerSecond: 100, DecodeTokensPerSecond: 3, MaxKVBytesPerRequest: 100, P95TTFTms: 400, P95TPOTms: 200, P95TransferMs: 100}
+	claim := pd.Profile{Scope: scope, KeyID: "benchmark", RunID: m.RunID, ArtifactSHA256: hash(raw), ObservedAtMillis: end, PrefillGPUs: prefillGPUs, DecodeGPUs: 1, PrefillTokensPerSecond: 100, DecodeTokensPerSecond: 3, MaxKVBytesPerRequest: 100, P95TTFTms: 400, P95TPOTms: 200, P95TransferMs: 100}
 	demand := pd.Demand{Scope: scope, Workload: workload, Generation: 2, LoadRevision: 3, ObservedAtMillis: end, PrefillTokensPerSecond: 100, DecodeTokensPerSecond: 3, RequestsPerSecond: 1, MaxKVBytesPerRequest: 100, MaxTTFTms: 400, MaxTPOTms: 200, MaxTransferP95ms: 100}
 	bPolicy := pd.Policy{Scope: scope, KeyID: claim.KeyID, PublicKey: bPub, ValidFrom: now.Add(-time.Hour), ValidUntil: now.Add(time.Hour), MaxAge: 5 * time.Minute}
 	meta := pd.SourceMeta{Scope: scope, ClusterUID: "cluster-uid", ProviderID: providerID, KeyID: "inventory", AdapterID: "inventory/v1", PoolRevision: 7, TopologyRevision: 9, ObservedAtMillis: end - 3000}
@@ -81,7 +88,7 @@ func pdIntentFixture(t *testing.T, now time.Time, scope pd.Scope, workload, prov
 	return v
 }
 
-func preparePDIntent(t *testing.T, ctx context.Context, db *sql.DB) (*Repository, PDIntentOwner, pd.VerifiedProposal) {
+func preparePDIntent(t *testing.T, ctx context.Context, db *sql.DB, gpuOverride ...int) (*Repository, PDIntentOwner, pd.VerifiedProposal) {
 	t.Helper()
 	repo, err := NewRepository(db)
 	if err != nil {
@@ -103,7 +110,7 @@ func preparePDIntent(t *testing.T, ctx context.Context, db *sql.DB) (*Repository
 		t.Fatal(err)
 	}
 	scope := pd.Scope{Tenant: owner.TenantID, Project: owner.ProjectID, Pool: params.PoolID, Model: "model", GPU: "gpu", Shape: "shape", Fabric: "fabric"}
-	return repo, owner, pdIntentFixture(t, now, scope, w.Workload.WorkloadID, provider.ProviderID)
+	return repo, owner, pdIntentFixture(t, now, scope, w.Workload.WorkloadID, provider.ProviderID, gpuOverride...)
 }
 
 func seedPDIntentFence(t *testing.T, ctx context.Context, db *sql.DB, v pd.VerifiedProposal) {
