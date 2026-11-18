@@ -85,12 +85,18 @@ func TestPromotePDIntentRejectsLiveOldAllocationAndCommitsNextGenerationAtomical
 		(SELECT count(*) FROM public.compute_allocations a WHERE a.workload_id=w.workload_id AND a.desired_generation=$2 AND a.phase='PENDING'),
 		(SELECT count(*) FROM public.compute_operations o WHERE o.workload_id=w.workload_id AND o.desired_generation=$2 AND o.status='PENDING' AND o.allocation_id=$3),
 		(SELECT count(*) FROM public.compute_outbox_events e WHERE e.event_id=$4 AND e.event_type='compute.pd.workload.generation-accepted.v1'),
-		(SELECT count(*) FROM public.compute_outbox_events e WHERE e.event_id=$5 AND e.event_type='compute.operation.pending.v1')
+		(SELECT count(*) FROM public.compute_outbox_events e WHERE e.event_id=$5 AND e.event_type='compute.pd.operation.staged.v1')
 		FROM public.compute_workloads w WHERE w.workload_id=$1 AND w.tenant_id=$6`,
 		c.Workload, int64(c.Generation), first.AllocationID, first.WorkloadEventID, first.OperationEventID, owner.TenantID).
 		Scan(&generation, &allocation, &operation, &workloadEvents, &operationEvents)
 	if err != nil || generation != 2 || allocation != 1 || operation != 1 || workloadEvents != 1 || operationEvents != 1 {
 		t.Fatalf("generation/alloc/op/workload-event/op-event=%d/%d/%d/%d/%d err=%v", generation, allocation, operation, workloadEvents, operationEvents, err)
+	}
+	// PD staging must never masquerade as the generic dispatch-eligible event.
+	var dispatchEvents int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM public.compute_outbox_events WHERE event_id=$1 AND event_type=$2`,
+		first.OperationEventID, operationPendingV1).Scan(&dispatchEvents); err != nil || dispatchEvents != 0 {
+		t.Fatalf("PD staging published %d generic dispatch events: %v", dispatchEvents, err)
 	}
 }
 
