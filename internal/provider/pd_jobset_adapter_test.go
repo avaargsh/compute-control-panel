@@ -89,10 +89,14 @@ func (s *pdJobSetAPI) count() int {
 func pdJobSetTestConfig() PDJobSetPlan {
 	return PDJobSetPlan{
 		IntentID:                  strings.Repeat("a", 64),
+		TenantID:                  "tenant-a",
+		WorkloadID:                "w-a",
+		ProviderID:                "pd-provider",
+		Generation:                2,
 		PrefillReplicas:           2,
 		DecodeReplicas:            3,
-		PrefillGPUsPerReplica:     4,
-		DecodeGPUsPerReplica:      2,
+		PrefillGPUsPerReplica:     1,
+		DecodeGPUsPerReplica:      1,
 		ResourceClaimTemplateName: "gpu-claim-template",
 	}
 }
@@ -200,6 +204,10 @@ func TestPDJobSetRejectsCrossIntentAndMalformedScopeBeforePOST(t *testing.T) {
 		func() Request { v := req; v.OperationID += "-other"; return v }(),
 		func() Request { v := req; v.IdempotencyKey += "-other"; return v }(),
 		func() Request { v := req; v.Kind = operation.Update; return v }(),
+		func() Request { v := req; v.TenantID = "other-tenant"; return v }(),
+		func() Request { v := req; v.WorkloadID = "other-workload"; return v }(),
+		func() Request { v := req; v.ProviderID = "other-provider"; return v }(),
+		func() Request { v := req; v.DesiredGeneration++; return v }(),
 	}
 	for _, input := range tests {
 		if _, err := a.Apply(context.Background(), input); err == nil {
@@ -208,5 +216,18 @@ func TestPDJobSetRejectsCrossIntentAndMalformedScopeBeforePOST(t *testing.T) {
 	}
 	if api.count() != 0 {
 		t.Fatalf("unsafe input reached POST: %d", api.count())
+	}
+}
+
+func TestPDJobSetRejectsUnprovenMultiGPUClaimTemplate(t *testing.T) {
+	plan := pdJobSetTestConfig()
+	plan.PrefillGPUsPerReplica = 2
+	if validPDJobSetPlan(plan) {
+		t.Fatal("accepted unverified multi-GPU ClaimTemplate cardinality")
+	}
+	plan = pdJobSetTestConfig()
+	plan.DecodeGPUsPerReplica = 2
+	if validPDJobSetPlan(plan) {
+		t.Fatal("accepted unverified Decode multi-GPU ClaimTemplate cardinality")
 	}
 }
