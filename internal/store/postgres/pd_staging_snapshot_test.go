@@ -14,7 +14,7 @@ func TestPDStagingSnapshotRequiresPromotionAndCurrentIndependentFence(t *testing
 	db := openIntegrationDB(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	repo, owner, intent := pdPromotionFixture(t, ctx, db)
+	repo, owner, intent := pdPromotionFixture(t, ctx, db, 1)
 	id := intent.Candidate.IntentID
 	if got, err := repo.ReadCurrentPDStagingSnapshot(ctx, owner, id); !errors.Is(err, ErrPDPromotionBlocked) || got.Promotion.IntentID != "" {
 		t.Fatalf("unpromoted proposal was accepted: %+v %v", got, err)
@@ -53,7 +53,7 @@ func TestPDStagingSnapshotRejectsRevokedExpiredOwnerOrSupersededGeneration(t *te
 	defer cancel()
 	for _, tc := range []string{"revoked", "expired", "wrong-owner", "stale-generation"} {
 		t.Run(tc, func(t *testing.T) {
-			repo, owner, intent := pdPromotionFixture(t, ctx, db)
+			repo, owner, intent := pdPromotionFixture(t, ctx, db, 1)
 			fixturePDRelease(t, ctx, db, intent.Candidate.Workload)
 			_, created, err := repo.PromotePDIntent(ctx, owner, intent.Candidate.IntentID, "pd-stage-blocker")
 			if err != nil || !created {
@@ -107,5 +107,26 @@ func TestPDStagingSnapshotRefusesMultiGPUEstimatesWithoutPhaseCardinality(t *tes
 		if singleGPUStagingShape(p) {
 			t.Fatalf("unproven PD physical cardinality or revision accepted %+v",p)
 		}
+	}
+}
+
+
+func TestPDStagingSnapshotRejectsSignedMultiGPUProposals(t *testing.T) {
+	db := openIntegrationDB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	// Default signed benchmark uses 2 prefill GPUs and 1 decode GPU per
+	// replica. It must NOT pass the one-GPU first writer through inference
+	// from mere totals or from a simulated ResourceClaimTemplate.
+	repo, owner, intent := pdPromotionFixture(t, ctx, db)
+	if intent.Candidate.GPUsNeeded == intent.Candidate.PrefillReplicas+intent.Candidate.DecodeReplicas {
+		t.Fatal("the multi-GPU negative fixture was silently weakened")
+	}
+	fixturePDRelease(t, ctx, db, intent.Candidate.Workload)
+	if _, created, err := repo.PromotePDIntent(ctx, owner, intent.Candidate.IntentID, "pd-stage-multigpu-negative"); err != nil || !created {
+		t.Fatalf("multi-GPU immutable proposal should still record without dispatch: created=%t err=%v",created,err)
+	}
+	if stage, err := repo.ReadCurrentPDStagingSnapshot(ctx, owner, intent.Candidate.IntentID); !errors.Is(err, ErrPDPromotionBlocked) {
+		t.Fatalf("unsupported multi-GPU proposal was exposed as dispatchable: %+v %v",stage,err)
 	}
 }
