@@ -45,6 +45,12 @@ for _ in $(seq 1 90); do
   [[ "$phase" == Succeeded ]] && break
   if [[ "$phase" == Failed ]]; then
     kubectl -n "$ns" logs "$name" >&2 || true
+    # Print only the disposable JobSet's server-defaulted metadata and spec,
+    # never ServiceAccount tokens, Kubeconfig or unrelated cluster objects.
+    kubectl -n "$ns" get jobsets.jobset.x-k8s.io -o json |
+      jq -c --arg intent "$intent" '[.items[] |
+        select(.metadata.annotations["compute-control-panel.io/pd-intent-id"]==$intent) |
+        {metadata:{name:.metadata.name,uid:.metadata.uid,annotations:.metadata.annotations,labels:.metadata.labels},spec}]' >&2 || true
     echo "FAIL: real PD JobSet writer failed" >&2
     exit 1
   fi
