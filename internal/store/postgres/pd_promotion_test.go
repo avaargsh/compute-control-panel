@@ -4,11 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-
-	"github.com/avaargsh/compute-control-panel/internal/operation"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/avaargsh/compute-control-panel/internal/operation"
 )
 
 func pdPromotionFixture(t *testing.T, ctx context.Context, db *sql.DB) (*Repository, PDIntentOwner, PDIntentRecord) {
