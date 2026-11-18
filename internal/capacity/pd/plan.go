@@ -73,6 +73,7 @@ type Topology struct {
 	FreeGPUs, MaxGPUsPerReplica    int
 	FreeKVBytesPerSecond           uint64
 	Attested                       bool
+	Islands                        []Island
 }
 type Advice struct {
 	Outcome                                     Outcome
@@ -115,7 +116,7 @@ func ceilRatio(a, b float64) *big.Int {
 // admission, allocation or that independent replicas scale linearly.
 func Plan(now time.Time, d Demand, p Profile, signature []byte, policy Policy, t Topology, maxObservationAge time.Duration) (Advice, error) {
 	fail := func() (Advice, error) { return Advice{Outcome: Unproven}, ErrUnproven }
-	if now.IsZero() || !validScope(d.Scope) || d.Scope != p.Scope || d.Scope != policy.Scope || d.Scope != t.Scope || !validID(d.Workload) || d.Generation == 0 || d.LoadRevision == 0 || !fresh(now, d.ObservedAtMillis, maxObservationAge) || !fresh(now, t.ObservedAtMillis, maxObservationAge) || !t.Attested || t.PoolRevision == 0 || t.TopologyRevision == 0 || t.FreeGPUs < 0 || t.MaxGPUsPerReplica < 0 {
+	if now.IsZero() || !validScope(d.Scope) || d.Scope != p.Scope || d.Scope != policy.Scope || d.Scope != t.Scope || !validID(d.Workload) || d.Generation == 0 || d.LoadRevision == 0 || !fresh(now, d.ObservedAtMillis, maxObservationAge) || !fresh(now, t.ObservedAtMillis, maxObservationAge) || !t.Attested || t.PoolRevision == 0 || t.TopologyRevision == 0 || t.FreeGPUs < 0 || t.MaxGPUsPerReplica < 0 || !validIslands(t) {
 		return fail()
 	}
 	if !validID(p.KeyID) || p.KeyID != policy.KeyID || !validID(p.RunID) || !digest(p.ArtifactSHA256) || len(policy.PublicKey) != ed25519.PublicKeySize || len(signature) != ed25519.SignatureSize || policy.ValidFrom.IsZero() || !policy.ValidFrom.Before(policy.ValidUntil) || now.Before(policy.ValidFrom) || !now.Before(policy.ValidUntil) || time.UnixMilli(p.ObservedAtMillis).Before(policy.ValidFrom) || !fresh(now, p.ObservedAtMillis, policy.MaxAge) {
@@ -145,10 +146,10 @@ func Plan(now time.Time, d Demand, p Profile, signature []byte, policy Policy, t
 	// Use the verified profile's full upper bound; do not size on a mean KV size.
 	kv := new(big.Rat).Mul(new(big.Rat).SetFloat64(d.RequestsPerSecond), new(big.Rat).SetInt(new(big.Int).SetUint64(p.MaxKVBytesPerRequest)))
 	switch {
-	case p.PrefillGPUs > t.MaxGPUsPerReplica || p.DecodeGPUs > t.MaxGPUsPerReplica:
-		a.Outcome = InsufficientTopology
 	case a.GPUsNeeded > t.FreeGPUs:
 		a.Outcome = InsufficientGPU
+	case p.PrefillGPUs > t.MaxGPUsPerReplica || p.DecodeGPUs > t.MaxGPUsPerReplica || !packIslands(t.Islands, p.PrefillGPUs, a.PrefillReplicas, p.DecodeGPUs, a.DecodeReplicas):
+		a.Outcome = InsufficientTopology
 	case kv.Cmp(new(big.Rat).SetInt(new(big.Int).SetUint64(t.FreeKVBytesPerSecond))) > 0:
 		a.Outcome = InsufficientLink
 	}

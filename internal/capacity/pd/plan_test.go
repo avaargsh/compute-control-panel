@@ -18,7 +18,7 @@ func fixture(t *testing.T) (time.Time, Demand, Profile, Policy, Topology, ed2551
 	d := Demand{Scope: scope, Workload: "w", Generation: 2, LoadRevision: 3, ObservedAtMillis: now.UnixMilli(), PrefillTokensPerSecond: 200, DecodeTokensPerSecond: 150, RequestsPerSecond: 5, MaxKVBytesPerRequest: 100, MaxTTFTms: 100, MaxTPOTms: 20, MaxTransferP95ms: 10}
 	p := Profile{Scope: scope, KeyID: "key", RunID: "pd-run", ArtifactSHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ObservedAtMillis: now.UnixMilli(), PrefillGPUs: 2, DecodeGPUs: 1, PrefillTokensPerSecond: 100, DecodeTokensPerSecond: 50, MaxKVBytesPerRequest: 100, P95TTFTms: 90, P95TPOTms: 15, P95TransferMs: 5}
 	policy := Policy{Scope: scope, KeyID: "key", PublicKey: pub, ValidFrom: now.Add(-time.Hour), ValidUntil: now.Add(time.Hour), MaxAge: time.Minute}
-	topology := Topology{Scope: scope, PoolRevision: 7, TopologyRevision: 9, ObservedAtMillis: now.UnixMilli(), FreeGPUs: 7, MaxGPUsPerReplica: 2, FreeKVBytesPerSecond: 500, Attested: true}
+	topology := Topology{Scope: scope, PoolRevision: 7, TopologyRevision: 9, ObservedAtMillis: now.UnixMilli(), FreeGPUs: 7, MaxGPUsPerReplica: 2, FreeKVBytesPerSecond: 500, Attested: true, Islands: []Island{{ID: "a", FreeGPUs: 7}}}
 	return now, d, p, policy, topology, priv
 }
 func sign(t *testing.T, p Profile, priv ed25519.PrivateKey) []byte {
@@ -37,11 +37,13 @@ func TestPlanPDIndependentPhasesAndSharedCapacity(t *testing.T) {
 		t.Fatalf("%+v %v", a, e)
 	}
 	top.FreeGPUs = 6
+	top.Islands[0].FreeGPUs = 6
 	a, e = Plan(now, d, p, sig, policy, top, time.Minute)
 	if e != nil || a.Outcome != InsufficientGPU {
 		t.Fatalf("%+v %v", a, e)
 	}
 	top.FreeGPUs = 7
+	top.Islands[0].FreeGPUs = 7
 	top.FreeKVBytesPerSecond = 499
 	a, e = Plan(now, d, p, sig, policy, top, time.Minute)
 	if e != nil || a.Outcome != InsufficientLink {
@@ -93,6 +95,7 @@ func TestProposalFencesReplayAndNeverActs(t *testing.T) {
 		t.Fatalf("revision not fenced: %+v %v", b, e)
 	}
 	top.FreeGPUs = 0
+	top.Islands[0].FreeGPUs = 0
 	if b, e = Propose(now, d, p, sig, policy, top, time.Minute); e == nil || b != (Proposal{}) {
 		t.Fatalf("nonfit proposed: %+v %v", b, e)
 	}
