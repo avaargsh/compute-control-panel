@@ -21,6 +21,10 @@ import (
 // command, node selector, privileged runtime or mutable ResourceClaim name.
 type PDJobSetPlan struct {
 	IntentID                  string
+	TenantID                  string
+	WorkloadID                string
+	ProviderID                string
+	Generation                uint64
 	PrefillReplicas           int
 	DecodeReplicas            int
 	PrefillGPUsPerReplica     int
@@ -31,11 +35,14 @@ type PDJobSetPlan struct {
 func validPDJobSetPlan(p PDJobSetPlan) bool {
 	digest, err := hex.DecodeString(p.IntentID)
 	return err == nil && len(digest) == sha256.Size && strings.ToLower(p.IntentID) == p.IntentID &&
+		validDRAIdentity(p.TenantID) && validDRAIdentity(p.WorkloadID) &&
+		validDRAIdentity(p.ProviderID) && p.Generation > 1 &&
 		p.PrefillReplicas > 0 && p.PrefillReplicas <= 32 &&
 		p.DecodeReplicas > 0 && p.DecodeReplicas <= 32 &&
 		p.PrefillReplicas+p.DecodeReplicas <= 64 &&
-		p.PrefillGPUsPerReplica > 0 && p.PrefillGPUsPerReplica <= 128 &&
-		p.DecodeGPUsPerReplica > 0 && p.DecodeGPUsPerReplica <= 128 &&
+		// This inert first writer cannot authenticate ClaimTemplate device
+		// count. Do not accept multi-GPU plans as if the Pod spec proved them.
+		p.PrefillGPUsPerReplica == 1 && p.DecodeGPUsPerReplica == 1 &&
 		validKubeName(p.ResourceClaimTemplateName)
 }
 
@@ -48,7 +55,9 @@ func validPDJobSetCreateRequest(req Request, plan PDJobSetPlan) bool {
 		req.Kind == operation.Create && req.DesiredGeneration > 1 &&
 		req.OperationID == "pd-operation-"+plan.IntentID &&
 		req.RequestDigest == "sha256:"+plan.IntentID &&
-		req.IdempotencyKey == "pd-create-"+plan.IntentID
+		req.IdempotencyKey == "pd-create-"+plan.IntentID &&
+		req.TenantID == plan.TenantID && req.WorkloadID == plan.WorkloadID &&
+		req.ProviderID == plan.ProviderID && req.DesiredGeneration == plan.Generation
 }
 
 type pdJobSetMeta struct {
