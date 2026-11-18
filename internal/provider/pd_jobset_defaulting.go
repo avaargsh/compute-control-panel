@@ -41,7 +41,7 @@ func normalizePDServerDefaults(raw json.RawMessage) ([]byte, error) {
 		return nil, ErrInvalidKueueObservation
 	}
 	for _, item := range []struct {
-		key string
+		key  string
 		want any
 	}{
 		{"network", map[string]any{
