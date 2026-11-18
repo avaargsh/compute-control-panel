@@ -5,6 +5,7 @@ package capacity
 import (
 	"errors"
 	"math"
+	"strconv"
 	"time"
 )
 
@@ -77,11 +78,17 @@ func Advise(now time.Time, d Demand, b Benchmark, pool PoolObservation, maxAge t
 		return Advice{Outcome: UnmetBenchmarkSLO}, nil
 	}
 	replicasF := math.Max(math.Ceil(d.PrefillTokensPerSec/b.PrefillTokensPerSec), math.Ceil(d.DecodeTokensPerSec/b.DecodeTokensPerSec))
-	limit := float64(int(^uint(0)>>1) / b.GPUsPerReplica)
-	if !positiveFinite(replicasF) || replicasF > limit {
+	// A float64 conversion of MaxInt can round up to 2^(IntSize-1).
+	// Check the exact exclusive conversion boundary before converting, then
+	// use integer division to check the GPU product without rounding.
+	if !positiveFinite(replicasF) || replicasF >= math.Ldexp(1, strconv.IntSize-1) {
 		return unproven, ErrUnprovenCapacity
 	}
 	replicas := int(replicasF)
+	maxInt := int(^uint(0) >> 1)
+	if replicas > maxInt/b.GPUsPerReplica {
+		return unproven, ErrUnprovenCapacity
+	}
 	needed := replicas * b.GPUsPerReplica
 	free := pool.AllocatableGPUs - pool.ReservedGPUs
 	result := Advice{Outcome: EstimatedFit, Replicas: replicas, GPUsNeeded: needed, ObservedFreeGPUs: free}
