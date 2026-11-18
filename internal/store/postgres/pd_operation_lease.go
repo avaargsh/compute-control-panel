@@ -138,10 +138,16 @@ func (r *Repository) ClaimPDStagingOperation(
 	if err := tx.QueryRowContext(ctx, "SELECT pg_catalog.clock_timestamp()").Scan(&now); err != nil {
 		return PDStageLease{}, err
 	}
-	// Limit the lease lifetime to the independent current authority deadline;
-	// a token must never outlive the source fence it was issued under.
-	if !now.Add(ttl).Before(stage.Snapshot.AuthorityExpiresAt) {
+	// The caller's requested TTL is a maximum, not a demand for a lease
+	// longer than the independently administered source fence. Cut the
+	// database lease deadline short of that source deadline. A near-expired
+	// authority is rejected rather than returning an immediately dead lease.
+	remaining := stage.Snapshot.AuthorityExpiresAt.Sub(now) - time.Millisecond
+	if remaining < time.Millisecond {
 		return PDStageLease{}, ErrPDPromotionBlocked
+	}
+	if ttl > remaining {
+		ttl = remaining
 	}
 	next, err := stage.Operation.Claim(expectedVersion, worker, now, ttl)
 	if err != nil {
