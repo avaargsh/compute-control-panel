@@ -9,20 +9,22 @@ import (
 
 // PDReplicaClaimQuery pins one replica's child Job and generated per-Pod
 // ResourceClaim. The caller must independently authenticate every identity.
-// The existing single-device claim reader limits this first integration to
-// one whole, non-shared DRA device per replica.
+// Devices pins the complete set for multi-device replicas. An omitted set
+// remains compatible with the legacy one-device identity.
 type PDReplicaClaimQuery struct {
-	Phase  string
-	Index  int
-	JobUID string
-	Pod    DRAPodClaimQuery
+	Phase   string
+	Index   int
+	JobUID  string
+	Pod     DRAPodClaimQuery
+	Devices []DRAAllocatedDevice
 }
 
 type PDReplicaClaimEvidence struct {
-	Phase string
-	Index int
-	Job   KubernetesResourceRef
-	Pod   DRAPodClaimObservation
+	Phase     string
+	Index     int
+	Job       KubernetesResourceRef
+	Pod       DRAPodClaimObservation // one-device compatibility projection only
+	DeviceSet DRADeviceSetObservation
 }
 
 type PDJobSetDRAEvidence struct {
@@ -30,9 +32,16 @@ type PDJobSetDRAEvidence struct {
 	Replicas  []PDReplicaClaimEvidence
 }
 
+func (r PDReplicaClaimQuery) deviceSet() DRADeviceSetQuery {
+	devices := r.Devices
+	if len(devices) == 0 {
+		devices = []DRAAllocatedDevice{expectedDevice(r.Pod.Claim)}
+	}
+	return DRADeviceSetQuery{Pod: r.Pod, Devices: devices}
+}
+
 func validPDReplicaClaims(q PDJobSetQuery, replicas []PDReplicaClaimQuery) bool {
-	if q.validate() != nil || q.Prefill.GPUsPerReplica != 1 || q.Decode.GPUsPerReplica != 1 ||
-		len(replicas) > 128 || len(replicas) != q.Prefill.Replicas+q.Decode.Replicas {
+	if q.validate() != nil || len(replicas) > 128 || len(replicas) != q.Prefill.Replicas+q.Decode.Replicas {
 		return false
 	}
 	type ordinal struct {
@@ -41,20 +50,26 @@ func validPDReplicaClaims(q PDJobSetQuery, replicas []PDReplicaClaimQuery) bool 
 	}
 	ordinals := map[ordinal]bool{}
 	jobs, pods, claims := map[string]bool{}, map[string]bool{}, map[string]bool{}
-	type device struct{ driver, pool, name string }
-	devices := map[device]bool{}
+	devices := map[draDeviceAddress]bool{}
 	for _, r := range replicas {
 		p, ok := pdPhase(q, r.Phase)
 		c := r.Pod.Claim
 		k := ordinal{r.Phase, r.Index}
-		d := device{c.Driver, c.Pool, c.Device}
+		set, valid := r.deviceSet().validate()
 		if !ok || r.Index < 0 || r.Index >= p.Replicas || ordinals[k] ||
 			r.Pod.validate() != nil || !validDRAIdentity(r.JobUID) || r.Pod.ExpectedJobUID != r.JobUID ||
 			c.Namespace != q.Namespace || r.Pod.ClaimTemplateName == "" || c.ShareID != "" ||
-			jobs[r.JobUID] || pods[c.ExpectedPodUID] || claims[c.ExpectedClaimUID] || devices[d] {
+			jobs[r.JobUID] || pods[c.ExpectedPodUID] || claims[c.ExpectedClaimUID] || !valid || len(set) != p.GPUsPerReplica || len(devices)+len(set) > maxDRADeviceSet {
 			return false
 		}
-		ordinals[k], jobs[r.JobUID], pods[c.ExpectedPodUID], claims[c.ExpectedClaimUID], devices[d] = true, true, true, true, true
+		for _, d := range set {
+			a := deviceAddress(d)
+			if devices[a] {
+				return false
+			}
+			devices[a] = true
+		}
+		ordinals[k], jobs[r.JobUID], pods[c.ExpectedPodUID], claims[c.ExpectedClaimUID] = true, true, true, true
 	}
 	return true
 }
@@ -97,18 +112,23 @@ func (r *KubernetesObservationReader) observePDReplica(ctx context.Context, q PD
 	if controllers != 1 {
 		return reject()
 	}
-	pod, err := r.ObserveDRAPodClaim(ctx, pin.Pod)
+	set, err := r.ObserveDRAPodDeviceSet(ctx, pin.deviceSet())
 	if err != nil || r.read(ctx, path, &second) != nil || !reflect.DeepEqual(first, second) {
 		return reject()
 	}
-	return PDReplicaClaimEvidence{Phase: pin.Phase, Index: pin.Index, Job: refFromKube(first.Metadata.kubeMeta), Pod: pod}, nil
+	evidence := PDReplicaClaimEvidence{Phase: pin.Phase, Index: pin.Index, Job: refFromKube(first.Metadata.kubeMeta), DeviceSet: set}
+	if len(set.Devices) == 1 {
+		evidence.Pod = DRAPodClaimObservation{Pod: set.Pod, NodeName: set.NodeName, PodClaimAlias: set.PodClaimAlias, ConsumerContainer: set.ConsumerContainer,
+			Claim: DRAClaimObservation{Claim: set.Claim, PodUID: set.Pod.UID, Device: set.Devices[0]}}
+	}
+	return evidence, nil
 }
 
 // ObservePairedPDClaims joins a valid paired quota observation to all expected
 // child Job/Pod/Claim identities and rejects duplicate device tuples or drift.
 // This is scheduler-side evidence only: it cannot prove device preparation,
 // physical UID membership, KV transfer, release, readiness or accounting.
-// Multi-device replicas are intentionally rejected until their reader exists.
+// The complete device set must match each replica's authorized GPU count.
 func (r *KubernetesObservationReader) ObservePairedPDClaims(ctx context.Context, q PDJobSetQuery, pins []PDReplicaClaimQuery) (PDJobSetDRAEvidence, error) {
 	reject := func() (PDJobSetDRAEvidence, error) { return PDJobSetDRAEvidence{}, ErrInvalidDRAObservation }
 	if !validPDReplicaClaims(q, pins) {
