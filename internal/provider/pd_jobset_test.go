@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -30,7 +31,7 @@ func TestObservePairedPDAdmission(t *testing.T) {
 		{"drift", jobset, workload, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			reads := 0
+			var reads atomic.Int32
 			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 				if req.Method != http.MethodGet {
 					t.Error("unexpected write")
@@ -39,9 +40,9 @@ func TestObservePairedPDAdmission(t *testing.T) {
 				case "/apis/jobset.x-k8s.io/v1alpha2/namespaces/tenant-a/jobsets/pd-a":
 					_, _ = w.Write([]byte(tc.job))
 				case "/apis/kueue.x-k8s.io/v1beta1/namespaces/tenant-a/workloads/wl-a":
-					reads++
+					n := reads.Add(1)
 					body := tc.wl
-					if tc.drift && reads > 1 {
+					if tc.drift && n > 1 {
 						body = strings.Replace(body, "\"resourceVersion\":\"22\"", "\"resourceVersion\":\"23\"", 1)
 					}
 					_, _ = w.Write([]byte(body))
