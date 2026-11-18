@@ -271,6 +271,14 @@ func (r *Repository) ClaimOperation(ctx context.Context, tenantID, operationID s
 	if !operation.ValidLeaseTTL(ttl) {
 		return operation.Operation{}, operation.ErrInvalid
 	}
+	// A PD promotion is a durable, non-dispatchable intent, not authority to
+	// create a single provider resource. Until the paired JobSet writer is
+	// authenticated and integrated, generic workers must not lease its CREATE
+	// Operation even though the canonical journal records it as PENDING.
+	// The exact PD operation ID is assigned by PromotePDIntent and immutable.
+	if strings.HasPrefix(operationID, "pd-operation-") {
+		return operation.Operation{}, operation.ErrTransition
+	}
 	return r.mutateOperation(ctx, tenantID, operationID, expectedVersion, func(o operation.Operation, now time.Time) (operation.Operation, error) {
 		return o.Claim(expectedVersion, owner, now, ttl)
 	})
