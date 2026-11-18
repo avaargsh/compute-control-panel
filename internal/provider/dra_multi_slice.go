@@ -89,10 +89,10 @@ func (r *KubernetesObservationReader) observeMultiSlicePool(
 		}
 		generation, count = gen, total
 		result = append(result, DRAMultiSliceDevice{
-			DRAAllocatedDevice:     d,
-			NodeUID:                q.ExpectedNodeUID,
-			SliceUID:               slice.UID,
-			SliceResourceVersion:   slice.ResourceVersion,
+			DRAAllocatedDevice:   d,
+			NodeUID:              q.ExpectedNodeUID,
+			SliceUID:             slice.UID,
+			SliceResourceVersion: slice.ResourceVersion,
 		})
 	}
 	return result, generation, count, nil
@@ -148,7 +148,6 @@ func (r *KubernetesObservationReader) ObserveDRAMultiSlice(ctx context.Context, 
 	return DRAMultiSliceObservation{
 		PodClaim: pod, NodeUID: q.ExpectedNodeUID,
 		NodeResourceVersion: nodeVersion,
-		PoolGeneration: gen, PoolResourceSliceCount: count, Devices: mapped,
+		PoolGeneration:      gen, PoolResourceSliceCount: count, Devices: mapped,
 	}, nil
 }
-
