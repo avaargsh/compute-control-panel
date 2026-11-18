@@ -20,6 +20,7 @@ type pdJobSetAPI struct {
 	posts      int
 	loseReply  bool
 	replaceUID bool
+	deleting   bool
 }
 
 func (s *pdJobSetAPI) serve(w http.ResponseWriter, r *http.Request) {
@@ -39,13 +40,18 @@ func (s *pdJobSetAPI) serve(w http.ResponseWriter, r *http.Request) {
 		for k, v := range s.obj {
 			obj[k] = v
 		}
-		if s.replaceUID {
+		if s.replaceUID || s.deleting {
 			old := obj["metadata"].(map[string]any)
 			fresh := map[string]any{}
 			for k, v := range old {
 				fresh[k] = v
 			}
-			fresh["uid"] = "successor-uid"
+			if s.replaceUID {
+				fresh["uid"] = "successor-uid"
+			}
+			if s.deleting {
+				fresh["deletionTimestamp"] = "2026-11-18T07:00:00Z"
+			}
 			obj["metadata"] = fresh
 		}
 		_ = json.NewEncoder(w).Encode(obj)
@@ -169,6 +175,16 @@ func TestPDJobSetCreatePinnedReplayAndRestart(t *testing.T) {
 	observed, err = a.Inspect(ctx, req)
 	if err != nil || observed.Result != operation.ObservationConflict {
 		t.Fatalf("successor UID incorrectly reconciled: %+v %v", observed, err)
+	}
+	api.mu.Lock()
+	api.replaceUID, api.deleting = false, true
+	api.mu.Unlock()
+	if _, err := a.Apply(ctx, req); !errors.Is(err, ErrOperationConflict) {
+		t.Fatalf("terminating JobSet was accepted as live replay: %v", err)
+	}
+	observed, err = a.Inspect(ctx, req)
+	if err != nil || observed.Result != operation.ObservationConflict {
+		t.Fatalf("terminating JobSet incorrectly reported present: %+v %v", observed, err)
 	}
 }
 
