@@ -60,7 +60,7 @@ func (r *Repository) ReadCurrentPDStagingSnapshot(
 	if r == nil || r.db == nil || !validPDIntentOwner(owner) || !validPDIntentDigest(intentID) {
 		return reject()
 	}
-	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted, ReadOnly: true})
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return PDStagingSnapshot{}, err
 	}
