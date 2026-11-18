@@ -21,12 +21,12 @@ import (
 type PDStagingSnapshot struct {
 	Promotion            PDPromotion
 	Proposal             pd.Proposal
-	TenantID, WorkloadID  string
-	ProviderID, PoolID    string
-	PrefillReplicas       int
-	DecodeReplicas        int
-	GPUsPerReplica        int
-	AuthorityExpiresAt    time.Time
+	TenantID, WorkloadID string
+	ProviderID, PoolID   string
+	PrefillReplicas      int
+	DecodeReplicas       int
+	GPUsPerReplica       int
+	AuthorityExpiresAt   time.Time
 }
 
 func singleGPUStagingShape(p pd.Proposal) bool {
@@ -157,7 +157,7 @@ func (r *Repository) ReadCurrentPDStagingSnapshot(
 		TenantID: owner.TenantID, WorkloadID: workload,
 		ProviderID: providerID, PoolID: poolID,
 		PrefillReplicas: candidate.PrefillReplicas,
-		DecodeReplicas: candidate.DecodeReplicas,
-		GPUsPerReplica: 1, AuthorityExpiresAt: expiresAt,
+		DecodeReplicas:  candidate.DecodeReplicas,
+		GPUsPerReplica:  1, AuthorityExpiresAt: expiresAt,
 	}, nil
 }
