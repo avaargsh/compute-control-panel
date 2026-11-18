@@ -50,6 +50,8 @@ func TestObserveDRAPodDeviceSet(t *testing.T) {
 		{"extra", claim([]DRAAllocatedDevice{a, b, foreign}, nil), normal, false},
 		{"duplicate", claim([]DRAAllocatedDevice{a, a}, nil), normal, false},
 		{"shared", claim([]DRAAllocatedDevice{a, shared}, nil), normal, false},
+		{"admin access", claim([]DRAAllocatedDevice{a, b}, func(v map[string]any) { draFirstDevice(v)["adminAccess"] = true }), normal, false},
+		{"consumed capacity", claim([]DRAAllocatedDevice{a, b}, func(v map[string]any) { draFirstDevice(v)["consumedCapacity"] = map[string]any{"memory": "1Gi"} }), normal, false},
 		{"same RV device drift", normal, claim([]DRAAllocatedDevice{a, foreign}, nil), false},
 		{"RV drift", normal, claim([]DRAAllocatedDevice{a, b}, func(v map[string]any) { v["metadata"].(map[string]any)["resourceVersion"] = "151" }), false},
 		{"deleting claim", claim([]DRAAllocatedDevice{a, b}, func(v map[string]any) { v["metadata"].(map[string]any)["deletionTimestamp"] = "2026-11-18T00:00:00Z" }), normal, false},
