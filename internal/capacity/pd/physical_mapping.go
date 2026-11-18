@@ -100,8 +100,8 @@ func BindScheduledDevices(now time.Time, evidence TopologyEvidence, policy Topol
 		seenPhysical[gpu.PhysicalUID] = true
 		claimPod[claim.ClaimUID] = claim.PodUID
 		mapped = append(mapped, PhysicalDeviceBinding{
-			PhysicalUID: gpu.PhysicalUID,
-			IslandID:    gpu.IslandID,
+			PhysicalUID:     gpu.PhysicalUID,
+			IslandID:        gpu.IslandID,
 			ScheduledDevice: claim,
 		})
 	}
