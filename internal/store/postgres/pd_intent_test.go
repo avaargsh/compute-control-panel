@@ -138,9 +138,9 @@ func TestPDIntentDurableCASReplayAndNonActuatingOutbox(t *testing.T) {
 	}
 	var wg sync.WaitGroup
 	type result struct {
-		record PDIntentRecord
+		record  PDIntentRecord
 		created bool
-		err error
+		err     error
 	}
 	results := make(chan result, 8)
 	for range 8 {
