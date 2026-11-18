@@ -11,9 +11,9 @@ import (
 	"github.com/avaargsh/compute-control-panel/internal/operation"
 )
 
-func pdPromotionFixture(t *testing.T, ctx context.Context, db *sql.DB) (*Repository, PDIntentOwner, PDIntentRecord) {
+func pdPromotionFixture(t *testing.T, ctx context.Context, db *sql.DB, gpuOverride ...int) (*Repository, PDIntentOwner, PDIntentRecord) {
 	t.Helper()
-	repo, owner, verified := preparePDIntent(t, ctx, db)
+	repo, owner, verified := preparePDIntent(t, ctx, db, gpuOverride...)
 	seedPDIntentFence(t, ctx, db, verified)
 	record, created, err := repo.RecordPDIntent(ctx, owner, verified, "pd-correlation")
 	if err != nil || !created {
