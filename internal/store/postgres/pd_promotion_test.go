@@ -190,3 +190,78 @@ func TestPromotedPDOperationRejectsGenericClaim(t *testing.T) {
 		t.Fatalf("generic claim mutated staged PD operation: before=%+v after=%+v err=%v", before, after, err)
 	}
 }
+
+func TestPDPromotionRejectsFenceExpiryWhileWaitingForOldAllocation(t *testing.T) {
+	db := openIntegrationDB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	repo, owner, intent := pdPromotionFixture(t, ctx, db)
+	workload := intent.Candidate.Workload
+	fixturePDRelease(t, ctx, db, workload)
+
+	// The independent authority is valid when promotion starts, but will
+	// expire while the promotion waits for its previous Allocation row.
+	_, err := db.ExecContext(ctx, `UPDATE public.compute_pd_intent_fences
+		SET valid_until=pg_catalog.clock_timestamp()+interval '3 seconds'
+		WHERE workload_id=$1 AND tenant_id=$2`, workload, owner.TenantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lockTx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lockTx.Rollback()
+	var lockedID string
+	if err := lockTx.QueryRowContext(ctx, `SELECT allocation_id FROM public.compute_allocations
+		WHERE workload_id=$1 AND desired_generation=1 FOR UPDATE`, workload).Scan(&lockedID); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := repo.PromotePDIntent(ctx, owner, intent.Candidate.IntentID, "expired-during-lock")
+		done <- err
+	}()
+	// Observe the actual PostgreSQL lock wait rather than assuming the
+	// worker reached the later Allocation read by sleeping arbitrarily.
+	waitUntil := time.Now().Add(2500 * time.Millisecond)
+	blocked := false
+	for time.Now().Before(waitUntil) {
+		var waiting int
+		err := db.QueryRowContext(ctx, `SELECT count(*) FROM pg_catalog.pg_stat_activity
+			WHERE pid<>pg_catalog.pg_backend_pid() AND wait_event_type='Lock'
+			AND query LIKE '%SELECT a.phase FROM public.compute_allocations a%'`).Scan(&waiting)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			blocked = true
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if !blocked {
+		t.Fatal("promotion did not reach prior Allocation lock while authority was valid")
+	}
+	// Let the authoritative database clock pass the shortened validity
+	// deadline before releasing the physical-row lock.
+	time.Sleep(3200 * time.Millisecond)
+	if err := lockTx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrPDPromotionBlocked) {
+			t.Fatalf("expired promotion committed after row lock wait: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("promotion failed to finish after lock release")
+	}
+	var generation, promoted int
+	if err := db.QueryRowContext(ctx, `SELECT w.desired_generation,
+		(SELECT count(*) FROM public.compute_pd_promotions p WHERE p.workload_id=w.workload_id)
+		FROM public.compute_workloads w WHERE w.workload_id=$1 AND w.tenant_id=$2`,
+		workload, owner.TenantID).Scan(&generation, &promoted); err != nil || generation != 1 || promoted != 0 {
+		t.Fatalf("expired authority caused mutation: generation=%d promotions=%d err=%v", generation, promoted, err)
+	}
+}
