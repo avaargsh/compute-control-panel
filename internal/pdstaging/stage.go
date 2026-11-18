@@ -26,12 +26,12 @@ var (
 // authority must still verify the ClaimTemplate's physical device count.
 // The DSN is the restricted ccp_kueue_job_binding login, NOT an admin login.
 type Config struct {
-	APIURL, CAPath, TokenPath        string
-	Namespace, LocalQueue           string
-	BindingDSN                      string
-	TenantID, ProjectID             string
-	ProviderID, PoolID              string
-	ResourceClaimTemplateName       string
+	APIURL, CAPath, TokenPath string
+	Namespace, LocalQueue     string
+	BindingDSN                string
+	TenantID, ProjectID       string
+	ProviderID, PoolID        string
+	ResourceClaimTemplateName string
 }
 
 func (c Config) valid() bool {
@@ -101,7 +101,7 @@ func currentPlanAndRequest(
 	plan := provider.PDJobSetPlan{
 		IntentID: intentID, TenantID: snapshot.TenantID,
 		WorkloadID: snapshot.WorkloadID, ProviderID: snapshot.ProviderID,
-		Generation: op.Generation,
+		Generation:      op.Generation,
 		PrefillReplicas: snapshot.PrefillReplicas, DecodeReplicas: snapshot.DecodeReplicas,
 		PrefillGPUsPerReplica: 1, DecodeGPUsPerReplica: 1,
 		ResourceClaimTemplateName: cfg.ResourceClaimTemplateName,
