@@ -1448,7 +1448,7 @@ bash scripts/kueue_dra_quota_kind_smoke.sh
 jobset_release="v0.13.0"
 curl -fLSs --retry 3 --retry-delay 2 -o "$dir/jobset.yaml" \
   "https://github.com/kubernetes-sigs/jobset/releases/download/$jobset_release/manifests.yaml"
-printf 'jobset_release=%s manifest_sha256=%s\\n' \
+printf 'jobset_release=%s manifest_sha256=%s\n' \
   "$jobset_release" "$(sha256sum "$dir/jobset.yaml" | cut -d' ' -f1)"
 kubectl apply --server-side -f "$dir/jobset.yaml"
 kubectl wait --for=condition=Established crd/jobsets.jobset.x-k8s.io --timeout=300s
