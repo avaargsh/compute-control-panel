@@ -152,6 +152,13 @@ func TestPDJobSetCreatePinnedReplayAndRestart(t *testing.T) {
 	if spec["suspend"] != true {
 		t.Fatal("writer must initially create inert suspended JobSet")
 	}
+	// Kueue admission can otherwise unsuspend even a suspended JobSet.
+	// The static gate is defense in depth; production still needs proof that
+	// AdmissionGatedBy is enabled for this specific JobSet controller version.
+	annotations := api.obj["metadata"].(map[string]any)["annotations"].(map[string]any)
+	if annotations["kueue.x-k8s.io/admission-gated-by"] != "compute-control-panel.io/pd-activation" {
+		t.Fatal("PD staging lacks the explicit Kueue admission gate")
+	}
 	phases := spec["replicatedJobs"].([]any)
 	if len(phases) != 2 || phases[0].(map[string]any)["replicas"] != float64(2) ||
 		phases[1].(map[string]any)["replicas"] != float64(3) {
