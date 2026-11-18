@@ -2,6 +2,8 @@ package capacity
 
 import (
 	"errors"
+	"math"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -71,5 +73,43 @@ func TestAdviceNeverClaimsAdmission(t *testing.T) {
 	a, _ := Advise(now, d, b, p, 30*time.Second)
 	if a.Admitted {
 		t.Fatal("advice must never admit or allocate Kueue resources")
+	}
+}
+
+func TestAdviseRejectsReplicaAndGPUIntegerOverflow(t *testing.T) {
+	now := time.Date(2026, 11, 18, 0, 0, 0, 0, time.UTC)
+	intBoundary := math.Ldexp(1, strconv.IntSize-1)
+	for _, tc := range []struct {
+		name string
+		rate float64
+		gpus int
+	}{
+		{name: "replica conversion overflows int", rate: intBoundary, gpus: 1},
+		{name: "GPU multiplication overflows int", rate: intBoundary / 2, gpus: 2},
+		{name: "finite demand divided by tiny benchmark overflows float", rate: math.MaxFloat64, gpus: 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, b, p := fixtures(now)
+			d.PrefillTokensPerSec, d.DecodeTokensPerSec = tc.rate, 0
+			b.PrefillTokensPerSec, b.GPUsPerReplica = 1, tc.gpus
+			if tc.rate == math.MaxFloat64 {
+				b.PrefillTokensPerSec = math.SmallestNonzeroFloat64
+			}
+			a, err := Advise(now, d, b, p, 30*time.Second)
+			if !errors.Is(err, ErrUnprovenCapacity) || a != (Advice{Outcome: Unproven}) {
+				t.Fatalf("overflow must not become capacity fit: %+v err=%v", a, err)
+			}
+		})
+	}
+}
+
+func TestAdviseLargeRepresentableDemandRemainsInsufficient(t *testing.T) {
+	now := time.Date(2026, 11, 18, 0, 0, 0, 0, time.UTC)
+	d, b, p := fixtures(now)
+	d.PrefillTokensPerSec, d.DecodeTokensPerSec = math.Ldexp(1, strconv.IntSize-3), 0
+	b.PrefillTokensPerSec, b.GPUsPerReplica = 1, 2
+	a, err := Advise(now, d, b, p, 30*time.Second)
+	if err != nil || a.Outcome != InsufficientObservedCapacity || a.Replicas <= 0 || a.GPUsNeeded != 2*a.Replicas || a.Admitted {
+		t.Fatalf("representable large demand must remain insufficient: %+v err=%v", a, err)
 	}
 }
