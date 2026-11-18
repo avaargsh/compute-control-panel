@@ -44,10 +44,10 @@ func run(ctx context.Context) error {
 	}
 	req := provider.Request{
 		OperationID: "pd-operation-" + id,
-		TenantID: plan.TenantID, WorkloadID: plan.WorkloadID,
+		TenantID:    plan.TenantID, WorkloadID: plan.WorkloadID,
 		ProviderID: plan.ProviderID, DesiredGeneration: plan.Generation,
 		IdempotencyKey: "pd-create-" + id,
-		RequestDigest: "sha256:" + id, Kind: operation.Create,
+		RequestDigest:  "sha256:" + id, Kind: operation.Create,
 	}
 	pins := provider.NewMemoryKueueJobBindingStore()
 	mkAdapter := func(bindings provider.KueueJobBindingStore) (*provider.PDJobSetAdapter, error) {
@@ -98,19 +98,19 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("unbound CREATE replay was not UNKNOWN: %v", err)
 	}
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{
-		"mode": "DISPOSABLE_REAL_JOBSET_API",
-		"uid": original.ResourceUID,
-		"resource_id": original.ResourceID,
-		"provider_create_pinned": true,
-		"same_uid_on_restart": true,
-		"unbound_state": string(unknown.Result),
+		"mode":                      "DISPOSABLE_REAL_JOBSET_API",
+		"uid":                       original.ResourceUID,
+		"resource_id":               original.ResourceID,
+		"provider_create_pinned":    true,
+		"same_uid_on_restart":       true,
+		"unbound_state":             string(unknown.Result),
 		"lost_ack_requires_inspect": true,
-		"one_gpu_per_replica": true,
-		"physical_gpu_verified": false,
-		"driver_prepared": false,
-		"allocation_ready": false,
-		"released": false,
-		"cost_final": false,
+		"one_gpu_per_replica":       true,
+		"physical_gpu_verified":     false,
+		"driver_prepared":           false,
+		"allocation_ready":          false,
+		"released":                  false,
+		"cost_final":                false,
 	})
 }
 
