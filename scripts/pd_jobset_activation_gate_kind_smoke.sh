@@ -37,9 +37,90 @@ kubectl patch clusterqueue "$q" --type=json -p="[
 ]"
 [[ "$(kubectl get clusterqueue "$q" -o jsonpath='{.metadata.uid}')" == "$queue_uid" ]] || exit 1
 
+# Enforce separate Kubernetes identities rather than relying on annotation
+# alone. Staging can CREATE/GET JobSets but cannot PATCH, UPDATE or DELETE;
+# activation is limited to GET/PATCH of one exact JobSet name. A production
+# rollout still needs an independent permit verifier/admission controller
+# because RBAC cannot restrict which annotation/spec field a PATCH changes.
+stage_actor="system:serviceaccount:$ns:ccp-pd-staging"
+activation_actor="system:serviceaccount:$ns:ccp-pd-activator"
+kubectl create -f - <<YAML
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: ccp-pd-staging, namespace: $ns}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: ccp-pd-activator, namespace: $ns}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: ccp-pd-staging, namespace: $ns}
+rules:
+- apiGroups: [jobset.x-k8s.io]
+  resources: [jobsets]
+  verbs: [get, create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: ccp-pd-staging, namespace: $ns}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: ccp-pd-staging}
+subjects:
+- kind: ServiceAccount
+  name: ccp-pd-staging
+  namespace: $ns
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: ccp-pd-activator, namespace: $ns}
+rules:
+- apiGroups: [jobset.x-k8s.io]
+  resources: [jobsets]
+  resourceNames: [$name]
+  verbs: [get, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: ccp-pd-activator, namespace: $ns}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: ccp-pd-activator}
+subjects:
+- kind: ServiceAccount
+  name: ccp-pd-activator
+  namespace: $ns
+YAML
+
+for verb in get create; do
+  [[ "$(kubectl auth can-i "$verb" jobsets.jobset.x-k8s.io -n "$ns" --as="$stage_actor")" == "yes" ]] || {
+    echo "FAIL: staging identity cannot $verb JobSets" >&2; exit 1
+  }
+done
+for verb in update patch delete; do
+  [[ "$(kubectl auth can-i "$verb" jobsets.jobset.x-k8s.io -n "$ns" --as="$stage_actor")" == "no" ]] || {
+    echo "FAIL: staging identity has forbidden $verb authority" >&2; exit 1
+  }
+done
+for kind in pods resourceclaims.resource.k8s.io; do
+  [[ "$(kubectl auth can-i create "$kind" -n "$ns" --as="$stage_actor")" == "no" ]] || {
+    echo "FAIL: staging identity can create $kind directly" >&2; exit 1
+  }
+done
+for verb in get patch; do
+  [[ "$(kubectl auth can-i "$verb" "jobsets.jobset.x-k8s.io/$name" -n "$ns" --as="$activation_actor")" == "yes" ]] || {
+    echo "FAIL: scoped activation identity cannot $verb its JobSet" >&2; exit 1
+  }
+done
+for verb in create update delete; do
+  [[ "$(kubectl auth can-i "$verb" "jobsets.jobset.x-k8s.io/$name" -n "$ns" --as="$activation_actor")" == "no" ]] || {
+    echo "FAIL: activation identity has forbidden $verb authority" >&2; exit 1
+  }
+done
+[[ "$(kubectl auth can-i patch jobsets.jobset.x-k8s.io/pd-pair -n "$ns" --as="$activation_actor")" == "no" ]] || {
+  echo "FAIL: activation identity can patch another JobSet" >&2; exit 1
+}
+
 # The second JobSet intentionally copies the production writer's critical
 # gate, whole two-phase pod-set shape and inert, non-executable container.
-cat <<YAML | kubectl create -f -
+cat <<YAML | kubectl create --as="$stage_actor" -f -
 apiVersion: jobset.x-k8s.io/v1alpha2
 kind: JobSet
 metadata:
@@ -135,7 +216,20 @@ patch="$(jq -nc --arg uid "$gate_uid" --arg gate "$gate" '[
   {op:"test",path:"/metadata/uid",value:$uid},
   {op:"test",path:"/metadata/annotations/kueue.x-k8s.io~1admission-gated-by",value:$gate},
   {op:"remove",path:"/metadata/annotations/kueue.x-k8s.io~1admission-gated-by"}]')"
-kubectl -n "$ns" patch jobset "$name" --type=json -p="$patch"
+# An unauthorized staging actor must fail at the API authorization boundary
+# without mutating the live JobSet, even with an otherwise valid UID patch.
+if rejected="$(kubectl -n "$ns" patch jobset "$name" --as="$stage_actor" --type=json -p="$patch" 2>&1)"; then
+  echo "FAIL: staging identity removed the activation gate" >&2; exit 1
+fi
+if ! grep -qi 'forbidden' <<< "$rejected"; then
+  echo "FAIL: staging PATCH failed for a reason other than RBAC: $rejected" >&2; exit 1
+fi
+if ! kubectl -n "$ns" get jobset "$name" -o json | jq -e --arg gate "$gate" '.metadata.annotations["kueue.x-k8s.io/admission-gated-by"] == $gate' >/dev/null; then
+  echo "FAIL: denied staging PATCH still removed the gate" >&2; exit 1
+fi
+# This fixture impersonates the narrowly scoped activation identity. It does
+# NOT impersonate a production policy/permit verifier, which remains a gate.
+kubectl -n "$ns" patch jobset "$name" --as="$activation_actor" --type=json -p="$patch"
 [[ "$(kubectl -n "$ns" get jobset "$name" -o jsonpath='{.metadata.uid}')" == "$gate_uid" ]] || exit 1
 
 released_workload=""
