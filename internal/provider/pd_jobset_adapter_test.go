@@ -15,11 +15,11 @@ import (
 )
 
 type pdJobSetAPI struct {
-	mu          sync.Mutex
-	obj         map[string]any
-	posts       int
-	loseReply   bool
-	replaceUID  bool
+	mu         sync.Mutex
+	obj        map[string]any
+	posts      int
+	loseReply  bool
+	replaceUID bool
 }
 
 func (s *pdJobSetAPI) serve(w http.ResponseWriter, r *http.Request) {
@@ -100,11 +100,11 @@ func pdJobSetTestConfig() PDJobSetPlan {
 func pdJobSetTestRequest(plan PDJobSetPlan) Request {
 	return Request{
 		OperationID: "pd-operation-" + plan.IntentID,
-		TenantID: "tenant-a", WorkloadID: "w-a", ProviderID: "pd-provider",
+		TenantID:    "tenant-a", WorkloadID: "w-a", ProviderID: "pd-provider",
 		DesiredGeneration: 2,
-		IdempotencyKey: "pd-create-" + plan.IntentID,
-		RequestDigest: "sha256:" + plan.IntentID,
-		Kind: operation.Create,
+		IdempotencyKey:    "pd-create-" + plan.IntentID,
+		RequestDigest:     "sha256:" + plan.IntentID,
+		Kind:              operation.Create,
 	}
 }
 
