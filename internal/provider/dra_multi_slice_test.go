@@ -47,7 +47,7 @@ func TestObserveDRAMultiDeviceResourceSlicesAndNodeUID(t *testing.T) {
 		{"ResourceSlice RV drift",strings.Replace(list,`"resourceVersion":"32"`,`"resourceVersion":"33"`,1),node,false},
 		{"missing second device",strings.Replace(list,`{"name":"device-b"}`,`{"name":"other"}`,1),node,false},
 		{"second Node UID",list,strings.Replace(node,"node-uid-a","node-successor",1),false},
-		{"missing slice",strings.Replace(list,`,\n\t\t{"metadata":{"name":"slice-b"`,`,\n\t\t{"metadata":{"name":"slice-other"`,1),node,false},
+		{"missing slice",strings.Replace(list,`"resourceSliceCount":2`,`"resourceSliceCount":3`,1),node,false},
 	}{
 		t.Run(tc.name,func(t *testing.T){
 			var nodeReads,sliceReads,claimReads atomic.Int32
