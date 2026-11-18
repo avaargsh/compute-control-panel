@@ -67,14 +67,14 @@ func stagingFixture() (postgres.PDStageLease, postgres.PDIntentOwner, Config) {
 			},
 			Proposal: pd.Proposal{
 				IntentID: intent, Workload: "workload-a", Generation: 2,
-				Scope: pd.Scope{Tenant: owner.TenantID, Project: owner.ProjectID, Pool: "pool-a"},
+				Scope:           pd.Scope{Tenant: owner.TenantID, Project: owner.ProjectID, Pool: "pool-a"},
 				PrefillReplicas: 2, DecodeReplicas: 3, GPUsNeeded: 5,
 				PoolRevision: 7, TopologyRevision: 9, LoadRevision: 3,
 			},
 			TenantID: owner.TenantID, WorkloadID: "workload-a",
 			ProviderID: "provider-a", PoolID: "pool-a",
 			PrefillReplicas: 2, DecodeReplicas: 3, GPUsPerReplica: 1,
-			AuthorityExpiresAt: time.Now().Add(30*time.Second),
+			AuthorityExpiresAt: time.Now().Add(30 * time.Second),
 		},
 		Operation: operation.Operation{
 			ID: "pd-operation-" + intent, TenantID: owner.TenantID,
@@ -82,16 +82,16 @@ func stagingFixture() (postgres.PDStageLease, postgres.PDIntentOwner, Config) {
 			ProviderID: "provider-a", IdempotencyKey: "pd-create-" + intent,
 			RequestDigest: "sha256:" + intent, Generation: 2,
 			Version: 3, FenceToken: 1, Kind: operation.Create, Status: operation.InFlight,
-			LeaseOwner: "worker-1", LeaseExpiresAt: time.Now().Add(10*time.Second),
+			LeaseOwner: "worker-1", LeaseExpiresAt: time.Now().Add(10 * time.Second),
 		},
 	}
 	cfg := Config{
-		APIURL: "https://kubernetes.default.svc:443",
-		CAPath: "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
+		APIURL:    "https://kubernetes.default.svc:443",
+		CAPath:    "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
 		TokenPath: "/var/run/secrets/kubernetes.io/serviceaccount/token",
 		Namespace: "tenant-a", LocalQueue: "gpu-queue",
 		BindingDSN: "postgres://ccp_kueue_job_binding@example.invalid/compute?sslmode=verify-full",
-		TenantID: owner.TenantID, ProjectID: owner.ProjectID,
+		TenantID:   owner.TenantID, ProjectID: owner.ProjectID,
 		ProviderID: "provider-a", PoolID: "pool-a",
 		ResourceClaimTemplateName: "pd-one-gpu",
 	}
