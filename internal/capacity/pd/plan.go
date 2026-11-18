@@ -172,14 +172,18 @@ func Propose(now time.Time, d Demand, p Profile, signature []byte, policy Policy
 	if e != nil || a.Outcome != Fit {
 		return Proposal{}, ErrUnproven
 	}
-	// Bind all immutable inputs (including evidence and observations), not just
-	// replica counts. Identical evidence and generation replay the same proposal.
+	// Bind the independent verifier policy, actual signature, freshness gate
+	// and observations, not just the profile or replica counts. A signer
+	// rotation or policy change must conflict under the same generation key.
 	payload, e := json.Marshal(struct {
-		Demand   Demand
-		Profile  Profile
-		Topology Topology
-		Advice   Advice
-	}{d, p, t, a})
+		Demand            Demand
+		Profile           Profile
+		Signature         []byte
+		Policy            Policy
+		Topology          Topology
+		MaxObservationAge time.Duration
+		Advice            Advice
+	}{d, p, signature, policy, t, maxObservationAge, a})
 	if e != nil {
 		return Proposal{}, ErrUnproven
 	}
