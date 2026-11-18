@@ -26,7 +26,8 @@ func TestPDLeaseClaimAndStartRequireExactCurrentAuthority(t *testing.T) {
 	}
 	claimed, err := repo.ClaimPDStagingOperation(ctx, owner, id, 1, "staging-worker-a", time.Minute)
 	if err != nil || claimed.Operation.Status != operation.Leased || claimed.Operation.Version != 2 ||
-		claimed.Operation.FenceToken != 1 || claimed.Snapshot.Promotion != promoted {
+		claimed.Operation.FenceToken != 1 || claimed.Snapshot.Promotion != promoted ||
+		!claimed.Operation.LeaseExpiresAt.Before(claimed.Snapshot.AuthorityExpiresAt) {
 		t.Fatalf("fenced claim: %+v %v", claimed, err)
 	}
 	// A generic provider worker MUST NOT start the dedicated PD operation.
