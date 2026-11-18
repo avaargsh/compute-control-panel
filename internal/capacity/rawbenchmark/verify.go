@@ -87,8 +87,11 @@ func p95(v []float64) float64 { sort.Float64s(v); return v[(len(v)*95+99)/100-1]
 // attempt must have at least two output tokens and positive latency samples.
 func Verify(raw []byte, expected Expectation) (Summary, error) {
 	fail := func() (Summary, error) { return Summary{}, ErrInvalid }
+	if len(raw) == 0 || len(raw) > maxArtifactBytes || !id(expected.RunID) || !id(expected.Scenario) || !id(expected.ModelRevision) {
+		return fail()
+	}
 	sum := sha256.Sum256(raw)
-	if len(raw) == 0 || len(raw) > maxArtifactBytes || hex.EncodeToString(sum[:]) != expected.SHA256 || !id(expected.RunID) || !id(expected.Scenario) || !id(expected.ModelRevision) {
+	if hex.EncodeToString(sum[:]) != expected.SHA256 {
 		return fail()
 	}
 	seen := map[string]bool{}
@@ -96,7 +99,13 @@ func Verify(raw []byte, expected Expectation) (Summary, error) {
 	var ttft, tpot []float64
 	var in, output uint64
 	start, end := math.Inf(1), math.Inf(-1)
-	for _, line := range bytes.Split(raw, []byte{'\n'}) {
+	// Bound physical lines before trimming and avoid allocating a slice per newline.
+	for rest := raw; len(rest) > 0; {
+		var line []byte
+		line, rest, _ = bytes.Cut(rest, []byte{'\n'})
+		if len(line) > maxRowBytes {
+			return fail()
+		}
 		line = bytes.TrimSpace(line)
 		if len(line) == 0 {
 			continue
