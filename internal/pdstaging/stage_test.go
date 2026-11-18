@@ -69,6 +69,7 @@ func stagingFixture() (postgres.PDStageLease, postgres.PDIntentOwner, Config) {
 				IntentID: intent, Workload: "workload-a", Generation: 2,
 				Scope: pd.Scope{Tenant: owner.TenantID, Project: owner.ProjectID, Pool: "pool-a"},
 				PrefillReplicas: 2, DecodeReplicas: 3, GPUsNeeded: 5,
+				PoolRevision: 7, TopologyRevision: 9, LoadRevision: 3,
 			},
 			TenantID: owner.TenantID, WorkloadID: "workload-a",
 			ProviderID: "provider-a", PoolID: "pool-a",
