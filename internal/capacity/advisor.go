@@ -5,7 +5,7 @@ package capacity
 import (
 	"errors"
 	"math"
-	"strconv"
+	"math/big"
 	"time"
 )
 
@@ -77,18 +77,17 @@ func Advise(now time.Time, d Demand, b Benchmark, pool PoolObservation, maxAge t
 	if (d.MaxTTFTms > 0 && b.P95TTFTms > d.MaxTTFTms) || (d.MaxTPOTms > 0 && b.P95TPOTms > d.MaxTPOTms) {
 		return Advice{Outcome: UnmetBenchmarkSLO}, nil
 	}
-	replicasF := math.Max(math.Ceil(d.PrefillTokensPerSec/b.PrefillTokensPerSec), math.Ceil(d.DecodeTokensPerSec/b.DecodeTokensPerSec))
-	// A float64 conversion of MaxInt can round up to 2^(IntSize-1).
-	// Check the exact exclusive conversion boundary before converting, then
-	// use integer division to check the GPU product without rounding.
-	if !positiveFinite(replicasF) || replicasF >= math.Ldexp(1, strconv.IntSize-1) {
+	prefill := ceilRepresentedRatio(d.PrefillTokensPerSec, b.PrefillTokensPerSec)
+	decode := ceilRepresentedRatio(d.DecodeTokensPerSec, b.DecodeTokensPerSec)
+	if decode.Cmp(prefill) > 0 {
+		prefill = decode
+	}
+	// Check the GPU product against the native int limit before conversion.
+	maxReplicas := int(^uint(0)>>1) / b.GPUsPerReplica
+	if prefill.Sign() <= 0 || prefill.Cmp(big.NewInt(int64(maxReplicas))) > 0 {
 		return unproven, ErrUnprovenCapacity
 	}
-	replicas := int(replicasF)
-	maxInt := int(^uint(0) >> 1)
-	if replicas > maxInt/b.GPUsPerReplica {
-		return unproven, ErrUnprovenCapacity
-	}
+	replicas := int(prefill.Int64())
 	needed := replicas * b.GPUsPerReplica
 	free := pool.AllocatableGPUs - pool.ReservedGPUs
 	result := Advice{Outcome: EstimatedFit, Replicas: replicas, GPUsNeeded: needed, ObservedFreeGPUs: free}
@@ -96,4 +95,18 @@ func Advise(now time.Time, d Demand, b Benchmark, pool PoolObservation, maxAge t
 		result.Outcome = InsufficientObservedCapacity
 	}
 	return result, nil
+}
+
+// ceilRepresentedRatio rounds the exact ratio of validated binary64 inputs up.
+// Floating-point division can round a positive fraction down to an integer
+// before math.Ceil sees it, underestimating required replicas. This is sizing
+// arithmetic over measured inputs, not a guarantee of benchmark precision.
+func ceilRepresentedRatio(demand, rate float64) *big.Int {
+	ratio := new(big.Rat).Quo(new(big.Rat).SetFloat64(demand), new(big.Rat).SetFloat64(rate))
+	var quotient, remainder big.Int
+	quotient.QuoRem(ratio.Num(), ratio.Denom(), &remainder)
+	if remainder.Sign() > 0 {
+		quotient.Add(&quotient, big.NewInt(1))
+	}
+	return &quotient
 }
