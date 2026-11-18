@@ -174,8 +174,6 @@ func readCurrentPDStagingSnapshotTx(
 	if !current {
 		return reject()
 	}
-	return PDStagingSnapshot{}, err
-	}
 	return PDStagingSnapshot{
 		Promotion: promotion, Proposal: candidate,
 		TenantID: owner.TenantID, WorkloadID: workload,
