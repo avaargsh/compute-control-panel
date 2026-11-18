@@ -285,6 +285,13 @@ func (r *Repository) ClaimOperation(ctx context.Context, tenantID, operationID s
 }
 
 func (r *Repository) StartOperation(ctx context.Context, tenantID, operationID string, expectedVersion uint64, owner string, fence uint64) (operation.Operation, error) {
+	// A PD operation may only start after the independently administered
+	// source/revision fence is rechecked under the SAME PostgreSQL transaction
+	// via StartPDStagingOperation. Generic Start cannot bypass revocation even
+	// if a previous worker already obtained a valid PD lease.
+	if strings.HasPrefix(operationID, "pd-operation-") {
+		return operation.Operation{}, operation.ErrTransition
+	}
 	return r.mutateOperation(ctx, tenantID, operationID, expectedVersion, func(o operation.Operation, now time.Time) (operation.Operation, error) {
 		return o.Start(expectedVersion, owner, fence, now)
 	})
