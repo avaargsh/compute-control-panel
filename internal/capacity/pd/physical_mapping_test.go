@@ -45,19 +45,21 @@ func TestBindScheduledDevicesRejectsCrossSourceDrift(t *testing.T) {
 	}
 	valid := []ScheduledDevice{makeDevice(one, "claim-1", "pod-1"), makeDevice(two, "claim-2", "pod-2")}
 	for name, change := range map[string]func(*TopologyEvidence, *[]ScheduledDevice){
-		"wrong node": func(_ *TopologyEvidence, d *[]ScheduledDevice) { (*d)[0].NodeUID = "successor-node" },
-		"wrong ResourceSlice UID": func(_ *TopologyEvidence, d *[]ScheduledDevice) { (*d)[0].SliceUID = "other-slice" },
+		"wrong node":               func(_ *TopologyEvidence, d *[]ScheduledDevice) { (*d)[0].NodeUID = "successor-node" },
+		"wrong ResourceSlice UID":  func(_ *TopologyEvidence, d *[]ScheduledDevice) { (*d)[0].SliceUID = "other-slice" },
 		"ResourceSlice RV changed": func(_ *TopologyEvidence, d *[]ScheduledDevice) { (*d)[0].SliceResourceVersion = "124" },
-		"unlisted GPU": func(_ *TopologyEvidence, d *[]ScheduledDevice) { (*d)[0].Device = "unregistered-gpu" },
-		"duplicate GPU": func(_ *TopologyEvidence, d *[]ScheduledDevice) { (*d)[1] = (*d)[0] },
-		"cross Pod Claim reuse": func(_ *TopologyEvidence, d *[]ScheduledDevice) { (*d)[1].ClaimUID = (*d)[0].ClaimUID },
-		"missing Pod UID": func(_ *TopologyEvidence, d *[]ScheduledDevice) { (*d)[1].PodUID = "" },
-		"GPU still FREE": func(e *TopologyEvidence, _ *[]ScheduledDevice) { e.Inventory.Devices[0].State = "FREE" },
-		"GPU unhealthy": func(e *TopologyEvidence, _ *[]ScheduledDevice) { e.Inventory.Devices[0].Healthy = false },
-		"GPU draining": func(e *TopologyEvidence, _ *[]ScheduledDevice) { e.Inventory.Devices[0].State = "DRAINING" },
-		"GPU unknown": func(e *TopologyEvidence, _ *[]ScheduledDevice) { e.Inventory.Devices[0].State = "UNKNOWN" },
-		"stale inventory": func(e *TopologyEvidence, _ *[]ScheduledDevice) { e.Inventory.Source.ObservedAtMillis -= 61000 },
-		"signature replay": func(e *TopologyEvidence, _ *[]ScheduledDevice) { e.Inventory.Devices[0].PhysicalUID = strings.Repeat("z", 20) },
+		"unlisted GPU":             func(_ *TopologyEvidence, d *[]ScheduledDevice) { (*d)[0].Device = "unregistered-gpu" },
+		"duplicate GPU":            func(_ *TopologyEvidence, d *[]ScheduledDevice) { (*d)[1] = (*d)[0] },
+		"cross Pod Claim reuse":    func(_ *TopologyEvidence, d *[]ScheduledDevice) { (*d)[1].ClaimUID = (*d)[0].ClaimUID },
+		"missing Pod UID":          func(_ *TopologyEvidence, d *[]ScheduledDevice) { (*d)[1].PodUID = "" },
+		"GPU still FREE":           func(e *TopologyEvidence, _ *[]ScheduledDevice) { e.Inventory.Devices[0].State = "FREE" },
+		"GPU unhealthy":            func(e *TopologyEvidence, _ *[]ScheduledDevice) { e.Inventory.Devices[0].Healthy = false },
+		"GPU draining":             func(e *TopologyEvidence, _ *[]ScheduledDevice) { e.Inventory.Devices[0].State = "DRAINING" },
+		"GPU unknown":              func(e *TopologyEvidence, _ *[]ScheduledDevice) { e.Inventory.Devices[0].State = "UNKNOWN" },
+		"stale inventory":          func(e *TopologyEvidence, _ *[]ScheduledDevice) { e.Inventory.Source.ObservedAtMillis -= 61000 },
+		"signature replay": func(e *TopologyEvidence, _ *[]ScheduledDevice) {
+			e.Inventory.Devices[0].PhysicalUID = strings.Repeat("z", 20)
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			in := e
