@@ -64,7 +64,7 @@ func TestPDPostgresKubeJobSetGolden(t *testing.T) {
 		IntentID: snap.Proposal.IntentID, TenantID: snap.TenantID,
 		WorkloadID: snap.WorkloadID, ProviderID: snap.ProviderID,
 		Generation: op.Generation, PrefillReplicas: snap.PrefillReplicas,
-		DecodeReplicas: snap.DecodeReplicas,
+		DecodeReplicas:        snap.DecodeReplicas,
 		PrefillGPUsPerReplica: 1, DecodeGPUsPerReplica: 1,
 		ResourceClaimTemplateName: "pd-gpu",
 	}
@@ -153,12 +153,12 @@ func TestPDPostgresKubeJobSetGolden(t *testing.T) {
 		t.Fatalf("restarted authoritative UID-pinned Inspect: %+v %v", observed, err)
 	}
 	evidence := InspectionEvidence{
-		ObservationID: "pd-kind-inspect-" + randomSuffix(t),
-		EventID: "pd-kind-event-" + randomSuffix(t),
-		CorrelationID: "pd-kind-correlation-" + randomSuffix(t),
-		Source: "jobset-controller-kind",
+		ObservationID:  "pd-kind-inspect-" + randomSuffix(t),
+		EventID:        "pd-kind-event-" + randomSuffix(t),
+		CorrelationID:  "pd-kind-correlation-" + randomSuffix(t),
+		Source:         "jobset-controller-kind",
 		AdapterVersion: "pd-jobset-v1alpha2",
-		Observation: observed,
+		Observation:    observed,
 	}
 	recovered, err := otherRepo.ReconcileOperation(
 		ctx, owner.TenantID, op.ID, reconcile.Version,
