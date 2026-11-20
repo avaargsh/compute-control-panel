@@ -181,8 +181,8 @@ func TestPDPostgresKubeJobSetGolden(t *testing.T) {
 	var pins int
 	if err := db.QueryRowContext(ctx,
 		`SELECT count(*) FROM public.kueue_job_create_pins
-		  WHERE namespace=$1 AND tenant_id=$2 AND compute_operation_id=$3
-		    AND resource_uid=$4`,
+		  WHERE namespace=$1 AND tenant_id=$2 AND operation_id=$3
+		    AND job_uid=$4`,
 		os.Getenv("CCP_PD_KIND_NAMESPACE"), owner.TenantID,
 		req.OperationID, observed.ResourceUID).Scan(&pins); err != nil || pins != 1 {
 		t.Fatalf("restricted durable UID pin not unique: pins=%d err=%v", pins, err)
