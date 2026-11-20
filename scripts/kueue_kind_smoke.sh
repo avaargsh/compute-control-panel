@@ -1465,3 +1465,12 @@ bash scripts/pd_jobset_activation_gate_kind_smoke.sh
 # the previously created staging-only ServiceAccount, not kubectl CREATE.
 bash scripts/pd_jobset_provider_kind_smoke.sh
 
+# One signed PD Intent across the SAME disposable PG16 and actual Kind API.
+# Uses a GET/CREATE-only ServiceAccount and an independently attested UID
+# binding DB login. A controlled post-POST ACK drop MUST persist UNKNOWN.
+CCP_PD_KIND_ADMIN_DSN="$binding_dsn" \
+CCP_PD_KIND_BINDING_DSN="$binding_role_dsn" \
+CCP_PD_KIND_API_URL="https://${api_host}:${api_port}" \
+CCP_PD_KIND_CA_PATH="$dir/kube-ca.crt" \
+  bash scripts/pd_jobset_pg_kind_golden_smoke.sh
+
