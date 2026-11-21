@@ -125,6 +125,19 @@ func TestReaderFiltersByAuthenticatedScopeBeforeCallingKubernetes(t *testing.T) 
 }
 
 func TestReaderRequiresVerifiedTLSConfiguration(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	temp := t.TempDir()
+	caFile := filepath.Join(temp, "valid-ca.pem")
+	tokenFile := filepath.Join(temp, "valid-token")
+	if err := os.WriteFile(caFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tokenFile, []byte("test-token"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		name string
 		mod  func(*Config)
@@ -139,7 +152,7 @@ func TestReaderRequiresVerifiedTLSConfiguration(t *testing.T) {
 		{"bad resource name", func(c *Config) { c.ResourceNames = []string{"../secret"} }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := Config{APIServer: "https://localhost:6443", CAFile: "ca.pem", TokenFile: "token", ClusterID: "c", TenantID: "t", ProjectID: "p", ResourceNames: []string{"nvidia.com/gpu"}, ObservationTTL: time.Minute}
+			cfg := Config{APIServer: server.URL, CAFile: caFile, TokenFile: tokenFile, ClusterID: "c", TenantID: "t", ProjectID: "p", ResourceNames: []string{"nvidia.com/gpu"}, ObservationTTL: time.Minute}
 			tc.mod(&cfg)
 			if _, err := NewReader(cfg); err == nil {
 				t.Fatal("insecure/invalid config accepted")
