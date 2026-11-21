@@ -10,6 +10,7 @@ A platform user sees exactly which layer is not ready: (1) allocated GPU, (2) mo
 
 ```json
 {
+  "data_mode": "demo",
   "workload_id": "w-123",
   "project_id": "p-123",
   "desired_generation": 7,
