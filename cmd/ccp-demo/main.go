@@ -16,7 +16,6 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -168,6 +167,3 @@ func main() {
 	}
 }
 
-// Compile-time documentation: no atomic state or asynchronous persistence
-// is used; Demo has no durable workload or authoritative GPU evidence.
-var _ = atomic.Bool{}
