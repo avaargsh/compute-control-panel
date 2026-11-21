@@ -9,8 +9,15 @@ on:
       - 'scripts/dra_example_kind_smoke.sh'
       - 'scripts/kueue_dra_quota_kind_smoke.sh'
       - 'scripts/kueue_preemption_kind_smoke.sh'
+      - 'scripts/pd_jobset_dra_kind_smoke.sh'
+      - 'scripts/pd_jobset_activation_gate_kind_smoke.sh'
+      - 'scripts/pd_jobset_provider_kind_smoke.sh'
+      - 'scripts/pd_jobset_pg_kind_golden_smoke.sh'
+      - 'internal/store/postgres/pd_jobset_kind_golden_test.go'
       - 'cmd/kueue-observe/**'
       - 'cmd/kueue-provider-smoke/**'
+      - 'cmd/pd-jobset-provider-smoke/**'
+      - 'internal/provider/pd_jobset_*.go'
       - 'internal/provider/kueue_*.go'
       - 'internal/provider/dra_*.go'
   push:
@@ -22,8 +29,15 @@ on:
       - 'scripts/dra_example_kind_smoke.sh'
       - 'scripts/kueue_dra_quota_kind_smoke.sh'
       - 'scripts/kueue_preemption_kind_smoke.sh'
+      - 'scripts/pd_jobset_dra_kind_smoke.sh'
+      - 'scripts/pd_jobset_activation_gate_kind_smoke.sh'
+      - 'scripts/pd_jobset_provider_kind_smoke.sh'
+      - 'scripts/pd_jobset_pg_kind_golden_smoke.sh'
+      - 'internal/store/postgres/pd_jobset_kind_golden_test.go'
       - 'cmd/kueue-observe/**'
       - 'cmd/kueue-provider-smoke/**'
+      - 'cmd/pd-jobset-provider-smoke/**'
+      - 'internal/provider/pd_jobset_*.go'
       - 'internal/provider/kueue_*.go'
       - 'internal/provider/dra_*.go'
   workflow_dispatch:
@@ -38,7 +52,7 @@ env:
 jobs:
   disposable-kind:
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6 immutable commit
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6 immutable commit
@@ -60,6 +74,10 @@ jobs:
           bash -n scripts/kueue_dra_quota_kind_smoke.sh
           bash -n scripts/kueue_relist_kind_smoke.sh
           bash -n scripts/kueue_preemption_kind_smoke.sh
+          bash -n scripts/pd_jobset_dra_kind_smoke.sh
+          bash -n scripts/pd_jobset_activation_gate_kind_smoke.sh
+          bash -n scripts/pd_jobset_provider_kind_smoke.sh
+          bash -n scripts/pd_jobset_pg_kind_golden_smoke.sh
       - name: Kubernetes 1.34 / Kueue v0.19.6 + simulated DRA v0.2.0 + PG16 (disposable)
         env:
           CCP_DISPOSABLE_KIND_SMOKE: '1'
