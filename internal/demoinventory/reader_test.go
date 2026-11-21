@@ -74,8 +74,8 @@ func TestDemoReaderDeniesForeignScopeBeforeReturningAnyData(t *testing.T) {
 
 func TestDemoReaderRequiresExplicitScopeAndClock(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		t, p string
+		name  string
+		t, p  string
 		clock func() time.Time
 	}{
 		{"no tenant", "", "project", time.Now},
