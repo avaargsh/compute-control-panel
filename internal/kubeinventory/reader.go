@@ -172,7 +172,8 @@ func (r *Reader) ListObservations(ctx context.Context, tenantID string, projects
 			if !capOK && !allocOK {
 				continue
 			}
-			if !capOK || !allocOK || !nonnegativeInteger(capacity) || !nonnegativeInteger(allocatable) {
+			if !capOK || !allocOK || !nonnegativeInteger(capacity) || !nonnegativeInteger(allocatable) ||
+				exceedsCapacity(capacity, allocatable) {
 				return observation.Snapshot{}, ErrInvalidResponse
 			}
 			gpu := base
@@ -198,6 +199,12 @@ func nonnegativeInteger(s string) bool {
 	}
 	_, err := strconv.ParseUint(s, 10, 64)
 	return err == nil
+}
+
+func exceedsCapacity(capacity, allocatable string) bool {
+	total, _ := strconv.ParseUint(capacity, 10, 64)
+	availableToScheduler, _ := strconv.ParseUint(allocatable, 10, 64)
+	return availableToScheduler > total
 }
 
 type nodeList struct {
