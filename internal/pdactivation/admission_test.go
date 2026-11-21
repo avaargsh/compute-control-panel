@@ -17,9 +17,9 @@ func admissionFixture(t *testing.T) (admissionReview, Trust, AuthorityLoader, ti
 	pair, _, authority, keys, now := permitFixture(t)
 	review := admissionReview{
 		APIVersion: "admission.k8s.io/v1",
-		Kind: "AdmissionReview",
+		Kind:       "AdmissionReview",
 		Request: &admissionRequest{
-			UID: "test-admission-uid-001",
+			UID:       "test-admission-uid-001",
 			Operation: "UPDATE",
 			Kind: admissionGroupVersionKind{
 				Group: "jobset.x-k8s.io", Version: "v1alpha2", Kind: "JobSet",
@@ -98,22 +98,30 @@ func TestAdmissionReviewRejectsImpersonationScopeAndUnauthorizedMutation(t *test
 		{"dry-run", func(r *admissionReview) { yes := true; r.Request.DryRun = &yes }},
 		{"spec-mutation", func(r *admissionReview) {
 			var obj map[string]any
-			if err := json.Unmarshal(r.Request.Object, &obj); err != nil { t.Fatal(err) }
+			if err := json.Unmarshal(r.Request.Object, &obj); err != nil {
+				t.Fatal(err)
+			}
 			obj["spec"].(map[string]any)["suspend"] = false
 			r.Request.Object, _ = json.Marshal(obj)
 		}},
 		{"missing-permit", func(r *admissionReview) {
 			var obj map[string]any
-			if err := json.Unmarshal(r.Request.Object, &obj); err != nil { t.Fatal(err) }
+			if err := json.Unmarshal(r.Request.Object, &obj); err != nil {
+				t.Fatal(err)
+			}
 			delete(obj["metadata"].(map[string]any)["annotations"].(map[string]any), PermitAnnotation)
 			r.Request.Object, _ = json.Marshal(obj)
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			raw, err := json.Marshal(original)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			var req admissionReview
-			if err := json.Unmarshal(raw, &req); err != nil { t.Fatal(err) }
+			if err := json.Unmarshal(raw, &req); err != nil {
+				t.Fatal(err)
+			}
 			tc.edit(&req)
 			h := &admissionHandler{trust: trust, load: load, now: func() time.Time { return now }}
 			code, res := callAdmission(t, h, req)
@@ -129,7 +137,7 @@ func TestAdmissionReviewRejectsImpersonationScopeAndUnauthorizedMutation(t *test
 func TestAdmissionReviewDeniesMissingOrRevokedIndependentAuthority(t *testing.T) {
 	req, trust, _, now := admissionFixture(t)
 	for _, tc := range []struct {
-		name string
+		name   string
 		loader AuthorityLoader
 	}{
 		{"absent", nil},
@@ -157,7 +165,7 @@ func TestAdmissionReviewRejectsMalformedAndOversizedRequests(t *testing.T) {
 	handler := &admissionHandler{trust: trust, load: load, now: func() time.Time { return now }}
 	for _, tc := range []struct {
 		name, method, contentType, body string
-		expected int
+		expected                        int
 	}{
 		{"wrong-method", "GET", "application/json", "{}", http.StatusMethodNotAllowed},
 		{"wrong-media-type", "POST", "text/plain", "{}", http.StatusUnsupportedMediaType},
