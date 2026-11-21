@@ -20,13 +20,13 @@ func permitFixture(t *testing.T) (OldNew, SignedPermit, Authority, map[string]ed
 	private := ed25519.NewKeyFromSeed(seed[:])
 	old := map[string]any{
 		"apiVersion": "jobset.x-k8s.io/v1alpha2",
-		"kind": "JobSet",
+		"kind":       "JobSet",
 		"metadata": map[string]any{
 			"namespace": "ccp-pd-paired-smoke", "name": "pd-gated", "uid": "uuid-gated-001",
 			"resourceVersion": "2055", "generation": float64(1),
 			"labels": map[string]any{"kueue.x-k8s.io/queue-name": "ccp-pd-paired-smoke"},
 			"annotations": map[string]any{
-				"kueue.x-k8s.io/admission-gated-by": "compute-control-panel.io/pd-activation",
+				"kueue.x-k8s.io/admission-gated-by":     "compute-control-panel.io/pd-activation",
 				"compute-control-panel.io/pd-intent-id": strings.Repeat("a", 64),
 			},
 		},
@@ -48,7 +48,9 @@ func permitFixture(t *testing.T) (OldNew, SignedPermit, Authority, map[string]ed
 		},
 	}
 	spec, err := json.Marshal(old["spec"])
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	digest := sha256.Sum256(spec)
 	claims := Claims{
 		Version: "ccp.pd.activation.v1", Issuer: "independent-approval-service",
@@ -60,25 +62,29 @@ func permitFixture(t *testing.T) (OldNew, SignedPermit, Authority, map[string]ed
 		Namespace: "ccp-pd-paired-smoke", JobSetName: "pd-gated",
 		JobSetUID: "uuid-gated-001", JobSetResourceVersion: "2055",
 		JobSetSpecSHA256: "sha256:" + hex.EncodeToString(digest[:]),
-		IssuedAtMS: now.Add(-time.Second).UnixMilli(),
-		NotBeforeMS: now.Add(-time.Second).UnixMilli(),
-		ExpiresAtMS: now.Add(time.Minute).UnixMilli(),
+		IssuedAtMS:       now.Add(-time.Second).UnixMilli(),
+		NotBeforeMS:      now.Add(-time.Second).UnixMilli(),
+		ExpiresAtMS:      now.Add(time.Minute).UnixMilli(),
 	}
 	signedBytes, err := json.Marshal(claims)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	permit := SignedPermit{Claims: claims, Signature: ed25519.Sign(private, signedBytes)}
 	newObject := cloneJSONMap(t, old)
 	delete(newObject["metadata"].(map[string]any)["annotations"].(map[string]any), AdmissionGateAnnotation)
 	payload, err := json.Marshal(permit)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	newObject["metadata"].(map[string]any)["annotations"].(map[string]any)[PermitAnnotation] = string(payload)
 	// Allowed Kubernetes bookkeeping effects are resourceVersion and managedFields.
 	newObject["metadata"].(map[string]any)["resourceVersion"] = "2056"
 	newObject["metadata"].(map[string]any)["managedFields"] = []any{map[string]any{"manager": "kube-apiserver"}}
 	authority := Authority{
 		Approved: true, Revoked: false, Version: 5,
-		ValidUntilMS: now.Add(2*time.Minute).UnixMilli(),
-		TenantID: claims.TenantID, ProjectID: claims.ProjectID,
+		ValidUntilMS: now.Add(2 * time.Minute).UnixMilli(),
+		TenantID:     claims.TenantID, ProjectID: claims.ProjectID,
 		ProviderID: claims.ProviderID, PoolID: claims.PoolID,
 		WorkloadID: claims.WorkloadID, IntentID: claims.IntentID,
 		Generation: claims.Generation, Namespace: claims.Namespace,
@@ -92,21 +98,29 @@ func permitFixture(t *testing.T) (OldNew, SignedPermit, Authority, map[string]ed
 func cloneJSONMap(t *testing.T, old map[string]any) map[string]any {
 	t.Helper()
 	b, err := json.Marshal(old)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	var out map[string]any
-	if err := json.Unmarshal(b, &out); err != nil { t.Fatal(err) }
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatal(err)
+	}
 	return out
 }
 func copyObject(t *testing.T, raw []byte) map[string]any {
 	t.Helper()
 	var out map[string]any
-	if err := json.Unmarshal(raw, &out); err != nil { t.Fatal(err) }
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
 	return out
 }
 func asJSON(t *testing.T, obj map[string]any) []byte {
 	t.Helper()
 	b, err := json.Marshal(obj)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	return b
 }
 func signMutation(t *testing.T, signed SignedPermit, mutate func(*Claims)) SignedPermit {
@@ -115,7 +129,9 @@ func signMutation(t *testing.T, signed SignedPermit, mutate func(*Claims)) Signe
 	priv := ed25519.NewKeyFromSeed(seed[:])
 	mutate(&signed.Claims)
 	raw, err := json.Marshal(signed.Claims)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	signed.Signature = ed25519.Sign(priv, raw)
 	return signed
 }
@@ -123,7 +139,9 @@ func setPermit(t *testing.T, pair OldNew, signed SignedPermit) OldNew {
 	t.Helper()
 	newObj := copyObject(t, pair.New)
 	encoded, err := json.Marshal(signed)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	newObj["metadata"].(map[string]any)["annotations"].(map[string]any)[PermitAnnotation] = string(encoded)
 	pair.New = asJSON(t, newObj)
 	return pair
@@ -139,9 +157,17 @@ func TestSignedScopedPermitAcceptsOnlyExactGateRelease(t *testing.T) {
 		t.Fatalf("legitimate independent signed activation denied: %+v %v", verified, err)
 	}
 	patch, err := GateRemovalPatch(verified)
-	if err != nil { t.Fatal(err) }
-	var ops []struct { Op string `json:"op"`; Path string `json:"path"`; Value any `json:"value"` }
-	if err := json.Unmarshal(patch, &ops); err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ops []struct {
+		Op    string `json:"op"`
+		Path  string `json:"path"`
+		Value any    `json:"value"`
+	}
+	if err := json.Unmarshal(patch, &ops); err != nil {
+		t.Fatal(err)
+	}
 	if len(ops) != 5 ||
 		ops[0].Op != "test" || ops[0].Path != "/metadata/uid" ||
 		ops[1].Op != "test" || ops[1].Path != "/metadata/resourceVersion" ||
@@ -155,21 +181,29 @@ func TestSignedScopedPermitAcceptsOnlyExactGateRelease(t *testing.T) {
 func TestScopedPermitRejectsUntrustedMutationAndReplay(t *testing.T) {
 	pair, _, auth, keys, now := permitFixture(t)
 	for _, tc := range []struct {
-		name string
+		name   string
 		mutate func(map[string]any)
 	}{
 		{"spec-unsuspend", func(x map[string]any) { x["spec"].(map[string]any)["suspend"] = false }},
 		{"spec-image", func(x map[string]any) {
 			x["spec"].(map[string]any)["replicatedJobs"].([]any)[0].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)["containers"].([]any)[0].(map[string]any)["image"] = "busybox"
 		}},
-		{"labels", func(x map[string]any) { x["metadata"].(map[string]any)["labels"].(map[string]any)["extra"] = "surprise" }},
-		{"annotation-extra", func(x map[string]any) { x["metadata"].(map[string]any)["annotations"].(map[string]any)["other"] = "value" }},
-		{"re-add-gate", func(x map[string]any) { x["metadata"].(map[string]any)["annotations"].(map[string]any)[AdmissionGateAnnotation] = GateValue }},
+		{"labels", func(x map[string]any) {
+			x["metadata"].(map[string]any)["labels"].(map[string]any)["extra"] = "surprise"
+		}},
+		{"annotation-extra", func(x map[string]any) {
+			x["metadata"].(map[string]any)["annotations"].(map[string]any)["other"] = "value"
+		}},
+		{"re-add-gate", func(x map[string]any) {
+			x["metadata"].(map[string]any)["annotations"].(map[string]any)[AdmissionGateAnnotation] = GateValue
+		}},
 		{"uid-replacement", func(x map[string]any) { x["metadata"].(map[string]any)["uid"] = "other" }},
 		{"name-replacement", func(x map[string]any) { x["metadata"].(map[string]any)["name"] = "other" }},
 		{"namespace-replacement", func(x map[string]any) { x["metadata"].(map[string]any)["namespace"] = "other" }},
 		{"metadata-new-field", func(x map[string]any) { x["metadata"].(map[string]any)["finalizers"] = []any{"evil"} }},
-		{"permit-missing", func(x map[string]any) { delete(x["metadata"].(map[string]any)["annotations"].(map[string]any), PermitAnnotation) }},
+		{"permit-missing", func(x map[string]any) {
+			delete(x["metadata"].(map[string]any)["annotations"].(map[string]any), PermitAnnotation)
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			x := copyObject(t, pair.New)
@@ -197,12 +231,16 @@ func TestScopedPermitRejectsUntrustedMutationAndReplay(t *testing.T) {
 func TestSignedPermitRejectsRevokedExpiredAuthorityAndBadSignatures(t *testing.T) {
 	pair, permit, auth, keys, now := permitFixture(t)
 	scenarios := []struct {
-		name string
+		name  string
 		alter func(*SignedPermit, *Authority, *time.Time)
 	}{
 		{"unsigned-change", func(p *SignedPermit, _ *Authority, _ *time.Time) { p.Claims.JobSetUID = "attacker" }},
-		{"wrong-audience", func(p *SignedPermit, _ *Authority, _ *time.Time) { *p = signMutation(t, *p, func(c *Claims) { c.Audience = "generic-api" }) }},
-		{"wrong-issuer", func(p *SignedPermit, _ *Authority, _ *time.Time) { *p = signMutation(t, *p, func(c *Claims) { c.Issuer = "tenant" }) }},
+		{"wrong-audience", func(p *SignedPermit, _ *Authority, _ *time.Time) {
+			*p = signMutation(t, *p, func(c *Claims) { c.Audience = "generic-api" })
+		}},
+		{"wrong-issuer", func(p *SignedPermit, _ *Authority, _ *time.Time) {
+			*p = signMutation(t, *p, func(c *Claims) { c.Issuer = "tenant" })
+		}},
 		{"revoked", func(_ *SignedPermit, a *Authority, _ *time.Time) { a.Revoked = true }},
 		{"not-approved", func(_ *SignedPermit, a *Authority, _ *time.Time) { a.Approved = false }},
 		{"fence-version", func(_ *SignedPermit, a *Authority, _ *time.Time) { a.Version++ }},
@@ -237,13 +275,15 @@ func TestSignedPermitRejectsRevokedExpiredAuthorityAndBadSignatures(t *testing.T
 			}
 		})
 	}
-	for _, tc := range []struct{name string; loader AuthorityLoader}{
+	for _, tc := range []struct {
+		name   string
+		loader AuthorityLoader
+	}{
 		{"missing", nil},
 		{"not-found", func(context.Context, Claims) (Authority, error) { return Authority{}, errors.New("authority missing") }},
-	}{
+	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := VerifyGateRelease(context.Background(), pair, trustFixture(keys), tc.loader, now);
-				!errors.Is(err, ErrActivationDenied) {
+			if _, err := VerifyGateRelease(context.Background(), pair, trustFixture(keys), tc.loader, now); !errors.Is(err, ErrActivationDenied) {
 				t.Fatalf("missing authoritative revocation check accepted: %v", err)
 			}
 		})
