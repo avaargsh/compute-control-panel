@@ -111,7 +111,9 @@ func Project(record Record, now time.Time) (View, error) {
 		case ConditionUnavailable:
 			view.Status = StatusUnavailable
 		case ConditionUnknown:
-			view.ReasonCode = "SOURCE_REPORTED_UNKNOWN"
+			if view.ReasonCode == "" {
+				view.ReasonCode = "SOURCE_REPORTED_UNKNOWN"
+			}
 		default:
 			view.ReasonCode = "CONDITION_INVALID"
 		}
