@@ -13,56 +13,56 @@ import (
 const maxAdmissionBytes = 1 << 20
 
 type admissionGroupVersionKind struct {
-	Group string `json:"group"`
+	Group   string `json:"group"`
 	Version string `json:"version"`
-	Kind string `json:"kind"`
+	Kind    string `json:"kind"`
 }
 type admissionGroupVersionResource struct {
-	Group string `json:"group"`
-	Version string `json:"version"`
+	Group    string `json:"group"`
+	Version  string `json:"version"`
 	Resource string `json:"resource"`
 }
 type admissionUserInfo struct {
 	Username string `json:"username"`
 }
 type admissionRequest struct {
-	UID string `json:"uid"`
-	Kind admissionGroupVersionKind `json:"kind"`
-	Resource admissionGroupVersionResource `json:"resource"`
-	SubResource string `json:"subResource,omitempty"`
-	Namespace string `json:"namespace"`
-	Name string `json:"name"`
-	Operation string `json:"operation"`
-	UserInfo admissionUserInfo `json:"userInfo"`
-	DryRun *bool `json:"dryRun,omitempty"`
-	OldObject json.RawMessage `json:"oldObject"`
-	Object json.RawMessage `json:"object"`
+	UID         string                        `json:"uid"`
+	Kind        admissionGroupVersionKind     `json:"kind"`
+	Resource    admissionGroupVersionResource `json:"resource"`
+	SubResource string                        `json:"subResource,omitempty"`
+	Namespace   string                        `json:"namespace"`
+	Name        string                        `json:"name"`
+	Operation   string                        `json:"operation"`
+	UserInfo    admissionUserInfo             `json:"userInfo"`
+	DryRun      *bool                         `json:"dryRun,omitempty"`
+	OldObject   json.RawMessage               `json:"oldObject"`
+	Object      json.RawMessage               `json:"object"`
 }
 type admissionStatus struct {
-	Code int `json:"code"`
-	Reason string `json:"reason"`
+	Code    int    `json:"code"`
+	Reason  string `json:"reason"`
 	Message string `json:"message"`
 }
 type admissionResponse struct {
-	UID string `json:"uid"`
-	Allowed bool `json:"allowed"`
-	Status *admissionStatus `json:"status,omitempty"`
+	UID     string           `json:"uid"`
+	Allowed bool             `json:"allowed"`
+	Status  *admissionStatus `json:"status,omitempty"`
 	// Validating webhooks NEVER return patches; these fields exist only to
 	// make an accidental mutation detectable in the integration tests.
-	Patch []byte `json:"patch,omitempty"`
+	Patch     []byte `json:"patch,omitempty"`
 	PatchType string `json:"patchType,omitempty"`
 }
 type admissionReview struct {
-	APIVersion string `json:"apiVersion"`
-	Kind string `json:"kind"`
-	Request *admissionRequest `json:"request,omitempty"`
-	Response *admissionResponse `json:"response,omitempty"`
+	APIVersion string             `json:"apiVersion"`
+	Kind       string             `json:"kind"`
+	Request    *admissionRequest  `json:"request,omitempty"`
+	Response   *admissionResponse `json:"response,omitempty"`
 }
 
 type admissionHandler struct {
 	trust Trust
-	load AuthorityLoader
-	now func() time.Time
+	load  AuthorityLoader
+	now   func() time.Time
 }
 
 // NewAdmissionHandler is the HTTP protocol adapter for a future cluster
@@ -106,9 +106,9 @@ func (h *admissionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	req := review.Request
 	response := &admissionResponse{
-		UID: req.UID,
+		UID:     req.UID,
 		Allowed: false,
-		Status: &admissionStatus{Code: http.StatusForbidden, Reason: "Forbidden", Message: "PD scoped activation denied"},
+		Status:  &admissionStatus{Code: http.StatusForbidden, Reason: "Forbidden", Message: "PD scoped activation denied"},
 	}
 	// Only this one authenticated ServiceAccount may attempt this exact
 	// JobSet gate transition. Server-side validation MUST still run for
@@ -144,4 +144,3 @@ func (h *admissionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Response: response,
 	})
 }
-
