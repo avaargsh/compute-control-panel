@@ -142,11 +142,12 @@ func TestSignedScopedPermitAcceptsOnlyExactGateRelease(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	var ops []struct { Op string `json:"op"`; Path string `json:"path"`; Value any `json:"value"` }
 	if err := json.Unmarshal(patch, &ops); err != nil { t.Fatal(err) }
-	if len(ops) != 4 ||
+	if len(ops) != 5 ||
 		ops[0].Op != "test" || ops[0].Path != "/metadata/uid" ||
 		ops[1].Op != "test" || ops[1].Path != "/metadata/resourceVersion" ||
 		ops[2].Op != "test" || ops[2].Path != "/metadata/annotations/kueue.x-k8s.io~1admission-gated-by" ||
-		ops[3].Op != "remove" || ops[3].Path != "/metadata/annotations/kueue.x-k8s.io~1admission-gated-by" {
+		ops[3].Op != "add" || ops[3].Path != "/metadata/annotations/compute-control-panel.io~1pd-activation-permit" ||
+		ops[4].Op != "remove" || ops[4].Path != "/metadata/annotations/kueue.x-k8s.io~1admission-gated-by" {
 		t.Fatalf("non-exact gate-only JSON Patch: %s", patch)
 	}
 }
