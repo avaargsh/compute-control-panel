@@ -188,3 +188,66 @@ func TestReleaseEvidenceRejectsDeleteWithoutGenerationAdvance(t *testing.T) {
 		t.Fatalf("same-generation DELETE must fail closed: correlation=%+v err=%v", got, err)
 	}
 }
+
+func TestReleaseEvidenceClaimUIDAbsenceAlternativeIsIdentityFenced(t *testing.T) {
+	// The historical Claim may be deleted rather than remain unallocated.
+	// The existing LIST observer reports old UID/name absence but not driver
+	// NodeUnprepare; correlation remains non-authoritative.
+	testCases := []struct {
+		name   string
+		mutate func(*ReleaseEvidenceCandidate)
+		valid  bool
+	}{
+		{name: "stable old Claim UID absence with exact historic identity", valid: true},
+		{name: "missing both Claim alternatives", mutate: func(e *ReleaseEvidenceCandidate) {
+			e.ClaimAbsent = nil
+		}},
+		{name: "unallocated Claim also asserted", mutate: func(e *ReleaseEvidenceCandidate) {
+			e.ClaimUnallocated = releaseCandidateFixture().ClaimUnallocated
+		}},
+		{name: "other historical Claim UID", mutate: func(e *ReleaseEvidenceCandidate) {
+			e.ClaimAbsent.PreviousClaim.UID = "foreign-claim-uid"
+		}},
+		{name: "successor Claim name", mutate: func(e *ReleaseEvidenceCandidate) {
+			e.ClaimAbsent.PreviousClaim.Name = "other-claim"
+		}},
+		{name: "wrong tenant namespace", mutate: func(e *ReleaseEvidenceCandidate) {
+			e.ClaimAbsent.PreviousClaim.Namespace = "tenant-b"
+		}},
+		{name: "missing complete LIST resourceVersion", mutate: func(e *ReleaseEvidenceCandidate) {
+			e.ClaimAbsent.ClaimListResourceVersion = ""
+		}},
+		{name: "malformed LIST resourceVersion", mutate: func(e *ReleaseEvidenceCandidate) {
+			e.ClaimAbsent.ClaimListResourceVersion = " 440 "
+		}},
+		{name: "NUL in LIST resourceVersion", mutate: func(e *ReleaseEvidenceCandidate) {
+			e.ClaimAbsent.ClaimListResourceVersion = "440\x00untrusted"
+		}},
+		{name: "prior DRA Pod UID differs", mutate: func(e *ReleaseEvidenceCandidate) {
+			e.PriorPodClaim.Claim.PodUID = "other-pod"
+		}},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := releaseCandidateFixture()
+			prior := e.PriorPodClaim.Claim
+			e.ClaimUnallocated = DRAClaimUnallocatedObservation{}
+			e.ClaimAbsent = &DRAClaimUIDAbsentObservation{
+				PreviousClaim: prior.Claim, ClaimListResourceVersion: "440",
+			}
+			if tc.mutate != nil {
+				tc.mutate(&e)
+			}
+			got, err := CorrelateReleaseEvidence(e)
+			if tc.valid {
+				if err != nil || got.AllocationID != "allocation-a" ||
+					got.Pod.UID != "pod-uid-a" ||
+					got.Claim != prior.Claim || got.Device != prior.Device {
+					t.Fatalf("exact old Claim structural absence not correlated: got=%+v err=%v", got, err)
+				}
+			} else if err != ErrUncorrelatedReleaseEvidence || got != (ReleaseEvidenceCorrelation{}) {
+				t.Fatalf("unsafe Claim absence was correlated: got=%+v err=%v", got, err)
+			}
+		})
+	}
+}
