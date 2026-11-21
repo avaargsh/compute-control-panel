@@ -175,3 +175,16 @@ func TestReleaseEvidenceCorrelationRejectsCrossAllocationSplicing(t *testing.T) 
 		})
 	}
 }
+
+// A DELETE observation for the old desired generation must not be joined to
+// a CREATE as release evidence. A release is a new, fenced desired transition.
+func TestReleaseEvidenceRejectsDeleteWithoutGenerationAdvance(t *testing.T) {
+	e := releaseCandidateFixture()
+	e.Delete.Generation = e.Create.Generation
+	e.ProviderAbsence.DesiredGeneration = e.Delete.Generation
+
+	got, err := CorrelateReleaseEvidence(e)
+	if err != ErrUncorrelatedReleaseEvidence || got != (ReleaseEvidenceCorrelation{}) {
+		t.Fatalf("same-generation DELETE must fail closed: correlation=%+v err=%v", got, err)
+	}
+}
