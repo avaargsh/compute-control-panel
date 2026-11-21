@@ -33,7 +33,7 @@ func fixtureReader(t *testing.T, handler http.HandlerFunc) (*Reader, string) {
 	reader, err := NewReader(Config{
 		APIServer: server.URL, CAFile: certFile, TokenFile: tokenFile,
 		ClusterID: "cluster-a", TenantID: "tenant-a", ProjectID: "project-a",
-		ResourceNames: []string{"nvidia.com/gpu", "huawei.com/Ascend910"},
+		ResourceNames:  []string{"nvidia.com/gpu", "huawei.com/Ascend910"},
 		ObservationTTL: time.Minute, Timeout: 3 * time.Second,
 		Now: func() time.Time { return now },
 	})
