@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -291,4 +290,3 @@ func TestConsoleRejectsMalformedLoginAndOversizedBody(t *testing.T) {
 	}
 }
 
-var _ = errors.Is
