@@ -132,12 +132,15 @@ func TestAdmissionReleaseObservationsStayUnknown(t *testing.T) {
 			if report["release_status"] != "UNKNOWN" || report["allocation_released"] != false || report["cost_final"] != false || report["physical_gpu_verified"] != false {
 				t.Fatalf("unverified sources promoted release: %+v", report)
 			}
-			complete := fault == ""
+			complete := fault == "" || fault == "claim404"
 			if report["api_snapshot_complete"] != complete {
 				t.Fatalf("snapshot completeness mismatch: %+v", report)
 			}
-			if complete && (report["pod_absent"] != true || report["quota_cleared"] != true || report["claim_unallocated"] != true) {
+			if complete && (report["pod_absent"] != true || report["quota_cleared"] != true) {
 				t.Fatalf("complete snapshot lost observations: %+v", report)
+			}
+			if fault == "" && report["claim_unallocated"] != true {
+				t.Fatalf("still-existing Claim must correlate as unallocated: %+v", report)
 			}
 			if fault == "pod present" && report["pod_absent"] != nil {
 				t.Fatalf("present Pod counted absent: %+v", report)
@@ -150,7 +153,7 @@ func TestAdmissionReleaseObservationsStayUnknown(t *testing.T) {
 			}
 			if fault == "claim404" {
 				versions, ok := report["resource_versions"].(map[string]string)
-				if report["claim_uid_absent"] != true || !ok || versions["resourceclaim_list"] != "500" || claimListReads.Load() != 2 || report["claim_unallocated"] != nil || report["api_snapshot_complete"] != false {
+				if report["claim_uid_absent"] != true || !ok || versions["resourceclaim_list"] != "500" || claimListReads.Load() != 4 || report["claim_unallocated"] != nil || report["api_snapshot_complete"] != true {
 					t.Fatalf("stable Claim LIST absence must not imply unallocation: %+v reads=%d", report, claimListReads.Load())
 				}
 			} else if report["claim_uid_absent"] != nil {
