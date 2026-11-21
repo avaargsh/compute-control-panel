@@ -128,9 +128,9 @@ func (m *Manager) Authenticate(_ context.Context, r *http.Request) (httpapi.Work
 		return httpapi.WorkloadPrincipal{}, ErrUnauthenticated
 	}
 	return httpapi.WorkloadPrincipal{
-		TenantID: m.cfg.TenantID,
-		Subject: "ccp-console-admin:" + m.cfg.Username,
-		Service: "console",
+		TenantID:   m.cfg.TenantID,
+		Subject:    "ccp-console-admin:" + m.cfg.Username,
+		Service:    "console",
 		ProjectIDs: []string{m.cfg.ProjectID},
 	}, nil
 }
@@ -255,7 +255,7 @@ func (m *Manager) login(w http.ResponseWriter, r *http.Request) {
 	id := sha256.Sum256(token[:])
 	m.sessions[id] = storedSession{
 		expires: now.Add(m.cfg.SessionTTL),
-		csrf: base64.RawURLEncoding.EncodeToString(csrfBytes[:]),
+		csrf:    base64.RawURLEncoding.EncodeToString(csrfBytes[:]),
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name: cookieName, Value: rawToken, Path: "/",
