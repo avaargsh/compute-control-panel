@@ -94,3 +94,16 @@ func TestSnapshotModeRequiresKnownValue(t *testing.T) {
 		t.Fatal("unsupported demo/live mode")
 	}
 }
+
+func TestProjectPreservesSourceUnknownReason(t *testing.T) {
+	r := sampleRecord()
+	r.Condition = ConditionUnknown
+	r.ReasonCode = "GPU_DRIVER_UNREACHABLE"
+	v, err := Project(r, r.ObservedAt.Add(5*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Status != StatusUnknown || v.ReasonCode != "GPU_DRIVER_UNREACHABLE" {
+		t.Fatalf("source diagnosis lost: %+v", v)
+	}
+}
