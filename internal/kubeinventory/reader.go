@@ -115,7 +115,7 @@ func NewReader(cfg Config) (*Reader, error) {
 	}
 	transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}}
 	return &Reader{
-		endpoint: strings.TrimSuffix(cfg.APIServer, "/"),
+		endpoint:  strings.TrimSuffix(cfg.APIServer, "/"),
 		tokenFile: cfg.TokenFile, clusterID: cfg.ClusterID,
 		tenantID: cfg.TenantID, projectID: cfg.ProjectID,
 		names: names, ttl: cfg.ObservationTTL, now: cfg.Now,
@@ -155,9 +155,9 @@ func (r *Reader) ListObservations(ctx context.Context, tenantID string, projects
 		condition, reason := nodeCondition(n)
 		base := observation.Record{
 			TenantID: r.tenantID, ProjectID: r.projectID,
-			Source: "kubernetes/core/v1/node.status",
+			Source:         "kubernetes/core/v1/node.status",
 			SourceRevision: n.Metadata.ResourceVersion,
-			ObservedAt: now, ExpiresAt: now.Add(r.ttl),
+			ObservedAt:     now, ExpiresAt: now.Add(r.ttl),
 		}
 		nr := base
 		nr.Resource = observation.ResourceRef{
@@ -179,7 +179,7 @@ func (r *Reader) ListObservations(ctx context.Context, tenantID string, projects
 			gpu := base
 			gpu.Resource = observation.ResourceRef{
 				ClusterID: r.clusterID, Kind: "NodeGPUResource",
-				Name: n.Metadata.Name + "/" + name,
+				Name:            n.Metadata.Name + "/" + name,
 				ResourceVersion: n.Metadata.ResourceVersion,
 				// Node UID is deliberately not mislabeled as physical GPU UID.
 			}
