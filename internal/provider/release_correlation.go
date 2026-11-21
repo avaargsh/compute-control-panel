@@ -57,7 +57,8 @@ func validReleaseDeletePair(c, d operation.Operation, obs operation.Observation)
 		c.ID == d.ID || c.AllocationID == "" || d.AllocationID == "" ||
 		c.TenantID != d.TenantID || c.WorkloadID != d.WorkloadID ||
 		c.ProviderID != d.ProviderID || c.AllocationID != d.AllocationID ||
-		d.Generation < c.Generation || c.ProviderResourceID == "" ||
+		// DELETE must represent a newer desired transition than the CREATE.
+		d.Generation <= c.Generation || c.ProviderResourceID == "" ||
 		c.ProviderResourceUID == "" ||
 		d.TargetResourceID != c.ProviderResourceID ||
 		d.TargetResourceUID != c.ProviderResourceUID {
