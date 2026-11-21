@@ -16,10 +16,7 @@ const maxObservationItems = 1000
 
 // ObservationSnapshot contains only observations for the authenticated caller.
 // The reader must assign a single trusted data mode for the whole result.
-type ObservationSnapshot struct {
-	DataMode observation.Mode     `json:"data_mode"`
-	Items    []observation.Record `json:"items"`
-}
+type ObservationSnapshot = observation.Snapshot
 
 type ObservationReader interface {
 	ListObservations(ctx context.Context, tenantID string, projectIDs []string) (ObservationSnapshot, error)
