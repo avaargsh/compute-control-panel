@@ -3,7 +3,7 @@ package provider
 import "context"
 
 // KubernetesReleaseSnapshot contains correlated *API-object observations*
-// from one read-only Kubernetes client. The three component observations are
+// from one read-only Kubernetes client. The Pod, queue and one of the mutually exclusive Claim observations are
 // collected and rechecked in a second sweep so an intervening resourceVersion
 // change cannot be silently joined as one stable snapshot.
 //
@@ -13,10 +13,13 @@ type KubernetesReleaseSnapshot struct {
 	PodAbsent        KubernetesPodAbsentObservation
 	QuotaCleared     KueueQuotaClearedObservation
 	ClaimUnallocated DRAClaimUnallocatedObservation
+	ClaimAbsent      DRAClaimUIDAbsentObservation
 }
 
 // ObserveKubernetesReleaseSnapshot reads the historical Pod, Kueue queue and
 // DRA Claim using the same caller-supplied KubernetesObservationReader.
+// A deleted Claim requires an independent complete LIST-absence proof; GET 404
+// by itself cannot establish old UID/name absence.
 // Every source gets two consistent reads per sweep; the second sweep must
 // agree exactly with the first. No Kubernetes writes are performed.
 //
@@ -55,13 +58,25 @@ func (r *KubernetesObservationReader) ObserveKubernetesReleaseSnapshot(
 			return KubernetesReleaseSnapshot{}, err
 		}
 		claim, err := r.ObserveDRAClaimUnallocated(ctx, podClaim.Claim)
+		if err == nil {
+			return KubernetesReleaseSnapshot{
+				PodAbsent:        pod,
+				QuotaCleared:     quota,
+				ClaimUnallocated: claim,
+			}, nil
+		}
+		// GET failure alone (including 404) NEVER proves release. Fall back
+		// exclusively to complete, stable namespace LISTs that exclude both
+		// the historical Claim UID and name. Either path is an API-object
+		// observation, not a driver/kubelet deallocation receipt.
+		absent, err := r.ObserveDRAClaimUIDAbsent(ctx, podClaim.Claim)
 		if err != nil {
 			return KubernetesReleaseSnapshot{}, err
 		}
 		return KubernetesReleaseSnapshot{
-			PodAbsent:        pod,
-			QuotaCleared:     quota,
-			ClaimUnallocated: claim,
+			PodAbsent:    pod,
+			QuotaCleared: quota,
+			ClaimAbsent:  absent,
 		}, nil
 	}
 	first, err := collect()
