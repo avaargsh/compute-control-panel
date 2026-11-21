@@ -150,7 +150,7 @@ func TestReleaseSnapshotDeletedClaimRequiresTwoCompleteStableLISTSweeps(t *testi
 		{name: "old UID remains in Claim LIST", firstList: withItems(oldClaimItem)},
 		{name: "successor reuses historical Claim name", firstList: withItems(successorClaimItem)},
 		{name: "old Claim reappears between source sweeps", afterList: withItems(oldClaimItem)},
-		{name: "LIST resourceVersion changes between sweeps", afterList: strings.Replace(absentClaimList, "\\\"440\\\"", "\\\"441\\\"", 1)},
+		{name: "LIST resourceVersion changes between sweeps", afterList: strings.Replace(absentClaimList, `"440"`, `"441"`, 1)},
 		{name: "Claim name GET reappears as unallocated between sweeps", reappear: true},
 		{name: "LIST is forbidden", listHTTPStatus: http.StatusForbidden},
 	}
