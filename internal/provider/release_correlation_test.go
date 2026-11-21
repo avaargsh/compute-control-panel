@@ -1,6 +1,11 @@
 package provider
 
 import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -249,5 +254,49 @@ func TestReleaseEvidenceClaimUIDAbsenceAlternativeIsIdentityFenced(t *testing.T)
 				t.Fatalf("unsafe Claim absence was correlated: got=%+v err=%v", got, err)
 			}
 		})
+	}
+}
+
+func TestReleaseCorrelationCollectsActualClaimUIDAbsenceReadOnly(t *testing.T) {
+	// Exercise the existing Kubernetes API reader and release correlation
+	// together. This TLS fixture is not a real cluster or GPU driver.
+	var reads, writes atomic.Int32
+	api := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writes.Add(1)
+			http.Error(w, "read-only", http.StatusMethodNotAllowed)
+			return
+		}
+		if r.URL.RequestURI() != "/apis/resource.k8s.io/v1/namespaces/tenant-a/resourceclaims" {
+			t.Errorf("unexpected Kubernetes API read: %s", r.URL.RequestURI())
+			http.NotFound(w, r)
+			return
+		}
+		reads.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, absentClaimList)
+	}))
+	defer api.Close()
+
+	client := api.Client()
+	client.Timeout = 3 * time.Second
+	reader, err := NewKubernetesObservationReader(api.URL, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := releaseCandidateFixture()
+	absent, err := reader.ObserveDRAClaimUIDAbsent(context.Background(), candidate.PriorPodClaim.Claim)
+	if err != nil {
+		t.Fatalf("independent two-read Claim absence failed: %v", err)
+	}
+	candidate.ClaimUnallocated = DRAClaimUnallocatedObservation{}
+	candidate.ClaimAbsent = &absent
+	correlated, err := CorrelateReleaseEvidence(candidate)
+	if err != nil || correlated.Claim.UID != "claim-uid-a" ||
+		correlated.AllocationID != "allocation-a" || correlated.Device.Device != "device-a" {
+		t.Fatalf("read-only Claim absence did not correlate: %+v err=%v", correlated, err)
+	}
+	if reads.Load() != 2 || writes.Load() != 0 {
+		t.Fatalf("expected exactly two Kubernetes GETs and no writes: reads=%d writes=%d", reads.Load(), writes.Load())
 	}
 }
