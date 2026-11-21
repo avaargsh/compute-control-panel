@@ -36,7 +36,7 @@ func (r *testReader) ListObservations(_ context.Context, tenant string, projects
 		Items: []observation.Record{{
 			TenantID: "tenant-a", ProjectID: project,
 			Resource: observation.ResourceRef{ClusterID: "cluster-a", Kind: "Node", Name: "node-a", UID: "node-uid", ResourceVersion: "11"},
-			Source: "kubernetes/core/v1/node.status", Condition: observation.ConditionAvailable,
+			Source:   "kubernetes/core/v1/node.status", Condition: observation.ConditionAvailable,
 			ObservedAt: now, ExpiresAt: now.Add(3 * time.Minute),
 		}},
 	}, nil
@@ -49,10 +49,10 @@ func sessionConfig(t *testing.T, now func() time.Time) Config {
 		t.Fatal(err)
 	}
 	return Config{
-		Username: "admin",
+		Username:           "admin",
 		PasswordBcryptHash: hash,
-		TenantID: "tenant-a", ProjectID: "project-a",
-		Origin: "https://ccp.example.test",
+		TenantID:           "tenant-a", ProjectID: "project-a",
+		Origin:     "https://ccp.example.test",
 		SessionTTL: time.Hour, Now: now,
 	}
 }
@@ -289,4 +289,3 @@ func TestConsoleRejectsMalformedLoginAndOversizedBody(t *testing.T) {
 		}
 	}
 }
-
