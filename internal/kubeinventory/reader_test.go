@@ -194,6 +194,7 @@ func TestInvalidNodeUIDOrGPUQuantityFailsClosed(t *testing.T) {
 	for _, payload := range []string{
 		`{"metadata":{"resourceVersion":"1"},"items":[{"metadata":{"name":"a","resourceVersion":"1"}}]}`,
 		`{"metadata":{"resourceVersion":"1"},"items":[{"metadata":{"name":"a","uid":"u1","resourceVersion":"1"},"status":{"capacity":{"nvidia.com/gpu":"not-a-number"},"allocatable":{"nvidia.com/gpu":"1"}}}]}`,
+		`{"metadata":{"resourceVersion":"1"},"items":[{"metadata":{"name":"a","uid":"u1","resourceVersion":"1"},"status":{"capacity":{"nvidia.com/gpu":"1"},"allocatable":{"nvidia.com/gpu":"2"}}}]}`,
 	} {
 		reader, _ := fixtureReader(t, func(w http.ResponseWriter, r *http.Request) { _, _ = fmt.Fprint(w, payload) })
 		_, err := reader.ListObservations(context.Background(), "tenant-a", []string{"project-a"})
