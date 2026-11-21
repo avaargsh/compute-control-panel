@@ -130,3 +130,105 @@ func TestReleaseKubernetesSnapshotRejectsCrossSourceDrift(t *testing.T) {
 		})
 	}
 }
+
+func TestReleaseSnapshotDeletedClaimRequiresTwoCompleteStableLISTSweeps(t *testing.T) {
+	// The Claim is already gone; GET by name cannot prove UID absence.
+	// Only two complete LISTs per sweep may establish API-object absence.
+	// This never proves NodeUnprepare or GPU deallocation.
+	withItems := func(item string) string {
+		return strings.Replace(absentClaimList, "[]", "["+item+"]", 1)
+	}
+	tests := []struct {
+		name           string
+		firstList      string
+		afterList      string
+		listHTTPStatus int
+		reappear       bool
+		valid          bool
+	}{
+		{name: "deleted historical Claim stable across two complete sweeps", valid: true},
+		{name: "old UID remains in Claim LIST", firstList: withItems(oldClaimItem)},
+		{name: "successor reuses historical Claim name", firstList: withItems(successorClaimItem)},
+		{name: "old Claim reappears between source sweeps", afterList: withItems(oldClaimItem)},
+		{name: "LIST resourceVersion changes between sweeps", afterList: strings.Replace(absentClaimList, "\\\"440\\\"", "\\\"441\\\"", 1)},
+		{name: "Claim name GET reappears as unallocated between sweeps", reappear: true},
+		{name: "LIST is forbidden", listHTTPStatus: http.StatusForbidden},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var podReads, claimGETs, claimLISTs, cqReads, writes atomic.Int32
+			srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					writes.Add(1)
+					http.Error(w, "read only", http.StatusMethodNotAllowed)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.RequestURI() {
+				case "/api/v1/namespaces/tenant-a/pods":
+					podReads.Add(1)
+					_, _ = fmt.Fprint(w, absentPodList)
+				case "/apis/kueue.x-k8s.io/v1beta1/namespaces/tenant-a/workloads":
+					_, _ = fmt.Fprint(w, clearedWorkloadList)
+				case "/apis/kueue.x-k8s.io/v1beta1/namespaces/tenant-a/localqueues/lq-a":
+					_, _ = fmt.Fprint(w, queueLocalJSON)
+				case "/apis/kueue.x-k8s.io/v1beta1/clusterqueues/cq-a":
+					cqReads.Add(1)
+					_, _ = fmt.Fprint(w, clearedClusterQueue)
+				case "/apis/resource.k8s.io/v1/namespaces/tenant-a/resourceclaims/gpu-claim-a":
+					n := claimGETs.Add(1)
+					if tc.reappear && n > 1 {
+						_, _ = fmt.Fprint(w, clearedDRAClaimJSON(t, nil))
+					} else {
+						http.NotFound(w, r)
+					}
+				case "/apis/resource.k8s.io/v1/namespaces/tenant-a/resourceclaims":
+					n := claimLISTs.Add(1)
+					if tc.listHTTPStatus != 0 {
+						http.Error(w, "denied", tc.listHTTPStatus)
+						return
+					}
+					body := absentClaimList
+					if n == 1 && tc.firstList != "" {
+						body = tc.firstList
+					}
+					if n > 2 && tc.afterList != "" {
+						body = tc.afterList
+					}
+					_, _ = fmt.Fprint(w, body)
+				default:
+					t.Errorf("unexpected Kubernetes API read: %s", r.URL.RequestURI())
+					http.NotFound(w, r)
+				}
+			}))
+			defer srv.Close()
+			client := srv.Client()
+			client.Timeout = 3 * time.Second
+			reader, err := NewKubernetesObservationReader(srv.URL, client)
+			if err != nil {
+				t.Fatal(err)
+			}
+			candidate := releaseCandidateFixture()
+			got, err := reader.ObserveKubernetesReleaseSnapshot(
+				context.Background(), candidate.PriorQueue, candidate.PriorPodClaim,
+			)
+			if tc.valid {
+				if err != nil || got.PodAbsent.PreviousPod.UID != "pod-uid-a" ||
+					got.QuotaCleared.PreviousWorkload.UID != candidate.PriorQueue.Job.KueueWorkload.UID ||
+					got.ClaimAbsent.PreviousClaim.UID != "claim-uid-a" ||
+					got.ClaimAbsent.ClaimListResourceVersion != "440" ||
+					got.ClaimUnallocated != (DRAClaimUnallocatedObservation{}) ||
+					podReads.Load() != 4 || cqReads.Load() != 4 ||
+					claimGETs.Load() != 2 || claimLISTs.Load() != 4 {
+					t.Fatalf("historical Claim absence not correlated: snapshot=%+v err=%v, reads pod=%d cq=%d get=%d list=%d",
+						got, err, podReads.Load(), cqReads.Load(), claimGETs.Load(), claimLISTs.Load())
+				}
+			} else if err == nil || got != (KubernetesReleaseSnapshot{}) {
+				t.Fatalf("unsafe or drifting deleted Claim snapshot was accepted: %+v err=%v", got, err)
+			}
+			if writes.Load() != 0 {
+				t.Fatal("release observer made a mutating Kubernetes request")
+			}
+		})
+	}
+}
