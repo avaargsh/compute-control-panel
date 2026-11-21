@@ -74,4 +74,4 @@ The handler rejects missing dependencies at construction, accepts GET only, refu
 3. Introduce an authenticated browser-facing Console API and UI after a separate security review; do not mount this service-identity handler directly for browser use.
 4. Add Cluster/Node/GPU views only after the read integration is verified.
 
-Related: [ADR-001](../adr/ADR-001-CROSS-REPO-OWNERSHIP.md), [LLMD-INFERENCE-OBSERVATION](LLMD-INFERENCE-OBSERVATION-V0.md) (proposed on a separate Draft PR).
+Related: [ADR-001](../adr/ADR-001-CROSS-REPO-OWNERSHIP.md), [llm-d observation contract PR #138](https://github.com/avaargsh/compute-control-panel/pull/138) (proposed separately, not required for this v0.1 PR).
