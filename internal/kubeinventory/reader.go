@@ -82,7 +82,11 @@ func NewReader(cfg Config) (*Reader, error) {
 	names := make([]string, len(cfg.ResourceNames))
 	used := make(map[string]bool, len(cfg.ResourceNames))
 	for i, name := range cfg.ResourceNames {
-		if !gpuResourceName.MatchString(name) || used[name] {
+		prefix, suffix, hasSlash := strings.Cut(name, "/")
+		if !hasSlash || !gpuResourceName.MatchString(name) ||
+			!strings.Contains(prefix, ".") || strings.HasPrefix(prefix, ".") ||
+			strings.HasSuffix(prefix, ".") || strings.Contains(prefix, "..") ||
+			strings.HasPrefix(suffix, ".") || used[name] {
 			return nil, errors.New("invalid or duplicate GPU extended resource name")
 		}
 		used[name] = true
