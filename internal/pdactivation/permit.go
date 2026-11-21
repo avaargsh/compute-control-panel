@@ -339,4 +339,3 @@ func DecodeSpecDigest(raw json.RawMessage) (string, error) {
 	sum := sha256.Sum256(normalized)
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
-
