@@ -11,6 +11,7 @@ Documents under `docs/` are **design contracts and architecture decisions**. The
 | Architecture | Authority boundaries, domain model, state machines | [BASELINE.md](architecture/BASELINE.md) |
 | Economics | Evidence, cost calculation, retention | [COMPUTE-ECONOMICS-DOMAIN.md](architecture/COMPUTE-ECONOMICS-DOMAIN.md) |
 | Contracts | API, events, JSON Schemas, fixtures | [COMPUTE-WORKLOAD-V1.md](contracts/COMPUTE-WORKLOAD-V1.md) |
+| Console observations | v0.1 read-only provenance and freshness contract | [OBSERVATION-READ-V0.md](contracts/OBSERVATION-READ-V0.md) |
 | Implementation | Go foundation notes | [GO-FOUNDATION.md](implementation/GO-FOUNDATION.md) |
 | Operations | Identity, release gates | [SPIFFE-WORKLOAD-IDENTITY-PROVISIONING.md](operations/SPIFFE-WORKLOAD-IDENTITY-PROVISIONING.md) |
 | Testing | Acceptance criteria | [RELIABILITY-ACCEPTANCE.md](testing/RELIABILITY-ACCEPTANCE.md) |
