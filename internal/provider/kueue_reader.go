@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,6 +22,11 @@ type KubernetesObservationReader struct {
 	apiURL string
 	client http.Client
 }
+
+// errKubernetesObjectNotFound is emitted only for an explicit API HTTP 404.
+// Invalid identities, HTTP 403 and transport failures must never be treated
+// as evidence that an old Kubernetes object was deleted.
+var errKubernetesObjectNotFound = errors.New("Kubernetes API object returned HTTP 404")
 
 type KubernetesJobQuery struct {
 	TenantID          string
@@ -236,6 +242,9 @@ func (r *KubernetesObservationReader) read(ctx context.Context, path string, int
 		return fmt.Errorf("read Kubernetes API: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("%w: %w", ErrInvalidKueueObservation, errKubernetesObjectNotFound)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("%w: Kubernetes API returned HTTP %d", ErrInvalidKueueObservation, resp.StatusCode)
 	}
