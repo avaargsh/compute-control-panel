@@ -1,6 +1,11 @@
 package provider
 
 import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -173,5 +178,125 @@ func TestReleaseEvidenceCorrelationRejectsCrossAllocationSplicing(t *testing.T) 
 				t.Fatalf("cross-Allocation evidence was accepted: %+v err=%v", got, err)
 			}
 		})
+	}
+}
+
+// A DELETE observation for the old desired generation must not be joined to
+// a CREATE as release evidence. A release is a new, fenced desired transition.
+func TestReleaseEvidenceRejectsDeleteWithoutGenerationAdvance(t *testing.T) {
+	e := releaseCandidateFixture()
+	e.Delete.Generation = e.Create.Generation
+	e.ProviderAbsence.DesiredGeneration = e.Delete.Generation
+
+	got, err := CorrelateReleaseEvidence(e)
+	if err != ErrUncorrelatedReleaseEvidence || got != (ReleaseEvidenceCorrelation{}) {
+		t.Fatalf("same-generation DELETE must fail closed: correlation=%+v err=%v", got, err)
+	}
+}
+
+func TestReleaseEvidenceClaimUIDAbsenceAlternativeIsIdentityFenced(t *testing.T) {
+	// The historical Claim may be deleted rather than remain unallocated.
+	// The existing LIST observer reports old UID/name absence but not driver
+	// NodeUnprepare; correlation remains non-authoritative.
+	testCases := []struct {
+		name   string
+		mutate func(*ReleaseEvidenceCandidate)
+		valid  bool
+	}{
+		{name: "stable old Claim UID absence with exact historic identity", valid: true},
+		{name: "missing both Claim alternatives", mutate: func(e *ReleaseEvidenceCandidate) {
+			e.ClaimAbsent = nil
+		}},
+		{name: "unallocated Claim also asserted", mutate: func(e *ReleaseEvidenceCandidate) {
+			e.ClaimUnallocated = releaseCandidateFixture().ClaimUnallocated
+		}},
+		{name: "other historical Claim UID", mutate: func(e *ReleaseEvidenceCandidate) {
+			e.ClaimAbsent.PreviousClaim.UID = "foreign-claim-uid"
+		}},
+		{name: "successor Claim name", mutate: func(e *ReleaseEvidenceCandidate) {
+			e.ClaimAbsent.PreviousClaim.Name = "other-claim"
+		}},
+		{name: "wrong tenant namespace", mutate: func(e *ReleaseEvidenceCandidate) {
+			e.ClaimAbsent.PreviousClaim.Namespace = "tenant-b"
+		}},
+		{name: "missing complete LIST resourceVersion", mutate: func(e *ReleaseEvidenceCandidate) {
+			e.ClaimAbsent.ClaimListResourceVersion = ""
+		}},
+		{name: "malformed LIST resourceVersion", mutate: func(e *ReleaseEvidenceCandidate) {
+			e.ClaimAbsent.ClaimListResourceVersion = " 440 "
+		}},
+		{name: "NUL in LIST resourceVersion", mutate: func(e *ReleaseEvidenceCandidate) {
+			e.ClaimAbsent.ClaimListResourceVersion = "440\x00untrusted"
+		}},
+		{name: "prior DRA Pod UID differs", mutate: func(e *ReleaseEvidenceCandidate) {
+			e.PriorPodClaim.Claim.PodUID = "other-pod"
+		}},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := releaseCandidateFixture()
+			prior := e.PriorPodClaim.Claim
+			e.ClaimUnallocated = DRAClaimUnallocatedObservation{}
+			e.ClaimAbsent = &DRAClaimUIDAbsentObservation{
+				PreviousClaim: prior.Claim, ClaimListResourceVersion: "440",
+			}
+			if tc.mutate != nil {
+				tc.mutate(&e)
+			}
+			got, err := CorrelateReleaseEvidence(e)
+			if tc.valid {
+				if err != nil || got.AllocationID != "allocation-a" ||
+					got.Pod.UID != "pod-uid-a" ||
+					got.Claim != prior.Claim || got.Device != prior.Device {
+					t.Fatalf("exact old Claim structural absence not correlated: got=%+v err=%v", got, err)
+				}
+			} else if err != ErrUncorrelatedReleaseEvidence || got != (ReleaseEvidenceCorrelation{}) {
+				t.Fatalf("unsafe Claim absence was correlated: got=%+v err=%v", got, err)
+			}
+		})
+	}
+}
+
+func TestReleaseCorrelationCollectsActualClaimUIDAbsenceReadOnly(t *testing.T) {
+	// Exercise the existing Kubernetes API reader and release correlation
+	// together. This TLS fixture is not a real cluster or GPU driver.
+	var reads, writes atomic.Int32
+	api := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writes.Add(1)
+			http.Error(w, "read-only", http.StatusMethodNotAllowed)
+			return
+		}
+		if r.URL.RequestURI() != "/apis/resource.k8s.io/v1/namespaces/tenant-a/resourceclaims" {
+			t.Errorf("unexpected Kubernetes API read: %s", r.URL.RequestURI())
+			http.NotFound(w, r)
+			return
+		}
+		reads.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, absentClaimList)
+	}))
+	defer api.Close()
+
+	client := api.Client()
+	client.Timeout = 3 * time.Second
+	reader, err := NewKubernetesObservationReader(api.URL, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := releaseCandidateFixture()
+	absent, err := reader.ObserveDRAClaimUIDAbsent(context.Background(), candidate.PriorPodClaim.Claim)
+	if err != nil {
+		t.Fatalf("independent two-read Claim absence failed: %v", err)
+	}
+	candidate.ClaimUnallocated = DRAClaimUnallocatedObservation{}
+	candidate.ClaimAbsent = &absent
+	correlated, err := CorrelateReleaseEvidence(candidate)
+	if err != nil || correlated.Claim.UID != "claim-uid-a" ||
+		correlated.AllocationID != "allocation-a" || correlated.Device.Device != "device-a" {
+		t.Fatalf("read-only Claim absence did not correlate: %+v err=%v", correlated, err)
+	}
+	if reads.Load() != 2 || writes.Load() != 0 {
+		t.Fatalf("expected exactly two Kubernetes GETs and no writes: reads=%d writes=%d", reads.Load(), writes.Load())
 	}
 }

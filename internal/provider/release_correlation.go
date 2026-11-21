@@ -27,6 +27,9 @@ type ReleaseEvidenceCandidate struct {
 	QuotaCleared     KueueQuotaClearedObservation
 	PriorPodClaim    DRAPodClaimObservation
 	ClaimUnallocated DRAClaimUnallocatedObservation
+	// ClaimAbsent is the alternative to a still-existing unallocated Claim.
+	// It is a Kubernetes API observation, never a driver release receipt.
+	ClaimAbsent *DRAClaimUIDAbsentObservation
 }
 
 // ReleaseEvidenceCorrelation contains only identities that matched across
@@ -57,7 +60,8 @@ func validReleaseDeletePair(c, d operation.Operation, obs operation.Observation)
 		c.ID == d.ID || c.AllocationID == "" || d.AllocationID == "" ||
 		c.TenantID != d.TenantID || c.WorkloadID != d.WorkloadID ||
 		c.ProviderID != d.ProviderID || c.AllocationID != d.AllocationID ||
-		d.Generation < c.Generation || c.ProviderResourceID == "" ||
+		// DELETE must represent a newer desired transition than the CREATE.
+		d.Generation <= c.Generation || c.ProviderResourceID == "" ||
 		c.ProviderResourceUID == "" ||
 		d.TargetResourceID != c.ProviderResourceID ||
 		d.TargetResourceUID != c.ProviderResourceUID {
@@ -131,8 +135,20 @@ func validReleaseClaimCorrelation(e ReleaseEvidenceCandidate) bool {
 		!validKubeName(d.ConsumerContainer) ||
 		!validPriorDRAAllocation(d.Claim) ||
 		d.Claim.Claim.Namespace != d.Pod.Namespace ||
-		d.Claim.PodUID != d.Pod.UID ||
-		u.PreviousClaim != d.Claim.Claim ||
+		d.Claim.PodUID != d.Pod.UID {
+		return false
+	}
+	// A deleted Claim cannot also be asserted as a still-existing,
+	// unallocated Claim. Never combine competing snapshots.
+	if e.ClaimAbsent != nil {
+		absent := e.ClaimAbsent
+		return u == (DRAClaimUnallocatedObservation{}) &&
+			absent.PreviousClaim == d.Claim.Claim &&
+			absent.ClaimListResourceVersion != "" &&
+			absent.ClaimListResourceVersion == strings.TrimSpace(absent.ClaimListResourceVersion) &&
+			!strings.ContainsRune(absent.ClaimListResourceVersion, 0)
+	}
+	if u.PreviousClaim != d.Claim.Claim ||
 		u.PreviousPodUID != d.Claim.PodUID ||
 		u.PreviousDevice != d.Claim.Device ||
 		!validKubernetesRef(u.CurrentClaim) ||
@@ -158,6 +174,10 @@ func CorrelateReleaseEvidence(e ReleaseEvidenceCandidate) (ReleaseEvidenceCorrel
 		!validReleaseClaimCorrelation(e) {
 		return ReleaseEvidenceCorrelation{}, ErrUncorrelatedReleaseEvidence
 	}
+	claim := e.ClaimUnallocated.CurrentClaim
+	if e.ClaimAbsent != nil {
+		claim = e.ClaimAbsent.PreviousClaim
+	}
 	return ReleaseEvidenceCorrelation{
 		TenantID:          e.Delete.TenantID,
 		WorkloadID:        e.Delete.WorkloadID,
@@ -166,7 +186,7 @@ func CorrelateReleaseEvidence(e ReleaseEvidenceCandidate) (ReleaseEvidenceCorrel
 		DeleteOperationID: e.Delete.ID,
 		Job:               e.PriorQueue.Job.Job,
 		Pod:               e.PriorPodClaim.Pod,
-		Claim:             e.ClaimUnallocated.CurrentClaim,
-		Device:            e.ClaimUnallocated.PreviousDevice,
+		Claim:             claim,
+		Device:            e.PriorPodClaim.Claim.Device,
 	}, nil
 }
