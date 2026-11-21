@@ -143,6 +143,7 @@ func TestReleaseSnapshotDeletedClaimRequiresTwoCompleteStableLISTSweeps(t *testi
 		firstList      string
 		afterList      string
 		listHTTPStatus int
+		getHTTPStatus  int
 		reappear       bool
 		valid          bool
 	}{
@@ -152,6 +153,8 @@ func TestReleaseSnapshotDeletedClaimRequiresTwoCompleteStableLISTSweeps(t *testi
 		{name: "old Claim reappears between source sweeps", afterList: withItems(oldClaimItem)},
 		{name: "LIST resourceVersion changes between sweeps", afterList: strings.Replace(absentClaimList, `"440"`, `"441"`, 1)},
 		{name: "Claim name GET reappears as unallocated between sweeps", reappear: true},
+		{name: "GET 403 cannot fall back to a clear LIST", getHTTPStatus: http.StatusForbidden},
+		{name: "GET 500 cannot fall back to a clear LIST", getHTTPStatus: http.StatusInternalServerError},
 		{name: "LIST is forbidden", listHTTPStatus: http.StatusForbidden},
 	}
 	for _, tc := range tests {
@@ -177,6 +180,10 @@ func TestReleaseSnapshotDeletedClaimRequiresTwoCompleteStableLISTSweeps(t *testi
 					_, _ = fmt.Fprint(w, clearedClusterQueue)
 				case "/apis/resource.k8s.io/v1/namespaces/tenant-a/resourceclaims/gpu-claim-a":
 					n := claimGETs.Add(1)
+					if tc.getHTTPStatus != 0 {
+						http.Error(w, "GET not authorized/available", tc.getHTTPStatus)
+						return
+					}
 					if tc.reappear && n > 1 {
 						_, _ = fmt.Fprint(w, clearedDRAClaimJSON(t, nil))
 					} else {
@@ -225,6 +232,9 @@ func TestReleaseSnapshotDeletedClaimRequiresTwoCompleteStableLISTSweeps(t *testi
 				}
 			} else if err == nil || got != (KubernetesReleaseSnapshot{}) {
 				t.Fatalf("unsafe or drifting deleted Claim snapshot was accepted: %+v err=%v", got, err)
+			}
+			if tc.getHTTPStatus != 0 && claimLISTs.Load() != 0 {
+				t.Fatalf("forbidden/failed Claim GET fell back to LIST: %d", claimLISTs.Load())
 			}
 			if writes.Load() != 0 {
 				t.Fatal("release observer made a mutating Kubernetes request")
