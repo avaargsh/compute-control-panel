@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="Compute Control Panel 只读产品预览，仅展示模拟数据">
+  <title>CCP Demo — GPU & Kubernetes Console</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script defer src="/assets/app.js"></script>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" aria-label="主导航">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">C</span>
+        <div><strong>Compute Control Panel</strong><span>GPU · Kubernetes · AI</span></div>
+      </div>
+      <p class="menu-heading">工作空间</p>
+      <nav class="navigation" aria-label="功能页面">
+        <button type="button" class="nav-item active" data-page="dashboard" aria-current="page"><span aria-hidden="true">◫</span> Dashboard</button>
+        <button type="button" class="nav-item" data-page="clusters"><span aria-hidden="true">▦</span> Clusters</button>
+        <button type="button" class="nav-item" data-page="gpus"><span aria-hidden="true">▤</span> GPUs</button>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="sidebar-foot-title">只读产品预览</div>
+        <p>v0.1 Demo · 无集群写入权限</p>
+        <span class="version-tag">PREVIEW · NOT PRODUCTION</span>
+      </div>
+    </aside>
+    <div class="workspace">
+      <header class="topbar">
+        <div class="crumb">Workspace <span aria-hidden="true">/</span> <strong id="page-crumb">Dashboard</strong></div>
+        <div class="topbar-right"><span class="tenant">demo-project</span><span class="avatar" aria-label="演示账户">D</span></div>
+      </header>
+      <main class="content" id="content">
+        <section class="demo-banner" role="note" aria-label="模拟数据提醒">
+          <span class="demo-pill">DEMO</span>
+          <div><strong>模拟数据 · 非真实 GPU 监控</strong><p>所有资源均来自本地 synthetic/demo 数据源，不能用于实际容量、设备身份或成本决策。</p></div>
+        </section>
+        <div class="page-heading">
+          <div><p class="eyebrow">COMPUTE / OBSERVABILITY</p><h1 id="page-title">资源总览</h1><p id="page-desc">查看集群和节点上报的 GPU 资源信息。</p></div>
+          <button class="refresh-btn" id="refresh" type="button"><span aria-hidden="true">↻</span> 刷新数据</button>
+        </div>
+        <div class="status-strip" role="status" aria-live="polite">
+          <span id="connection" class="status-label">连接中…</span>
+          <span class="status-detail">数据源 <strong id="source">—</strong></span>
+          <span class="status-detail">最后观察 <strong id="observed">—</strong></span>
+        </div>
+        <section id="view" aria-label="当前页面数据">
+          <div class="empty-state">正在加载资源观察数据…</div>
+        </section>
+        <footer class="footer">Compute Control Panel · Self-hosted AI Infrastructure · Demo data only</footer>
+      </main>
+    </div>
+  </div>
+</body>
+</html>
