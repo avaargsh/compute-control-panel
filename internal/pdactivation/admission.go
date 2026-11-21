@@ -117,7 +117,7 @@ func (h *admissionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	valid := review.APIVersion == "admission.k8s.io/v1" && review.Kind == "AdmissionReview" &&
 		review.Response == nil && req.UID != "" && len(req.UID) <= 256 &&
 		req.Operation == "UPDATE" && req.SubResource == "" &&
-		req.DryRun != nil && !*req.DryRun &&
+		(req.DryRun == nil || !*req.DryRun) &&
 		req.Resource.Group == "jobset.x-k8s.io" && req.Resource.Version == "v1alpha2" &&
 		req.Resource.Resource == "jobsets" &&
 		req.Kind.Group == "jobset.x-k8s.io" && req.Kind.Version == "v1alpha2" &&
@@ -145,4 +145,3 @@ func (h *admissionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-var _ context.Context
