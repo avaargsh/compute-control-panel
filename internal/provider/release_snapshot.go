@@ -1,6 +1,9 @@
 package provider
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 // KubernetesReleaseSnapshot contains correlated *API-object observations*
 // from one read-only Kubernetes client. The Pod, queue and one of the mutually exclusive Claim observations are
@@ -65,10 +68,13 @@ func (r *KubernetesObservationReader) ObserveKubernetesReleaseSnapshot(
 				ClaimUnallocated: claim,
 			}, nil
 		}
-		// GET failure alone (including 404) NEVER proves release. Fall back
-		// exclusively to complete, stable namespace LISTs that exclude both
-		// the historical Claim UID and name. Either path is an API-object
-		// observation, not a driver/kubelet deallocation receipt.
+		// Only a first-GET HTTP 404 can authorize a bounded attempt to
+		// corroborate old UID/name absence with complete namespace LISTs.
+		// A still-allocated Claim, forbidden API, changed UID/RV or second-
+		// read failure is not absence. 404 itself is never release proof.
+		if !errors.Is(err, errKubernetesObjectNotFound) {
+			return KubernetesReleaseSnapshot{}, err
+		}
 		absent, err := r.ObserveDRAClaimUIDAbsent(ctx, podClaim.Claim)
 		if err != nil {
 			return KubernetesReleaseSnapshot{}, err
