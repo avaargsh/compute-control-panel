@@ -6,6 +6,45 @@ import (
 	"time"
 )
 
+// A node-bound Pod is still not GPU-ready. More importantly, it must not
+// appear as a trusted placement snapshot when native preemption evidence was
+// never parsed or was malformed; explicit MISSING is different from zero value.
+func TestProjectPlacementWithoutDeviceProofRejectsUnobservedConditions(t *testing.T) {
+	good := kueueEvidenceFixture()
+	baseline, err := ProjectPlacementWithoutDeviceProof(good)
+	if err != nil || baseline.Stage != KueuePodPlaced || baseline.Phase != "NOT_READY" ||
+		!baseline.PodScheduled || !baseline.NodeBound ||
+		baseline.Allocated || baseline.Active || baseline.Ready || baseline.Costable || baseline.Released {
+		t.Fatalf("legitimate node-bound read-only projection changed: %+v err=%v", baseline, err)
+	}
+	for _, tc := range []struct {
+		name string
+		mutate func(*KueueJobEvidence)
+	}{
+		{"zero-value eviction", func(e *KueueJobEvidence) { e.KueueEvictedCondition = KueueConditionEvidence{} }},
+		{"zero-value preemption", func(e *KueueJobEvidence) { e.KueuePreemptedCondition = KueueConditionEvidence{} }},
+		{"both unobserved", func(e *KueueJobEvidence) {
+			e.KueueEvictedCondition = KueueConditionEvidence{}
+			e.KueuePreemptedCondition = KueueConditionEvidence{}
+		}},
+		{"malformed eviction", func(e *KueueJobEvidence) {
+			e.KueueEvictedCondition = KueueConditionEvidence{Status: "False", LastTransitionTime: "not-a-time"}
+		}},
+		{"malformed preemption", func(e *KueueJobEvidence) {
+			e.KueuePreemptedCondition = KueueConditionEvidence{Status: "False", ObservedGeneration: -1}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := kueueEvidenceFixture()
+			tc.mutate(&e)
+			got, err := ProjectPlacementWithoutDeviceProof(e)
+			if !errors.Is(err, ErrInvalidKueueObservation) || got != (AdmissionPlacementProjection{}) {
+				t.Fatalf("unobserved/invalid preemption data promoted node binding: %+v err=%v", got, err)
+			}
+		})
+	}
+}
+
 func TestProjectAdmissionWithoutPlacementStaysNotReady(t *testing.T) {
 	e := kueueEvidenceFixture()
 	e.PodScheduled = false
