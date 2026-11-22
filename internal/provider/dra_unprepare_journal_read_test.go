@@ -55,6 +55,46 @@ func TestRecordedDRAReceiptSameTransactionPresenceReplayAndRevocation(t *testing
 		t.Fatalf("exact recorded and DBA-registered receipt rejected: %v", err)
 	}
 
+	// This read-only check must hold the DBA source row lock until the
+	// caller's transaction ends, not merely until this helper returns.
+	// A revocation FK needs KEY SHARE on that row: NOWAIT must fail with
+	// 55P03 while the preflight owns FOR UPDATE, then succeed after rollback.
+	holder, err := admin.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Rollback()
+	if err := RequireRecordedDRAUnprepareReceipt(ctx, holder, verifier, candidate, signed, asOf); err != nil {
+		t.Fatalf("transaction-bound journal membership: %v", err)
+	}
+	keyLockQuery := `SELECT lock_token FROM public.dra_unprepare_source_keys
+		WHERE cluster_id=$1 AND source_id=$2 AND key_id=$3 FOR KEY SHARE NOWAIT`
+	keyArgs := []any{signed.Event.ClusterID, signed.Event.SourceID, signed.Event.KeyID}
+	contender, err := admin.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lockToken int16
+	err = contender.QueryRowContext(ctx, keyLockQuery, keyArgs...).Scan(&lockToken)
+	_ = contender.Rollback()
+	if postgresSQLState(err) != "55P03" {
+		t.Fatalf("source-key lock escaped caller transaction: state=%s err=%v", postgresSQLState(err), err)
+	}
+	if err := holder.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	after, err := admin.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer after.Rollback()
+	if err := after.QueryRowContext(ctx, keyLockQuery, keyArgs...).Scan(&lockToken); err != nil {
+		t.Fatalf("source key remained locked after rollback: %v", err)
+	}
+	if err := after.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+
 	// A valid signature on a *different* event cannot borrow the existing
 	// journal row, even if signer, Claim/Pod/device and key scope match.
 	other := signed
