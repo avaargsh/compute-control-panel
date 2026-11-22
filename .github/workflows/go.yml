@@ -121,6 +121,18 @@ jobs:
             echo 'real PostgreSQL release bridge test skipped: no evidence' >&2
             exit 1
           fi
+      - name: Require real PostgreSQL signed-and-current release preflight (no skip)
+        shell: bash
+        env:
+          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
+        run: |
+          set -euo pipefail
+          go test -count=1 -v -run '^TestSignedRecordedAndCurrentGenerationOneTransaction$' ./internal/store/postgres | tee release-signed-same-tx-pg.log
+          grep -F -- '--- PASS: TestSignedRecordedAndCurrentGenerationOneTransaction ' release-signed-same-tx-pg.log
+          if grep -F -- '--- SKIP: TestSignedRecordedAndCurrentGenerationOneTransaction' release-signed-same-tx-pg.log; then
+            echo 'signed/current same-transaction PG test was skipped: no acceptance evidence' >&2
+            exit 1
+          fi
       - name: Race-enabled tests
         env:
           DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
