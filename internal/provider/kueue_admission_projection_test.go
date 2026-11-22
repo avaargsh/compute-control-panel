@@ -18,7 +18,7 @@ func TestProjectPlacementWithoutDeviceProofRejectsUnobservedConditions(t *testin
 		t.Fatalf("legitimate node-bound read-only projection changed: %+v err=%v", baseline, err)
 	}
 	for _, tc := range []struct {
-		name string
+		name   string
 		mutate func(*KueueJobEvidence)
 	}{
 		{"zero-value eviction", func(e *KueueJobEvidence) { e.KueueEvictedCondition = KueueConditionEvidence{} }},
