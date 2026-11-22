@@ -100,6 +100,11 @@ func (s releaseCommitFenceSnapshot) matches(p ReleaseCommitFence) bool {
 // authorize release. The caller must separately verify authenticated driver,
 // Provider, Kueue, Pod, and DRA source evidence before any protected effect.
 //
+// A newer-generation DELETE has NULL allocation_id under the existing
+// migration 0003 FK: the historical Allocation still belongs to the CREATE
+// generation. The exact original resource is bound via the successful CREATE
+// operation, not a cross-generation DELETE foreign key. Do not weaken the FK.
+//
 // This deliberately excludes SUPERSEDED cleanup; it is not a generalized
 // release writer. A missing, changed or contradictory row fails closed.
 func ValidateReleaseCommitFence(ctx context.Context, tx *sql.Tx, p ReleaseCommitFence) error {
@@ -125,7 +130,7 @@ func ValidateReleaseCommitFence(ctx context.Context, tx *sql.Tx, p ReleaseCommit
 		 AND c.compute_operation_id=$5
 		JOIN public.compute_operations d
 		  ON d.tenant_id=w.tenant_id AND d.workload_id=w.workload_id
-		 AND d.allocation_id=a.allocation_id AND d.provider_id=a.provider_id
+		 AND d.allocation_id IS NULL AND d.provider_id=a.provider_id
 		 AND d.compute_operation_id=$6
 		WHERE w.tenant_id=$1 AND w.workload_id=$2
 		FOR UPDATE OF w, a, c, d
