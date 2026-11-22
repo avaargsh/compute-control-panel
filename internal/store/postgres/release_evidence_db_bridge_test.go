@@ -84,3 +84,62 @@ func TestCorrelatedReleasePreflightNeedsCallerTransaction(t *testing.T) {
 		t.Fatalf("missing context was accepted: %v", err)
 	}
 }
+ 
+// The provider-side validators reject illegal Kubernetes names and DRA
+// identity tokens. The bridge must not re-admit invalid standalone structs
+// simply because their top-level IDs match the durable rows.
+func TestCorrelatedReleaseBridgeRejectsMalformedKubernetesAndDRATokens(t *testing.T) {
+	base, _ := goodReleaseCommitFence()
+	good := correlatedReleaseFixture(base)
+	withShare := good
+	withShare.Device.ShareID = "shared-partition-a"
+	if !correlatedReleaseMatchesFence(base, withShare) {
+		t.Fatal("legitimate optional DRA ShareID rejected")
+	}
+	tests := []struct {
+		name   string
+		modify func(*ReleaseCommitFence, *provider.ReleaseEvidenceCorrelation)
+	}{
+		{"uppercase Job namespace", func(p *ReleaseCommitFence, c *provider.ReleaseEvidenceCorrelation) {
+			p.TargetResourceID = "Tenant-A/job-a"
+			c.Job.Namespace, c.Pod.Namespace, c.Claim.Namespace = "Tenant-A", "Tenant-A", "Tenant-A"
+		}},
+		{"invalid Job name", func(p *ReleaseCommitFence, c *provider.ReleaseEvidenceCorrelation) {
+			p.TargetResourceID = "tenant-a/job_bad"
+			c.Job.Name = "job_bad"
+		}},
+		{"invalid Pod name", func(_ *ReleaseCommitFence, c *provider.ReleaseEvidenceCorrelation) {
+			c.Pod.Name = "pod/other"
+		}},
+		{"invalid Claim name", func(_ *ReleaseCommitFence, c *provider.ReleaseEvidenceCorrelation) {
+			c.Claim.Name = "claim_bad"
+		}},
+		{"invalid device request", func(_ *ReleaseCommitFence, c *provider.ReleaseEvidenceCorrelation) {
+			c.Device.Request = "gpu_request"
+		}},
+		{"interior control in device pool", func(_ *ReleaseCommitFence, c *provider.ReleaseEvidenceCorrelation) {
+			c.Device.Pool = "pool\\nspoof"
+		}},
+		{"backslash in device identity", func(_ *ReleaseCommitFence, c *provider.ReleaseEvidenceCorrelation) {
+			c.Device.Device = "device\\\\unsafe"
+		}},
+		{"oversized DRA device identity", func(_ *ReleaseCommitFence, c *provider.ReleaseEvidenceCorrelation) {
+			c.Device.Device = strings.Repeat("x", 254)
+		}},
+		{"optional ShareID injection", func(_ *ReleaseCommitFence, c *provider.ReleaseEvidenceCorrelation) {
+			c.Device.ShareID = "share\\nspoof"
+		}},
+		{"oversized optional ShareID", func(_ *ReleaseCommitFence, c *provider.ReleaseEvidenceCorrelation) {
+			c.Device.ShareID = strings.Repeat("s", 254)
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p, c := base, good
+			tc.modify(&p, &c)
+			if correlatedReleaseMatchesFence(p, c) {
+				t.Fatalf("accepted provider-invalid release identity: %s", tc.name)
+			}
+		})
+	}
+}
