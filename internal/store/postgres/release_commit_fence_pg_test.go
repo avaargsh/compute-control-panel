@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // This uses the existing PostgreSQL 16 integration harness. Without a real
@@ -140,6 +142,64 @@ func TestReleaseCommitFenceMatchesLivePostgresGenerationAndUID(t *testing.T) {
 	if err := check(want); err != nil {
 		t.Fatalf("fixture not restored: %v", err)
 	}
+	// A matching snapshot is meaningful only if the caller's transaction
+	// prevents concurrent writers from changing ANY of the four source rows.
+	// PostgreSQL NOWAIT returns SQLSTATE 55P03 if a distinct transaction
+	// cannot take an incompatible row lock. This checks actual row locking,
+	// not merely snapshot fields or a single-connection pool timeout.
+	t.Run("same transaction pins workload allocation create and delete rows", func(t *testing.T) {
+		holder, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer holder.Rollback()
+		if err := ValidateReleaseCommitFence(ctx, holder, want); err != nil {
+			t.Fatalf("failed to establish locked preflight: %v", err)
+		}
+		rows := []struct {
+			name  string
+			query string
+			id    string
+		}{
+			{"workload", `SELECT version FROM public.compute_workloads
+				WHERE tenant_id=$1 AND workload_id=$2 FOR UPDATE NOWAIT`, workload},
+			{"allocation", `SELECT version FROM public.compute_allocations
+				WHERE tenant_id=$1 AND allocation_id=$2 FOR UPDATE NOWAIT`, allocation},
+			{"create operation", `SELECT version FROM public.compute_operations
+				WHERE tenant_id=$1 AND compute_operation_id=$2 FOR UPDATE NOWAIT`, createID},
+			{"delete operation", `SELECT version FROM public.compute_operations
+				WHERE tenant_id=$1 AND compute_operation_id=$2 FOR UPDATE NOWAIT`, deleteID},
+		}
+		for _, row := range rows {
+			t.Run(row.name, func(t *testing.T) {
+				contender, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer contender.Rollback()
+				var version int64
+				err = contender.QueryRowContext(ctx, row.query, tenant, row.id).Scan(&version)
+				var pgErr *pgconn.PgError
+				if !errors.As(err, &pgErr) || pgErr.Code != "55P03" {
+					t.Fatalf("independent transaction was not blocked by %s lock: version=%d err=%v", row.name, version, err)
+				}
+			})
+		}
+		if err := holder.Rollback(); err != nil {
+			t.Fatalf("release preflight locks: %v", err)
+		}
+		// Positive control: the same row becomes lockable once the caller
+		// releases its transaction. No protected release state is written.
+		after, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer after.Rollback()
+		var version int64
+		if err := after.QueryRowContext(ctx, rows[0].query, tenant, workload).Scan(&version); err != nil {
+			t.Fatalf("workload lock remained unavailable after rollback: %v", err)
+		}
+	})
 	var allocationPhase, workloadPhase string
 	if err := db.QueryRowContext(ctx, `SELECT a.phase,w.observed_phase
         FROM public.compute_allocations a
