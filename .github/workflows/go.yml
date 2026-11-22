@@ -32,7 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6, immutable commit
         with:
-          # Test literal PR HEAD; never promote a synthetic merge tree as source proof.
+          # Do not represent synthetic PR-merge checkout as source-HEAD proof.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Assert exact source checkout for release fence
@@ -103,17 +103,10 @@ jobs:
           DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
         run: |
           set -euo pipefail
-          go test -count=1 -v -run '^TestReleaseCommitFenceMatchesLivePostgresGenerationAndUID        env:
-          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
-        run: go test -race -count=1 ./...
-      - name: SIGKILL recovery repeatability
-        env:
-          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
-        run: go test -race -count=3 -run '^TestSIGKILLRecoveryLeaseIsFencedBeforeInspection$' ./internal/recovery
- ./internal/store/postgres | tee release-fence-pg.log
+          go test -count=1 -v -run '^TestReleaseCommitFenceMatchesLivePostgresGenerationAndUID$' ./internal/store/postgres | tee release-fence-pg.log
           grep -F -- '--- PASS: TestReleaseCommitFenceMatchesLivePostgresGenerationAndUID' release-fence-pg.log
           if grep -F -- '--- SKIP: TestReleaseCommitFenceMatchesLivePostgresGenerationAndUID' release-fence-pg.log; then
-            echo 'release fence PostgreSQL integration test was skipped: no evidence' >&2
+            echo 'real PostgreSQL release fence test skipped: no evidence' >&2
             exit 1
           fi
       - name: Race-enabled tests
