@@ -113,10 +113,6 @@ func TestProjectAdmissionWithoutPlacementRejectsContradictoryPodEvidence(t *test
 	}
 }
 
-// The integration of Kueue admission without placement (#99) and release
-// correlation (#98) must not reinterpret admitted/reserved quota as a
-// previously placed, device-assigned Allocation. Even fabricated later Pod,
-// quota and Claim-clear observations do not upgrade this historical stage.
 // Admission is not a positive state if native Kueue has simultaneously
 // reported preemption, eviction, or an unknown transition. Such snapshots
 // must not be rendered as healthy admitted capacity even if quota is still
@@ -163,6 +159,10 @@ func TestProjectAdmissionWithoutPlacementRejectsPreemptionOrUnknown(t *testing.T
 	}
 }
 
+// The integration of Kueue admission without placement (#99) and release
+// correlation (#98) must not reinterpret admitted/reserved quota as a
+// previously placed, device-assigned Allocation. Even fabricated later Pod,
+// quota and Claim-clear observations do not upgrade this historical stage.
 func TestAdmittedUnplacedPodCannotBeSplicedIntoReleaseEvidence(t *testing.T) {
 	candidate := releaseCandidateFixture()
 	job := &candidate.PriorQueue.Job
