@@ -16,7 +16,7 @@ func TestReleaseCorrelationCallerSuppliedClaimAbsenceIsNotAuthority(t *testing.T
 	prior := candidate.PriorPodClaim.Claim
 	candidate.ClaimUnallocated = DRAClaimUnallocatedObservation{}
 	candidate.ClaimAbsent = &DRAClaimUIDAbsentObservation{
-		PreviousClaim: prior.Claim,
+		PreviousClaim:            prior.Claim,
 		ClaimListResourceVersion: "caller-supplied-not-attested",
 	}
 
@@ -68,7 +68,7 @@ func TestReleaseCorrelationDeletedClaimRejectsStaleOrConflictingOperation(t *tes
 			e := releaseCandidateFixture()
 			e.ClaimUnallocated = DRAClaimUnallocatedObservation{}
 			e.ClaimAbsent = &DRAClaimUIDAbsentObservation{
-				PreviousClaim: e.PriorPodClaim.Claim.Claim,
+				PreviousClaim:            e.PriorPodClaim.Claim.Claim,
 				ClaimListResourceVersion: "440",
 			}
 			tc.mutate(&e)
