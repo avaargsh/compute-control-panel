@@ -64,7 +64,9 @@ func TestReleaseCommitFenceMatchesLivePostgresGenerationAndUID(t *testing.T) {
          operation_kind, desired_generation, provider_request_digest, idempotency_key,
          status, target_resource_id, target_resource_uid)
          VALUES($1,$2,$3,$4,$5,'DELETE',2,$6,$7,'SUCCEEDED',$8,$9)`,
-		deleteID, tenant, workload, allocation, provider,
+		// A DELETE for Generation 2 cannot point its FK at Allocation Generation 1.
+		// The source CREATE and exact target UID carry historical linkage.
+		deleteID, tenant, workload, nil, provider,
 		"sha256:"+strings.Repeat("b", 64), "idempotency-delete-"+suffix, resourceID, resourceUID)
 
 	want := ReleaseCommitFence{
