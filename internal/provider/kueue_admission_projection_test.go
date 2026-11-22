@@ -136,6 +136,21 @@ func TestProjectAdmissionWithoutPlacementRejectsPreemptionOrUnknown(t *testing.T
 		{"unknown preemption", func(e *KueueJobEvidence) {
 			e.KueuePreemptedCondition = KueueConditionEvidence{Status: "Unknown"}
 		}},
+		{"missing eviction condition representation", func(e *KueueJobEvidence) {
+			e.KueueEvictedCondition = KueueConditionEvidence{}
+		}},
+		{"invalid eviction condition status", func(e *KueueJobEvidence) {
+			e.KueueEvictedCondition = KueueConditionEvidence{Status: "PENDING"}
+		}},
+		{"malformed eviction transition time", func(e *KueueJobEvidence) {
+			e.KueueEvictedCondition = KueueConditionEvidence{Status: "False", LastTransitionTime: "not-a-time"}
+		}},
+		{"negative preemption observed generation", func(e *KueueJobEvidence) {
+			e.KueuePreemptedCondition = KueueConditionEvidence{Status: "False", ObservedGeneration: -1}
+		}},
+		{"evicted condition true without boolean mirror", func(e *KueueJobEvidence) {
+			e.KueueEvictedCondition = KueueConditionEvidence{Status: "True", Reason: "Preempted"}
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
