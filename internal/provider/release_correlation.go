@@ -30,6 +30,12 @@ type ReleaseEvidenceCandidate struct {
 	// ClaimAbsent is the alternative to a still-existing unallocated Claim.
 	// It is a Kubernetes API observation, never a driver release receipt.
 	ClaimAbsent *DRAClaimUIDAbsentObservation
+
+	// ExpectedAllocationID is the historical Allocation identity the trusted
+	// durable-state caller intends to correlate. It is only a structural
+	// cross-check: callers must independently authenticate it. A newer
+	// DELETE cannot carry the older Allocation's FK under migration 0003.
+	ExpectedAllocationID string
 }
 
 // ReleaseEvidenceCorrelation contains only identities that matched across
@@ -51,15 +57,18 @@ func sameKubeResourceIdentity(a, b KubernetesResourceRef) bool {
 	return a.Namespace == b.Namespace && a.Name == b.Name && a.UID == b.UID
 }
 
-func validReleaseDeletePair(c, d operation.Operation, obs operation.Observation) bool {
+func validReleaseDeletePair(c, d operation.Operation, obs operation.Observation, expectedAllocationID string) bool {
 	if c.Validate() != nil || d.Validate() != nil ||
 		c.Kind != operation.Create ||
 		(c.Status != operation.Succeeded &&
 			!(c.Status == operation.Superseded && c.CleanupRequired)) ||
 		d.Kind != operation.Delete || d.Status != operation.Succeeded ||
-		c.ID == d.ID || c.AllocationID == "" || d.AllocationID == "" ||
+		c.ID == d.ID || c.AllocationID == "" ||
+		expectedAllocationID == "" || expectedAllocationID != strings.TrimSpace(expectedAllocationID) ||
+		strings.ContainsRune(expectedAllocationID, 0) ||
+		c.AllocationID != expectedAllocationID || d.AllocationID != "" ||
 		c.TenantID != d.TenantID || c.WorkloadID != d.WorkloadID ||
-		c.ProviderID != d.ProviderID || c.AllocationID != d.AllocationID ||
+		c.ProviderID != d.ProviderID ||
 		// DELETE must represent a newer desired transition than the CREATE.
 		d.Generation <= c.Generation || c.ProviderResourceID == "" ||
 		c.ProviderResourceUID == "" ||
@@ -159,8 +168,9 @@ func validReleaseClaimCorrelation(e ReleaseEvidenceCandidate) bool {
 	return true
 }
 
-// CorrelateReleaseEvidence only checks same-Allocation durable CREATE/DELETE
-// identities and cross-source structural consistency, including an independent
+// CorrelateReleaseEvidence only checks the historical CREATE Allocation and a
+// newer DELETE's exact resource/operation identities, plus cross-source
+// structural consistency, including an independent
 // API observation that the historical Pod UID/name is absent. Inputs must originate
 // from separate, authenticated stores/collectors; this is not a trust
 // resolver. Even a correlated PodList absence snapshot cannot establish Pod
@@ -169,7 +179,7 @@ func validReleaseClaimCorrelation(e ReleaseEvidenceCandidate) bool {
 //
 // No backend mutation, state transition, capability grant or cost posting.
 func CorrelateReleaseEvidence(e ReleaseEvidenceCandidate) (ReleaseEvidenceCorrelation, error) {
-	if !validReleaseDeletePair(e.Create, e.Delete, e.ProviderAbsence) ||
+	if !validReleaseDeletePair(e.Create, e.Delete, e.ProviderAbsence, e.ExpectedAllocationID) ||
 		!validReleaseQueueCorrelation(e) ||
 		!validReleaseClaimCorrelation(e) {
 		return ReleaseEvidenceCorrelation{}, ErrUncorrelatedReleaseEvidence
@@ -181,7 +191,7 @@ func CorrelateReleaseEvidence(e ReleaseEvidenceCandidate) (ReleaseEvidenceCorrel
 	return ReleaseEvidenceCorrelation{
 		TenantID:          e.Delete.TenantID,
 		WorkloadID:        e.Delete.WorkloadID,
-		AllocationID:      e.Delete.AllocationID,
+		AllocationID:      e.Create.AllocationID,
 		ProviderID:        e.Delete.ProviderID,
 		DeleteOperationID: e.Delete.ID,
 		Job:               e.PriorQueue.Job.Job,
