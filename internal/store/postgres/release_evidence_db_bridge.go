@@ -69,6 +69,11 @@ func correlatedReleaseMatchesFence(
 		!validReleaseDRAIdentity(job.UID) ||
 		!validReleaseDRAIdentity(pod.UID) ||
 		!validReleaseDRAIdentity(claim.UID) ||
+		// Upstream Job and DRA identity contracts reject path separators in
+		// Kubernetes object UIDs. Device/pool strings are separate tokens.
+		strings.ContainsRune(job.UID, '/') ||
+		strings.ContainsRune(pod.UID, '/') ||
+		strings.ContainsRune(claim.UID, '/') ||
 		!validReleaseDRAIdentity(device.Driver) ||
 		!validReleaseDRAIdentity(device.Pool) ||
 		!validReleaseDRAIdentity(device.Device) ||
