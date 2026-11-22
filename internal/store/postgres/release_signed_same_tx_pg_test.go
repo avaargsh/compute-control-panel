@@ -278,6 +278,9 @@ func TestSignedRecordedAndCurrentGenerationOneTransaction(t *testing.T) {
 			args        []any
 		}{
 			{"workload", "SELECT version FROM public.compute_workloads WHERE tenant_id=$1 AND workload_id=$2 FOR UPDATE NOWAIT", []any{p.TenantID, p.WorkloadID}},
+			{"allocation", "SELECT version FROM public.compute_allocations WHERE tenant_id=$1 AND allocation_id=$2 FOR UPDATE NOWAIT", []any{p.TenantID, p.AllocationID}},
+			{"CREATE operation", "SELECT version FROM public.compute_operations WHERE tenant_id=$1 AND compute_operation_id=$2 FOR UPDATE NOWAIT", []any{p.TenantID, p.CreateOperationID}},
+			{"DELETE operation", "SELECT version FROM public.compute_operations WHERE tenant_id=$1 AND compute_operation_id=$2 FOR UPDATE NOWAIT", []any{p.TenantID, p.DeleteOperationID}},
 			{"source key", "SELECT lock_token FROM public.dra_unprepare_source_keys WHERE cluster_id=$1 AND source_id=$2 AND key_id=$3 FOR KEY SHARE NOWAIT", []any{signed.Event.ClusterID, signed.Event.SourceID, signed.Event.KeyID}},
 		} {
 			contender, e := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
