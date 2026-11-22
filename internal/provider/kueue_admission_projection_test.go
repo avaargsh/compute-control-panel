@@ -30,16 +30,48 @@ func TestProjectAdmissionWithoutPlacementStaysNotReady(t *testing.T) {
 	}
 }
 
+// Kueue admission can precede Pod creation. This is quota evidence only;
+// missing Pod identity must not be projected as placement or GPU readiness.
+func TestProjectAdmissionWithoutPlacementBeforePodCreation(t *testing.T) {
+	e := kueueEvidenceFixture()
+	e.Pod = KubernetesResourceRef{}
+	e.PodOwnerJobUID = ""
+	e.PodScheduled = false
+	e.PodNodeName = ""
+
+	stage, err := AssessKueueJobObservation(e)
+	if err != nil || stage != KueueAdmitted {
+		t.Fatalf("admitted Kueue Workload before Pod exists: stage=%s err=%v", stage, err)
+	}
+	got, err := ProjectAdmissionWithoutPlacement(e)
+	if err != nil {
+		t.Fatalf("valid admitted-but-Pod-absent observation rejected: %v", err)
+	}
+	if got.Phase != "NOT_READY" || got.Stage != KueueAdmitted ||
+		!got.QuotaReserved || !got.Admitted ||
+		got.WorkloadUID != e.KueueWorkload.UID || got.JobUID != e.Job.UID ||
+		got.PodNamespace != "" || got.PodName != "" ||
+		got.PodUID != "" || got.PodResourceVersion != "" ||
+		got.PodScheduled || got.NodeBound || got.NodeName != "" ||
+		got.Allocated || got.Active || got.Ready || got.Costable || got.Released {
+		t.Fatalf("Pod-absent admission invented placement or device truth: %+v", got)
+	}
+}
+
 func TestProjectAdmissionWithoutPlacementRejectsPlacementAndMissingPod(t *testing.T) {
 	cases := []struct {
 		name   string
 		change func(*KueueJobEvidence)
 	}{
 		{name: "pod placed on a node", change: func(*KueueJobEvidence) {}},
-		{name: "admitted before a pod exists", change: func(e *KueueJobEvidence) {
+		{name: "absent pod with dangling owner UID", change: func(e *KueueJobEvidence) {
+			e.Pod = KubernetesResourceRef{}
+			e.PodScheduled = false
+			e.PodNodeName = ""
+		}},
+		{name: "absent pod with scheduled flag", change: func(e *KueueJobEvidence) {
 			e.Pod = KubernetesResourceRef{}
 			e.PodOwnerJobUID = ""
-			e.PodScheduled = false
 			e.PodNodeName = ""
 		}},
 		{name: "quota not reserved", change: func(e *KueueJobEvidence) {
