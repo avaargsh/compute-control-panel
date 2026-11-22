@@ -183,6 +183,11 @@ func TestAdmittedUnplacedPodCannotBeSplicedIntoReleaseEvidence(t *testing.T) {
 	job := &candidate.PriorQueue.Job
 	job.KueueAdmitted = true
 	job.KueueAdmissionCondition.Status = "True"
+	// The release fixture predates native eviction/preemption condition reads.
+	// No such conditions were returned; MISSING is explicit reader evidence,
+	// unlike an absent zero-value condition that must fail closed.
+	job.KueueEvictedCondition = KueueConditionEvidence{Status: "MISSING"}
+	job.KueuePreemptedCondition = KueueConditionEvidence{Status: "MISSING"}
 	job.KueuePodSetAssignmentsJSON = `[{"name":"main","resourceUsage":{"cpu":"2"}}]`
 	job.PodScheduled = false
 	job.PodNodeName = ""
