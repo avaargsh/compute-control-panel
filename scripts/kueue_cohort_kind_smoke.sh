@@ -167,10 +167,14 @@ cohort_create_job ccp-cohort-b ccp-cohort-b-borrow 50m ccp-cohort-low
 b_borrow="$(cohort_uid ccp-cohort-b ccp-cohort-b-borrow)"
 cohort_wait "B borrow admitted" cohort_admitted ccp-cohort-b "$b_borrow" ccp-cohort-b
 
-kubectl get clusterqueue ccp-cohort-b -o json > "$dir/cohort-b-borrowed.json"
-jq -e 'any(.status.flavorsReservation[]?.resources[]?;
-  .name == "cpu" and .total == "150m")' "$dir/cohort-b-borrowed.json" >/dev/null ||
-  cohort_fail "B reservation did not prove 150m > 100m nominal"
+cohort_borrowed_quota_reported() {
+  kubectl get clusterqueue ccp-cohort-b -o json > "$dir/cohort-b-borrowed.json" || return 1
+  jq -e 'any(.status.flavorsReservation[]?.resources[]?;
+    .name == "cpu" and .total == "150m")' "$dir/cohort-b-borrowed.json" >/dev/null
+}
+# Admission and ClusterQueue status are updated in separate controller passes.
+# Never assume a status snapshot is instantly consistent after Workload admission.
+cohort_wait "B authoritative 150m borrowed quota accounting" cohort_borrowed_quota_reported
 
 echo "cohort: A demands remaining nominal 50m and reclaims B's low-priority borrow"
 cohort_create_job ccp-cohort-a ccp-cohort-a-reclaim 50m ccp-cohort-high
