@@ -129,6 +129,27 @@ func TestDRAReceiptIngestRefusesMissingDependenciesAndInvalidGrants(t *testing.T
 	}
 }
 
+// A generic caller-provided authenticator could assert any Subject despite a
+// verified peer TLS chain. The internal ingress must only accept the SPIFFE
+// authenticator that binds certificate SAN to authoritative directory Subject.
+func TestDRAReceiptIngestConstructorRefusesArbitraryAuthenticator(t *testing.T) {
+	policy, err := NewExactDRAReceiptIngestAuthorizer([]DRAReceiptIngestGrant{{
+		Subject: draReceiptTestSubject, TenantID: "platform", Service: "dra-node-driver",
+		ClusterID: "cluster-a", SourceID: "source-a", Driver: "gpu.example.com", NodeName: "node-a",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := NewDRAReceiptIngestHandler(DRAReceiptIngestDependencies{
+		Authenticator: draReceiptTestAuthenticator{principal: draReceiptTestPrincipal()},
+		Authorizer: policy, Resolver: &draReceiptTestResolver{},
+		Journal: &draReceiptTestJournal{},
+	})
+	if err == nil || h != nil {
+		t.Fatal("injected authenticator could impersonate the TLS peer for DRA receipts")
+	}
+}
+
 func TestDRAReceiptIngestRequiresVerifiedSPIFFEIdentityAndExactSource(t *testing.T) {
 	identityResolver := &testWorkloadIdentityResolver{expected: draReceiptTestSubject, principal: draReceiptTestPrincipal()}
 	auth, err := NewSPIFFEWorkloadAuthenticator("example.org", identityResolver)
