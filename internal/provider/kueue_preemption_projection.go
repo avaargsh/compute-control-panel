@@ -16,7 +16,8 @@ var ErrCrossKueuePreemption = errors.New("kueue preemption projection crossed id
 // KueuePreemptionProjection is a fail-closed reading of one Job and its Kueue
 // Workload. ADMITTED means quota is reserved and the Workload is admitted.
 // NOT_READY / PREEMPTED means Kueue reported Evicted reason Preempted and
-// Preempted reason InClusterQueue, with QuotaReserved and Admitted both false.
+// Preempted reason from the pinned, recognized Kueue reason set, with
+// QuotaReserved and Admitted both false.
 // Neither value is Allocation allocated, active, READY, costable, or RELEASED.
 // Preemption is not release.
 type KueuePreemptionProjection struct {
@@ -74,6 +75,18 @@ func opaqueResourceVersion(v string) bool {
 
 func conditionObserved(c KueueConditionEvidence) bool {
 	return c.Status != "" && validKueueCondition(c)
+}
+
+// The reason allowlist is pinned to documented Kueue v1beta1/v1beta2
+// reasons. Unknown future versions must be reviewed, not silently accepted.
+// This identifies a quota-evicted Workload, not the release of any GPU device.
+func recognizedKueuePreemptionReason(reason string) bool {
+	switch reason {
+	case "InClusterQueue", "InCohortReclamation", "InCohortFairSharing", "InCohortReclaimWhileBorrowing":
+		return true
+	default:
+		return false
+	}
 }
 
 func evictedOrPreempted(e KueueJobEvidence) bool {
@@ -151,7 +164,7 @@ func ProjectKueueAdmissionBeforePreemption(e KueueJobEvidence) (KueuePreemptionP
 }
 
 // ProjectKueuePreemptedWorkload accepts one Workload whose live conditions are
-// Evicted=True reason Preempted, Preempted=True reason InClusterQueue,
+// Evicted=True reason Preempted, Preempted=True with a recognized reason,
 // QuotaReserved=False, and Admitted=False. The phase is NOT_READY. It is not
 // release, and it is not a ready or costable Allocation.
 func ProjectKueuePreemptedWorkload(e KueueJobEvidence) (KueuePreemptionProjection, error) {
@@ -168,7 +181,7 @@ func ProjectKueuePreemptedWorkload(e KueueJobEvidence) (KueuePreemptionProjectio
 	}
 	if e.KueueEvictedCondition.Status != "True" || e.KueueEvictedCondition.Reason != "Preempted" ||
 		!e.KueueEvicted || e.KueuePreemptedCondition.Status != "True" ||
-		e.KueuePreemptedCondition.Reason != "InClusterQueue" || !e.KueuePreempted {
+		!recognizedKueuePreemptionReason(e.KueuePreemptedCondition.Reason) || !e.KueuePreempted {
 		return reject()
 	}
 	if e.KueueQuotaCondition.Status != "False" || e.KueueQuotaReserved ||
@@ -194,7 +207,7 @@ func ProjectKueuePreemptedWorkload(e KueueJobEvidence) (KueuePreemptionProjectio
 		Evicted:                 true,
 		EvictedReason:           "Preempted",
 		Preempted:               true,
-		PreemptedReason:         "InClusterQueue",
+		PreemptedReason:         e.KueuePreemptedCondition.Reason,
 		QuotaReserved:           false,
 		Admitted:                false,
 		WorkloadNamespace:       e.KueueWorkload.Namespace,
@@ -219,7 +232,7 @@ func (p KueuePreemptionProjection) fence() (KueuePreemptionFence, error) {
 	switch {
 	case p.Phase == "ADMITTED" && p.Disposition == "ADMITTED" && p.Admitted && p.QuotaReserved && !p.Evicted && !p.Preempted:
 	case p.Phase == "NOT_READY" && p.Disposition == "PREEMPTED" && !p.Admitted && !p.QuotaReserved &&
-		p.Evicted && p.EvictedReason == "Preempted" && p.Preempted && p.PreemptedReason == "InClusterQueue":
+		p.Evicted && p.EvictedReason == "Preempted" && p.Preempted && recognizedKueuePreemptionReason(p.PreemptedReason):
 	default:
 		return KueuePreemptionFence{}, ErrInvalidKueueObservation
 	}
