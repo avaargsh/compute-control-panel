@@ -84,7 +84,7 @@ func draReceiptMTLSTestLeaf(
 	}
 	return tls.Certificate{
 		Certificate: [][]byte{encoded, issuer.Raw},
-		PrivateKey: privateKey,
+		PrivateKey:  privateKey,
 	}
 }
 
@@ -119,8 +119,8 @@ func TestDRAReceiptIngestRealMTLSHandshakeAndIdentityBinding(t *testing.T) {
 	send := func(certs []tls.Certificate, body []byte) (int, string, error) {
 		transport := &http.Transport{}
 		transport.TLSClientConfig = &tls.Config{
-			MinVersion: tls.VersionTLS13,
-			RootCAs: trustedRoots,
+			MinVersion:   tls.VersionTLS13,
+			RootCAs:      trustedRoots,
 			Certificates: certs,
 		}
 		defer transport.CloseIdleConnections()
@@ -143,10 +143,10 @@ func TestDRAReceiptIngestRealMTLSHandshakeAndIdentityBinding(t *testing.T) {
 	}
 	validBody := draReceiptTestBody(t, draReceiptTestSigned())
 	for _, tc := range []struct {
-		name string
-		certificates []tls.Certificate
+		name               string
+		certificates       []tls.Certificate
 		wantHandshakeError bool
-		wantHTTP int
+		wantHTTP           int
 	}{
 		{name: "no client certificate", wantHandshakeError: true},
 		{name: "self-signed by unknown CA", certificates: []tls.Certificate{foreignCert}, wantHandshakeError: true},
