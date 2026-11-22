@@ -26,7 +26,9 @@ cohort_wait() {
   cohort_fail "timed out waiting for $label"
 }
 
-# v1beta1 uses spec.cohort; newer v1beta2 uses cohortName.
+# v1beta1 write uses spec.cohort, but the pinned cluster serves v1beta2
+# for kubectl GET, whose converted field is spec.cohortName.
+# Verify both write acceptance and read-back API to avoid false negatives.
 kubectl create namespace ccp-cohort-a
 kubectl create namespace ccp-cohort-b
 cat > "$dir/cohort-queues.yaml" <<'YAML'
@@ -91,10 +93,13 @@ spec: {clusterQueue: ccp-cohort-b}
 YAML
 kubectl apply -f "$dir/cohort-queues.yaml" || cohort_fail "Kueue Cohort config rejected"
 kubectl get clusterqueue ccp-cohort-a -o json | jq -e \
-  '.spec.cohort == "ccp-cohort-isolated" and .spec.preemption.reclaimWithinCohort == "LowerPriority"' >/dev/null ||
+  '.apiVersion == "kueue.x-k8s.io/v1beta2" and
+   .spec.cohortName == "ccp-cohort-isolated" and
+   .spec.preemption.reclaimWithinCohort == "LowerPriority"' >/dev/null ||
   cohort_fail "A reclaim policy not persisted"
 kubectl get clusterqueue ccp-cohort-b -o json | jq -e \
-  '.spec.cohort == "ccp-cohort-isolated" and
+  '.apiVersion == "kueue.x-k8s.io/v1beta2" and
+   .spec.cohortName == "ccp-cohort-isolated" and
    .spec.resourceGroups[0].flavors[0].resources[0].borrowingLimit == "50m"' >/dev/null ||
   cohort_fail "B borrowing limit not persisted"
 
