@@ -17,20 +17,20 @@ var ErrReleaseCommitFence = errors.New("durable release generation fence did not
 // need to re-check inside its own transaction. It is NOT a capability or a
 // driver attestation. All identities come from trusted durable records.
 type ReleaseCommitFence struct {
-	TenantID                string
-	WorkloadID              string
-	AllocationID            string
-	ProviderID              string
-	CreateOperationID       string
-	DeleteOperationID       string
-	TargetResourceID        string
-	TargetResourceUID       string
-	AllocationGeneration    int64
-	DeleteGeneration        int64
-	WorkloadVersion         int64
-	AllocationVersion       int64
-	CreateOperationVersion  int64
-	DeleteOperationVersion  int64
+	TenantID               string
+	WorkloadID             string
+	AllocationID           string
+	ProviderID             string
+	CreateOperationID      string
+	DeleteOperationID      string
+	TargetResourceID       string
+	TargetResourceUID      string
+	AllocationGeneration   int64
+	DeleteGeneration       int64
+	WorkloadVersion        int64
+	AllocationVersion      int64
+	CreateOperationVersion int64
+	DeleteOperationVersion int64
 }
 
 func validReleaseCommitFence(p ReleaseCommitFence) bool {
@@ -52,26 +52,26 @@ func validReleaseCommitFence(p ReleaseCommitFence) bool {
 // releaseCommitFenceSnapshot is only a locked database state comparison. A
 // matching snapshot cannot prove signed source provenance or physical release.
 type releaseCommitFenceSnapshot struct {
-	WorkloadGeneration    int64
-	WorkloadVersion       int64
-	DesiredState          string
-	WorkloadPhase         string
-	LatestAllocationID    string
-	AllocationGeneration  int64
-	AllocationVersion     int64
-	AllocationPhase       string
-	CreateGeneration      int64
-	CreateVersion         int64
-	CreateKind            string
-	CreateStatus          string
-	CreateResourceID      string
-	CreateResourceUID     string
-	DeleteGeneration      int64
-	DeleteVersion         int64
-	DeleteKind            string
-	DeleteStatus          string
-	DeleteTargetID        string
-	DeleteTargetUID       string
+	WorkloadGeneration   int64
+	WorkloadVersion      int64
+	DesiredState         string
+	WorkloadPhase        string
+	LatestAllocationID   string
+	AllocationGeneration int64
+	AllocationVersion    int64
+	AllocationPhase      string
+	CreateGeneration     int64
+	CreateVersion        int64
+	CreateKind           string
+	CreateStatus         string
+	CreateResourceID     string
+	CreateResourceUID    string
+	DeleteGeneration     int64
+	DeleteVersion        int64
+	DeleteKind           string
+	DeleteStatus         string
+	DeleteTargetID       string
+	DeleteTargetUID      string
 }
 
 func (s releaseCommitFenceSnapshot) matches(p ReleaseCommitFence) bool {
