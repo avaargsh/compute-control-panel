@@ -123,7 +123,7 @@ func TestProjectAdmissionWithoutPlacementRejectsContradictoryPodEvidence(t *test
 // marked reserved in this non-transactional read.
 func TestProjectAdmissionWithoutPlacementRejectsPreemptionOrUnknown(t *testing.T) {
 	cases := []struct {
-		name string
+		name   string
 		change func(*KueueJobEvidence)
 	}{
 		{"evicted boolean", func(e *KueueJobEvidence) {
