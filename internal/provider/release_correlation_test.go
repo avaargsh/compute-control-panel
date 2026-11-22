@@ -29,6 +29,10 @@ func releaseCandidateFixture() ReleaseEvidenceCandidate {
 	q.Job.PodScheduled = true
 	q.Job.PodNodeName = "gpu-node-a"
 	q.Stage = KueuePodPlaced
+	// Historical POD_PLACED requires native Kueue admission as well as
+	// quota reservation; these represent distinct controller conditions.
+	q.Job.KueueAdmitted = true
+	q.Job.KueueAdmissionCondition = KueueConditionEvidence{Status: "True"}
 
 	del := operation.Operation{
 		ID: "delete-op-a", TenantID: "tenant-a", WorkloadID: "workload-a",
@@ -141,6 +145,19 @@ func TestReleaseEvidenceCorrelationRejectsCrossAllocationSplicing(t *testing.T) 
 			e.PriorQueue.Job.JobDesiredGeneration = 9
 		}},
 		{name: "Kueue previous reservation missing", mutate: func(e *ReleaseEvidenceCandidate) { e.PriorQueue.Job.KueueQuotaReserved = false }},
+		{name: "POD_PLACED was never admitted", mutate: func(e *ReleaseEvidenceCandidate) {
+			e.PriorQueue.Job.KueueAdmitted = false
+			e.PriorQueue.Job.KueueAdmissionCondition = KueueConditionEvidence{Status: "False"}
+		}},
+		{name: "admission flag true but native condition false", mutate: func(e *ReleaseEvidenceCandidate) {
+			e.PriorQueue.Job.KueueAdmissionCondition = KueueConditionEvidence{Status: "False"}
+		}},
+		{name: "admission native condition unknown", mutate: func(e *ReleaseEvidenceCandidate) {
+			e.PriorQueue.Job.KueueAdmissionCondition = KueueConditionEvidence{Status: "Unknown"}
+		}},
+		{name: "native admission not observed", mutate: func(e *ReleaseEvidenceCandidate) {
+			e.PriorQueue.Job.KueueAdmissionCondition = KueueConditionEvidence{}
+		}},
 		{name: "Kueue previous stage did not prove Pod", mutate: func(e *ReleaseEvidenceCandidate) { e.PriorQueue.Stage = KueueAdmitted }},
 		{name: "quota clear snapshot missing", mutate: func(e *ReleaseEvidenceCandidate) { e.QuotaCleared = KueueQuotaClearedObservation{} }},
 		{name: "quota clear from different Workload UID", mutate: func(e *ReleaseEvidenceCandidate) { e.QuotaCleared.PreviousWorkload.UID = "other-kueue" }},

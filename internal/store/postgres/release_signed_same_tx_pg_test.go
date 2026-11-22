@@ -52,8 +52,10 @@ func signedSameTxFixture(t *testing.T, p ReleaseCommitFence, asOf time.Time) (
 				Namespace: ns, Name: "kueue-a", UID: "kueue-uid-a", ResourceVersion: "22",
 			},
 			KueueOwnerJobUID: job.UID, KueueClusterQueue: "cq-a",
-			KueueQuotaReserved:  true,
-			KueueQuotaCondition: provider.KueueConditionEvidence{Status: "True"},
+			KueueQuotaReserved:      true,
+			KueueQuotaCondition:     provider.KueueConditionEvidence{Status: "True"},
+			KueueAdmitted:           true,
+			KueueAdmissionCondition: provider.KueueConditionEvidence{Status: "True"},
 		},
 		Stage: provider.KueuePodPlaced,
 		LocalQueue: provider.KubernetesResourceRef{
@@ -237,6 +239,16 @@ func TestSignedRecordedAndCurrentGenerationOneTransaction(t *testing.T) {
 	if e := probe(p, candidate, signed); e != nil {
 		t.Fatalf("matching current generation and recorded source refused: %v", e)
 	}
+	t.Run("historical node binding without native Kueue admission rejected", func(t *testing.T) {
+		for _, nativeStatus := range []string{"False", "Unknown", ""} {
+			bad := candidate
+			bad.PriorQueue.Job.KueueAdmitted = false
+			bad.PriorQueue.Job.KueueAdmissionCondition = provider.KueueConditionEvidence{Status: nativeStatus}
+			if e := probe(p, bad, signed); !errors.Is(e, provider.ErrUncorrelatedDRAUnprepare) {
+				t.Fatalf("native admission %q promoted release evidence: %v", nativeStatus, e)
+			}
+		}
+	})
 	t.Run("successor Job UID rejected", func(t *testing.T) {
 		bad := p
 		bad.TargetResourceUID = "successor-uid"
