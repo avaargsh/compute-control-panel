@@ -15,6 +15,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -65,7 +66,17 @@ type Manager struct {
 // requires direct TLS. It is intentionally NOT registered by the default
 // cmd/compute-control-panel/main.go process.
 func NewHandler(cfg Config, reader httpapi.ObservationReader) (http.Handler, error) {
-	if reader == nil || cfg.Now == nil ||
+	// Interfaces may contain a typed-nil Reader. Such an implementation can
+	// pass a plain nil check and panic only when an authenticated read occurs.
+	readerMissing := reader == nil
+	if !readerMissing {
+		value := reflect.ValueOf(reader)
+		switch value.Kind() {
+		case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+			readerMissing = value.IsNil()
+		}
+	}
+	if readerMissing || cfg.Now == nil ||
 		strings.TrimSpace(cfg.Username) == "" ||
 		strings.TrimSpace(cfg.TenantID) == "" ||
 		strings.TrimSpace(cfg.ProjectID) == "" ||
