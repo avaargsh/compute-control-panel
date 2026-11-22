@@ -142,7 +142,7 @@ func TestDRAReceiptIngestConstructorRefusesArbitraryAuthenticator(t *testing.T) 
 	}
 	h, err := NewDRAReceiptIngestHandler(DRAReceiptIngestDependencies{
 		Authenticator: draReceiptTestAuthenticator{principal: draReceiptTestPrincipal()},
-		Authorizer: policy, Resolver: &draReceiptTestResolver{},
+		Authorizer:    policy, Resolver: &draReceiptTestResolver{},
 		Journal: &draReceiptTestJournal{},
 	})
 	if err == nil || h != nil {
