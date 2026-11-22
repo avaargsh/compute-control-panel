@@ -14,7 +14,8 @@ Documents under `docs/` are **design contracts and architecture decisions**. The
 | Implementation | Go foundation notes | [GO-FOUNDATION.md](implementation/GO-FOUNDATION.md) |
 | Operations | Identity, release gates | [SPIFFE-WORKLOAD-IDENTITY-PROVISIONING.md](operations/SPIFFE-WORKLOAD-IDENTITY-PROVISIONING.md) |
 | Testing | Acceptance criteria | [RELIABILITY-ACCEPTANCE.md](testing/RELIABILITY-ACCEPTANCE.md) |
-| Decisions | Cross-repo ownership | [ADR-001](adr/ADR-001-CROSS-REPO-OWNERSHIP.md) |
+| Decisions | Cross-repo ownership, llm-d serving and resource ownership | [ADR-001](adr/ADR-001-CROSS-REPO-OWNERSHIP.md), [ADR-002](adr/ADR-002-LLMD-SERVING-BASELINE.md), [ADR-003](adr/ADR-003-LLMD-RESOURCE-OWNERSHIP.md) |
+| Inference | Proposed three-layer source-aware readiness contract (v0.2 only) | [LLMD-INFERENCE-OBSERVATION-V0.md](contracts/LLMD-INFERENCE-OBSERVATION-V0.md) |
 
 ## Directory layout
 
