@@ -164,6 +164,20 @@ func TestObservationReadShowsStaleNotGreen(t *testing.T) {
 		t.Fatalf("expired source shown as green: %d %s", w.Code, w.Body.String())
 	}
 }
+// Even an empty literal '?' is query syntax; scope is server-owned and
+// must not be interpreted differently by proxies or downstream services.
+func TestObservationReadRejectsExplicitEmptyQuery(t *testing.T) {
+	deps, src, _ := observationFixture()
+	h, err := NewObservationReadHandler(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := observationRequest(h, http.MethodGet, "/api/v1/observations?")
+	if w.Code != http.StatusBadRequest || src.calls != 0 {
+		t.Fatalf("explicit empty query escaped the read-only boundary: status=%d reads=%d body=%s", w.Code, src.calls, w.Body.String())
+	}
+}
+
 func TestObservationReadRejectsWritesAndUnexpectedQuery(t *testing.T) {
 	deps, src, _ := observationFixture()
 	h, err := NewObservationReadHandler(deps)
