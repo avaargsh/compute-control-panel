@@ -48,8 +48,16 @@ func ProjectAdmissionWithoutPlacement(e KueueJobEvidence) (AdmissionPlacementPro
 		return reject()
 	}
 	if !e.KueueQuotaReserved || !e.KueueAdmitted || e.KueueClusterQueue == "" ||
-		e.KueuePodSetAssignmentsJSON == "" || e.KueueOwnerJobUID != e.Job.UID ||
-		evictedOrPreempted(e) || e.KueueEvictedCondition.Status == "Unknown" ||
+		e.KueuePodSetAssignmentsJSON == "" || e.KueueOwnerJobUID != e.Job.UID {
+		return reject()
+	}
+	// The reader preserves absent native conditions as explicit MISSING.
+	// Do not accept zero-value, malformed, or future-unknown condition data
+	// as proof that this admitted Workload has not been evicted/preempted.
+	if !conditionObserved(e.KueueEvictedCondition) ||
+		!conditionObserved(e.KueuePreemptedCondition) ||
+		evictedOrPreempted(e) ||
+		e.KueueEvictedCondition.Status == "Unknown" ||
 		e.KueuePreemptedCondition.Status == "Unknown" {
 		return reject()
 	}
