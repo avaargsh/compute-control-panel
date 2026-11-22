@@ -97,6 +97,18 @@ jobs:
         run: psql --host=127.0.0.1 --username=postgres --dbname=postgres --set=ON_ERROR_STOP=1 --file=migrations/tests/0001_compute_core_constraints.sql
       - name: Static analysis
         run: go vet ./...
+      - name: Require real PostgreSQL release Generation/UID fence test (no skip)
+        shell: bash
+        env:
+          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
+        run: |
+          set -euo pipefail
+          go test -count=1 -v -run '^TestReleaseCommitFenceMatchesLivePostgresGenerationAndUID$' ./internal/store/postgres | tee release-fence-pg.log
+          grep -F -- '--- PASS: TestReleaseCommitFenceMatchesLivePostgresGenerationAndUID' release-fence-pg.log
+          if grep -F -- '--- SKIP: TestReleaseCommitFenceMatchesLivePostgresGenerationAndUID' release-fence-pg.log; then
+            echo 'real PostgreSQL release fence test skipped: no evidence' >&2
+            exit 1
+          fi
       - name: Require real PostgreSQL release bridge acceptance (no skip)
         shell: bash
         env:
