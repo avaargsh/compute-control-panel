@@ -32,7 +32,7 @@ func releaseCandidateFixture() ReleaseEvidenceCandidate {
 
 	del := operation.Operation{
 		ID: "delete-op-a", TenantID: "tenant-a", WorkloadID: "workload-a",
-		AllocationID: "allocation-a", ProviderID: "provider-a",
+		ProviderID: "provider-a",
 		IdempotencyKey: "delete-a", RequestDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		Generation: 8, Version: 4, Kind: operation.Delete, Status: operation.Succeeded,
 		TargetResourceID: "tenant-a/job-a", TargetResourceUID: "job-uid-a",
@@ -53,6 +53,8 @@ func releaseCandidateFixture() ReleaseEvidenceCandidate {
 	}
 	claim := previousDRAClaimAllocation()
 	return ReleaseEvidenceCandidate{
+		ExpectedAllocationID: "allocation-a",
+
 		Create:          create,
 		Delete:          del,
 		ProviderAbsence: obs,
@@ -111,7 +113,11 @@ func TestReleaseEvidenceCorrelationRejectsCrossAllocationSplicing(t *testing.T) 
 		{name: "DELETE references older-than-CREATE generation", mutate: func(e *ReleaseEvidenceCandidate) { e.Delete.Generation = 6; e.ProviderAbsence.DesiredGeneration = 6 }},
 		{name: "DELETE pending not terminal", mutate: func(e *ReleaseEvidenceCandidate) { e.Delete.Status = operation.Pending }},
 		{name: "DELETE from wrong kind", mutate: func(e *ReleaseEvidenceCandidate) { e.Delete.Kind = operation.Update }},
-		{name: "Allocation missing", mutate: func(e *ReleaseEvidenceCandidate) { e.Delete.AllocationID = "" }},
+		{name: "DELETE illegally binds historical Allocation FK", mutate: func(e *ReleaseEvidenceCandidate) { e.Delete.AllocationID = "allocation-a" }},
+		{name: "DELETE falsely binds successor Allocation FK", mutate: func(e *ReleaseEvidenceCandidate) { e.Delete.AllocationID = "allocation-b" }},
+		{name: "expected historical Allocation missing", mutate: func(e *ReleaseEvidenceCandidate) { e.ExpectedAllocationID = "" }},
+		{name: "expected historical Allocation replaced", mutate: func(e *ReleaseEvidenceCandidate) { e.ExpectedAllocationID = "allocation-b" }},
+		{name: "expected historical Allocation has padding", mutate: func(e *ReleaseEvidenceCandidate) { e.ExpectedAllocationID = " allocation-a " }},
 		{name: "DELETE wrong tenant", mutate: func(e *ReleaseEvidenceCandidate) { e.Delete.TenantID = "tenant-b" }},
 		{name: "DELETE wrong workload", mutate: func(e *ReleaseEvidenceCandidate) { e.Delete.WorkloadID = "workload-b" }},
 		{name: "DELETE resource name differs", mutate: func(e *ReleaseEvidenceCandidate) { e.Delete.TargetResourceID = "tenant-a/job-other" }},
