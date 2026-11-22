@@ -32,7 +32,7 @@ func releaseCandidateFixture() ReleaseEvidenceCandidate {
 
 	del := operation.Operation{
 		ID: "delete-op-a", TenantID: "tenant-a", WorkloadID: "workload-a",
-		ProviderID: "provider-a",
+		ProviderID:     "provider-a",
 		IdempotencyKey: "delete-a", RequestDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		Generation: 8, Version: 4, Kind: operation.Delete, Status: operation.Succeeded,
 		TargetResourceID: "tenant-a/job-a", TargetResourceUID: "job-uid-a",
