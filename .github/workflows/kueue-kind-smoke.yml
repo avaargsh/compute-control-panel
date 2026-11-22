@@ -42,6 +42,20 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6 immutable commit
+        with:
+          # PR workflows normally check out a synthetic merge commit. Pin the
+          # tested tree to the PR head; main/push/dispatch use the trigger SHA.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact PR/source checkout identity
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          actual="$(git rev-parse --verify HEAD)"
+          if [[ ! "$actual" =~ ^[a-f0-9]{40}$ || "$actual" != "$EXPECTED_SOURCE_SHA" ]]; then
+            echo "source identity mismatch: expected=$EXPECTED_SOURCE_SHA actual=$actual" >&2
+            exit 1
+          fi
+          printf 'verified_disposable_smoke_source_sha=%s\n' "$actual"
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6 immutable commit
         with:
           go-version: '1.27.4'
