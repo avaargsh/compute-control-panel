@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"regexp"
 	"strings"
 
 	"github.com/avaargsh/compute-control-panel/internal/provider"
@@ -13,6 +14,43 @@ import (
 func presentReleaseIdentity(value string) bool {
 	return value != "" && strings.TrimSpace(value) == value &&
 		!strings.ContainsRune(value, 0)
+}
+
+// These checks mirror the pinned Provider/Kubernetes parser boundaries:
+// a Kubernetes DNS label (63 ASCII bytes), and a DRA identity (253 bytes,
+// no ASCII controls, whitespace or backslash). Keep them deliberately
+// independent of the untrusted caller-supplied correlation object.
+var releaseKubeDNSLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?package postgres
+
+import (
+	"context"
+	"database/sql"
+	"regexp"
+	"strings"
+
+	"github.com/avaargsh/compute-control-panel/internal/provider"
+)
+
+// presentReleaseIdentity checks only the shape of an already supplied token.
+// It never authenticates the source of that token.
+func presentReleaseIdentity(value string) bool {
+	return value != "" && strings.TrimSpace(value) == value &&
+		!strings.ContainsRune(value, 0)
+}
+
+)
+
+func validReleaseKubeName(value string) bool {
+	return len(value) > 0 && len(value) <= 63 &&
+		releaseKubeDNSLabel.MatchString(value)
+}
+
+func validReleaseDRAIdentity(value string) bool {
+	return len(value) > 0 && len(value) <= 253 &&
+		value == strings.TrimSpace(value) &&
+		strings.IndexFunc(value, func(char rune) bool {
+			return char <= 32 || char == 92
+		}) == -1
 }
 
 // correlatedReleaseMatchesFence is a NECESSARY cross-layer identity check,
@@ -41,8 +79,18 @@ func correlatedReleaseMatchesFence(
 			return false
 		}
 	}
-	if strings.ContainsAny(job.Namespace, "/\n\r") ||
-		strings.ContainsAny(job.Name, "/\n\r") ||
+	if !validReleaseKubeName(job.Namespace) ||
+		!validReleaseKubeName(job.Name) ||
+		!validReleaseKubeName(pod.Name) ||
+		!validReleaseKubeName(claim.Name) ||
+		!validReleaseKubeName(device.Request) ||
+		!validReleaseDRAIdentity(job.UID) ||
+		!validReleaseDRAIdentity(pod.UID) ||
+		!validReleaseDRAIdentity(claim.UID) ||
+		!validReleaseDRAIdentity(device.Driver) ||
+		!validReleaseDRAIdentity(device.Pool) ||
+		!validReleaseDRAIdentity(device.Device) ||
+		(device.ShareID != "" && !validReleaseDRAIdentity(device.ShareID)) ||
 		p.TargetResourceID != job.Namespace+"/"+job.Name ||
 		p.TargetResourceUID != job.UID ||
 		pod.Namespace != job.Namespace ||
