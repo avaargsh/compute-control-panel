@@ -3,26 +3,28 @@ package postgres
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/avaargsh/compute-control-panel/internal/provider"
 )
 
 func correlatedReleaseFixture(p ReleaseCommitFence) provider.ReleaseEvidenceCorrelation {
+	namespace, jobName, _ := strings.Cut(p.TargetResourceID, "/")
 	return provider.ReleaseEvidenceCorrelation{
 		TenantID: p.TenantID, WorkloadID: p.WorkloadID,
 		AllocationID: p.AllocationID, ProviderID: p.ProviderID,
 		DeleteOperationID: p.DeleteOperationID,
 		Job: provider.KubernetesResourceRef{
-			Namespace: "tenant-a", Name: "job-a",
+			Namespace: namespace, Name: jobName,
 			UID: p.TargetResourceUID, ResourceVersion: "job-rv-12",
 		},
 		Pod: provider.KubernetesResourceRef{
-			Namespace: "tenant-a", Name: "pod-a",
+			Namespace: namespace, Name: "pod-a",
 			UID: "pod-uid-a", ResourceVersion: "pod-rv-34",
 		},
 		Claim: provider.KubernetesResourceRef{
-			Namespace: "tenant-a", Name: "claim-a",
+			Namespace: namespace, Name: "claim-a",
 			UID: "claim-uid-a", ResourceVersion: "claim-rv-56",
 		},
 		Device: provider.DRAAllocatedDevice{
