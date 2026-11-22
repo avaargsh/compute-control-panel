@@ -48,7 +48,9 @@ func ProjectAdmissionWithoutPlacement(e KueueJobEvidence) (AdmissionPlacementPro
 		return reject()
 	}
 	if !e.KueueQuotaReserved || !e.KueueAdmitted || e.KueueClusterQueue == "" ||
-		e.KueuePodSetAssignmentsJSON == "" || e.KueueOwnerJobUID != e.Job.UID {
+		e.KueuePodSetAssignmentsJSON == "" || e.KueueOwnerJobUID != e.Job.UID ||
+		evictedOrPreempted(e) || e.KueueEvictedCondition.Status == "Unknown" ||
+		e.KueuePreemptedCondition.Status == "Unknown" {
 		return reject()
 	}
 	podPresent := presentKubernetesRef(e.Pod)
