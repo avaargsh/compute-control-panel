@@ -147,6 +147,12 @@ func TestReleaseEvidenceCorrelationRejectsCrossAllocationSplicing(t *testing.T) 
 		{name: "quota clear from different LocalQueue", mutate: func(e *ReleaseEvidenceCandidate) { e.QuotaCleared.LocalQueue.UID = "foreign-local" }},
 		{name: "quota clear from different ClusterQueue", mutate: func(e *ReleaseEvidenceCandidate) { e.QuotaCleared.ClusterQueue.UID = "foreign-cq" }},
 		{name: "quota clear lacks list resourceVersion", mutate: func(e *ReleaseEvidenceCandidate) { e.QuotaCleared.WorkloadListResourceVersion = "" }},
+		{name: "quota clear LIST resourceVersion contains NUL", mutate: func(e *ReleaseEvidenceCandidate) {
+			e.QuotaCleared.WorkloadListResourceVersion = "rv\x00forged"
+		}},
+		{name: "quota clear ClusterQueue resourceVersion contains NUL", mutate: func(e *ReleaseEvidenceCandidate) {
+			e.QuotaCleared.ClusterQueue.ResourceVersion = "rv\x00forged"
+		}},
 		{name: "missing independent Pod absence", mutate: func(e *ReleaseEvidenceCandidate) { e.PodAbsent = KubernetesPodAbsentObservation{} }},
 		{name: "Pod absence belongs to successor UID", mutate: func(e *ReleaseEvidenceCandidate) { e.PodAbsent.PreviousPod.UID = "successor-uid" }},
 		{name: "Pod absence belongs to other tenant", mutate: func(e *ReleaseEvidenceCandidate) { e.PodAbsent.PreviousPod.Namespace = "tenant-b" }},
