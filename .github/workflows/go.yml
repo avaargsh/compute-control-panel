@@ -31,6 +31,21 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6, immutable commit
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Assert exact DRA receipt reader source HEAD
+        shell: bash
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse --verify HEAD)"
+          if [[ ! "$EXPECTED_SOURCE_SHA" =~ ^[a-f0-9]{40}$ || "$actual" != "$EXPECTED_SOURCE_SHA" ]]; then
+            echo "receipt reader checkout mismatch: expected=$EXPECTED_SOURCE_SHA actual=$actual" >&2
+            exit 1
+          fi
+          printf 'verified_dra_receipt_reader_source_sha=%s\n' "$actual"
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6, immutable commit
         with:
           go-version: '1.27.4'
@@ -81,6 +96,27 @@ jobs:
         run: psql --host=127.0.0.1 --username=postgres --dbname=postgres --set=ON_ERROR_STOP=1 --file=migrations/tests/0001_compute_core_constraints.sql
       - name: Static analysis
         run: go vet ./...
+      - name: Require real PostgreSQL recorded DRA receipt acceptance (no skip)
+        shell: bash
+        env:
+          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
+        run: |
+          set -euo pipefail
+          go test -count=1 -v -run '^TestRecordedDRAReceipt(SameTransactionPresenceReplayAndRevocation|RejectsUnrestrictedTestOnlyJournalIngress)      - name: Race-enabled tests
+        env:
+          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
+        run: go test -race -count=1 ./...
+      - name: SIGKILL recovery repeatability
+        env:
+          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
+        run: go test -race -count=3 -run '^TestSIGKILLRecoveryLeaseIsFencedBeforeInspection$' ./internal/recovery
+ ./internal/provider | tee dra-receipt-reader-pg.log
+          grep -F -- '--- PASS: TestRecordedDRAReceiptSameTransactionPresenceReplayAndRevocation' dra-receipt-reader-pg.log
+          grep -F -- '--- PASS: TestRecordedDRAReceiptRejectsUnrestrictedTestOnlyJournalIngress' dra-receipt-reader-pg.log
+          if grep -F -- '--- SKIP: TestRecordedDRAReceipt' dra-receipt-reader-pg.log; then
+            echo 'real PostgreSQL recorded receipt reader acceptance was skipped' >&2
+            exit 1
+          fi
       - name: Race-enabled tests
         env:
           DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
