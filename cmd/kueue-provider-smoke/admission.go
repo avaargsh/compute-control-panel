@@ -191,11 +191,11 @@ func admissionCreate(getenv func(string) string, out io.Writer) error {
 			return errors.New("pod was node-bound; admission was not kept separate from placement")
 		} else if collected.Stage == provider.KueueAdmitted {
 			projected, err = provider.ProjectAdmissionWithoutPlacement(collected.Evidence)
-			if err == nil && admissionSmokeHasPodIdentity(projected) {
-				break
+			if err != nil {
+				return fmt.Errorf("admitted observation is not a valid pre-placement projection: %w", err)
 			}
-			if err != nil && collected.Evidence.Pod.UID != "" {
-				return fmt.Errorf("admitted pod was not an unplaced projection: %w", err)
+			if admissionSmokeHasPodIdentity(projected) {
+				break
 			}
 		}
 		select {
