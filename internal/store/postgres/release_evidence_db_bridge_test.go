@@ -84,7 +84,7 @@ func TestCorrelatedReleasePreflightNeedsCallerTransaction(t *testing.T) {
 		t.Fatalf("missing context was accepted: %v", err)
 	}
 }
- 
+
 // The provider-side validators reject illegal Kubernetes names and DRA
 // identity tokens. The bridge must not re-admit invalid standalone structs
 // simply because their top-level IDs match the durable rows.
@@ -118,16 +118,16 @@ func TestCorrelatedReleaseBridgeRejectsMalformedKubernetesAndDRATokens(t *testin
 			c.Device.Request = "gpu_request"
 		}},
 		{"interior control in device pool", func(_ *ReleaseCommitFence, c *provider.ReleaseEvidenceCorrelation) {
-			c.Device.Pool = "pool\\nspoof"
+			c.Device.Pool = "pool\nspoof"
 		}},
 		{"backslash in device identity", func(_ *ReleaseCommitFence, c *provider.ReleaseEvidenceCorrelation) {
-			c.Device.Device = "device\\\\unsafe"
+			c.Device.Device = "device\\unsafe"
 		}},
 		{"oversized DRA device identity", func(_ *ReleaseCommitFence, c *provider.ReleaseEvidenceCorrelation) {
 			c.Device.Device = strings.Repeat("x", 254)
 		}},
 		{"optional ShareID injection", func(_ *ReleaseCommitFence, c *provider.ReleaseEvidenceCorrelation) {
-			c.Device.ShareID = "share\\nspoof"
+			c.Device.ShareID = "share\nspoof"
 		}},
 		{"oversized optional ShareID", func(_ *ReleaseCommitFence, c *provider.ReleaseEvidenceCorrelation) {
 			c.Device.ShareID = strings.Repeat("s", 254)
