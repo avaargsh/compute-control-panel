@@ -100,6 +100,12 @@ func validReleaseQueueCorrelation(e ReleaseEvidenceCandidate) bool {
 	d := e.Delete
 	qc := e.QuotaCleared
 	if !validPreviousKueueReservation(q) || q.Stage != KueuePodPlaced ||
+		// A historical node-bound Pod is not a legitimate Kueue-placed
+		// snapshot without native Admitted=True. QuotaReserved alone is
+		// insufficient, and an UNKNOWN/absent condition is not a true one.
+		!p.KueueAdmitted || p.KueueAdmissionCondition.Status != "True" ||
+		!validKueueCondition(p.KueueAdmissionCondition) ||
+		!validKueueCondition(p.KueueQuotaCondition) ||
 		p.TenantID != c.TenantID || p.WorkloadID != c.WorkloadID ||
 		p.JobTenantID != c.TenantID || p.JobWorkloadID != c.WorkloadID ||
 		p.DesiredGeneration != c.Generation ||
