@@ -110,7 +110,7 @@ func TestPreemptionProjectionRejectsMissingOrContradictoryEvidence(t *testing.T)
 		}},
 		{name: "wrong preemption reason", change: func(e *KueueJobEvidence) {
 			*e = preemptedPreemptionEvidence()
-			e.KueuePreemptedCondition.Reason = "InCohortReclamation"
+			e.KueuePreemptedCondition.Reason = "UnrecognizedPreemption"
 		}},
 		{name: "conditions not read", change: func(e *KueueJobEvidence) {
 			e.KueueEvictedCondition = KueueConditionEvidence{}
@@ -134,6 +134,50 @@ func TestPreemptionProjectionRejectsMissingOrContradictoryEvidence(t *testing.T)
 				t.Fatalf("promoted contradictory evidence: admitted=%+v %v preempted=%+v %v", admitted, admittedErr, preempted, preemptedErr)
 			}
 		})
+	}
+}
+
+// Cohort borrowing/reclamation and fair-sharing have distinct native Kueue
+// preemption reasons. The observation must preserve each reason, but must
+// never treat Kueue quota eviction as GPU device release or billing finality.
+func TestKueueSupportedPreemptionReasonsRemainInactive(t *testing.T) {
+	for _, reason := range []string{
+		"InClusterQueue",
+		"InCohortReclamation",
+		"InCohortFairSharing",
+		"InCohortReclaimWhileBorrowing",
+	} {
+		t.Run(reason, func(t *testing.T) {
+			e := preemptedPreemptionEvidence()
+			e.KueuePreemptedCondition.Reason = reason
+			projected, err := ProjectKueuePreemptedWorkload(e)
+			if err != nil || projected.PreemptedReason != reason || projected.Phase != "NOT_READY" ||
+				projected.Ready || projected.Released || projected.Allocated || projected.Active || projected.Costable {
+				t.Fatalf("cohort reason was lost or promoted to allocation: %+v err=%v", projected, err)
+			}
+			admitted, err := ProjectKueueAdmissionBeforePreemption(admittedPreemptionEvidence())
+			if err != nil {
+				t.Fatal(err)
+			}
+			admitted.ReadSequence = 1
+			prior, err := AdvanceKueuePreemptionFence(KueuePreemptionFence{}, admitted)
+			if err != nil {
+				t.Fatal(err)
+			}
+			projected.ReadSequence = 2
+			accepted, err := AdvanceKueuePreemptionFence(prior, projected)
+			if err != nil || accepted.Disposition != "PREEMPTED" || accepted.Phase != "NOT_READY" {
+				t.Fatalf("supported reason failed preemption fencing: %+v err=%v", accepted, err)
+			}
+		})
+	}
+	for _, reason := range []string{"InCohort", "InCohortReclamationExtra", "UnrecognizedPreemption", ""} {
+		e := preemptedPreemptionEvidence()
+		e.KueuePreemptedCondition.Reason = reason
+		if p, err := ProjectKueuePreemptedWorkload(e); !errors.Is(err, ErrInvalidKueueObservation) ||
+			p != (KueuePreemptionProjection{}) {
+			t.Fatalf("unknown reason accepted: %q: %+v err=%v", reason, p, err)
+		}
 	}
 }
 
