@@ -207,8 +207,8 @@ func TestSignedRecordedAndCurrentGenerationOneTransaction(t *testing.T) {
 		defer tx.Rollback()
 		return ValidateRecordedReleaseSameTx(ctx, tx, f, verifier, c, s, asOf)
 	}
-	if e := probe(p, candidate, signed); !errors.Is(e, provider.ErrDRAReceiptNotRecorded) {
-		t.Fatalf("signed but not journaled accepted: %v", e)
+	if e := probe(p, candidate, signed); !errors.Is(e, provider.ErrDRAReceiptSourceUntrusted) {
+		t.Fatalf("unregistered signer accepted before journal lookup: %v", e)
 	}
 	// A separate disposable-DBA test principal registers the exact signer.
 	// This does not represent a real driver's authenticated RPC transport.
