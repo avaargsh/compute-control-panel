@@ -20,25 +20,7 @@ func presentReleaseIdentity(value string) bool {
 // a Kubernetes DNS label (63 ASCII bytes), and a DRA identity (253 bytes,
 // no ASCII controls, whitespace or backslash). Keep them deliberately
 // independent of the untrusted caller-supplied correlation object.
-var releaseKubeDNSLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?package postgres
-
-import (
-	"context"
-	"database/sql"
-	"regexp"
-	"strings"
-
-	"github.com/avaargsh/compute-control-panel/internal/provider"
-)
-
-// presentReleaseIdentity checks only the shape of an already supplied token.
-// It never authenticates the source of that token.
-func presentReleaseIdentity(value string) bool {
-	return value != "" && strings.TrimSpace(value) == value &&
-		!strings.ContainsRune(value, 0)
-}
-
-)
+var releaseKubeDNSLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
 func validReleaseKubeName(value string) bool {
 	return len(value) > 0 && len(value) <= 63 &&
