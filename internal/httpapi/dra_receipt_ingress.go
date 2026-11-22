@@ -19,20 +19,20 @@ import (
 
 const (
 	draReceiptIngestPath = "/internal/v1/dra/node-unprepare-receipts"
-	maxDRAReceiptBody = 64 << 10
+	maxDRAReceiptBody    = 64 << 10
 )
 
 // DRAReceiptIngestGrant independently binds a verified SPIFFE driver identity
 // to exactly one cluster, signer, driver and node. A tenant or Project grant
 // alone must never authorize custom NodeUnprepare receipt ingestion.
 type DRAReceiptIngestGrant struct {
-	Subject string
-	TenantID string
-	Service string
+	Subject   string
+	TenantID  string
+	Service   string
 	ClusterID string
-	SourceID string
-	Driver string
-	NodeName string
+	SourceID  string
+	Driver    string
+	NodeName  string
 }
 
 var ErrDRAReceiptIngressDenied = errors.New("DRA receipt source identity is not authorized")
@@ -111,9 +111,9 @@ type DRAReceiptRestrictedJournal interface {
 
 type DRAReceiptIngestDependencies struct {
 	Authenticator WorkloadAuthenticator
-	Authorizer DRAReceiptIngestAuthorizer
-	Resolver DRAReceiptEvidenceResolver
-	Journal DRAReceiptRestrictedJournal
+	Authorizer    DRAReceiptIngestAuthorizer
+	Resolver      DRAReceiptEvidenceResolver
+	Journal       DRAReceiptRestrictedJournal
 }
 
 type draReceiptIngestHandler struct {
@@ -200,7 +200,7 @@ func readDRASignedEnvelope(w http.ResponseWriter, r *http.Request) (provider.Sig
 		return reject()
 	}
 	var envelope struct {
-		Event provider.DRAUnprepareEvent
+		Event     provider.DRAUnprepareEvent
 		Signature []byte
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
