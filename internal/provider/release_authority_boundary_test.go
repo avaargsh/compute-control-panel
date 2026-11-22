@@ -24,7 +24,8 @@ func TestReleaseCorrelationCallerSuppliedClaimAbsenceIsNotAuthority(t *testing.T
 	if err != nil {
 		t.Fatalf("structural correlation unexpectedly rejected: %v", err)
 	}
-	if got.AllocationID != candidate.Delete.AllocationID ||
+	if got.AllocationID != candidate.Create.AllocationID ||
+		got.AllocationID != candidate.ExpectedAllocationID ||
 		got.Claim.UID != prior.Claim.UID {
 		t.Fatalf("identity join changed: %+v", got)
 	}
