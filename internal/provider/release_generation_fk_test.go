@@ -17,8 +17,9 @@ func TestReleaseCorrelationAcceptsSchemaCompatibleNewerDelete(t *testing.T) {
 
 func TestReleaseCorrelationRejectsUnpersistableCrossGenerationAllocationFK(t *testing.T) {
 	e := releaseCandidateFixture()
-	// This is the old synthetic fixture shape: the newer DELETE falsely
-	// claims the CREATE's old-generation Allocation FK.
+	// Recreate the old, unpersistable synthetic fixture shape explicitly:
+	// newer DELETE falsely claims the CREATE's old-generation Allocation FK.
+	e.Delete.AllocationID = e.Create.AllocationID
 	if got, err := CorrelateReleaseEvidence(e); err == nil ||
 		got != (ReleaseEvidenceCorrelation{}) {
 		t.Fatalf("non-NULL cross-generation DELETE allocation FK was accepted: %+v err=%v", got, err)
