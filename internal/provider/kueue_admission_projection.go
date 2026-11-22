@@ -136,6 +136,8 @@ func ProjectPlacementWithoutDeviceProof(e KueueJobEvidence) (AdmissionPlacementP
 		e.Pod.Namespace != e.Job.Namespace || e.PodOwnerJobUID != e.Job.UID ||
 		e.Job.UID == e.KueueWorkload.UID || e.Job.UID == e.Pod.UID ||
 		e.KueueWorkload.UID == e.Pod.UID ||
+		!conditionObserved(e.KueueEvictedCondition) ||
+		!conditionObserved(e.KueuePreemptedCondition) ||
 		evictedOrPreempted(e) ||
 		e.KueueEvictedCondition.Status == "Unknown" ||
 		e.KueuePreemptedCondition.Status == "Unknown" {
