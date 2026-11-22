@@ -43,9 +43,9 @@ func signedSameTxFixture(t *testing.T, p ReleaseCommitFence, asOf time.Time) (
 	q := provider.KueueQueueBindingEvidence{
 		Job: provider.KueueJobEvidence{
 			TenantID: p.TenantID, WorkloadID: p.WorkloadID,
-			DesiredGeneration: p.AllocationGeneration,
+			DesiredGeneration: uint64(p.AllocationGeneration),
 			JobTenantID:       p.TenantID, JobWorkloadID: p.WorkloadID,
-			JobDesiredGeneration: p.AllocationGeneration,
+			JobDesiredGeneration: uint64(p.AllocationGeneration),
 			Job:                  job, Pod: pod, PodOwnerJobUID: job.UID,
 			PodScheduled: true, PodNodeName: "gpu-node-a",
 			KueueWorkload: provider.KubernetesResourceRef{
@@ -72,7 +72,7 @@ func signedSameTxFixture(t *testing.T, p ReleaseCommitFence, asOf time.Time) (
 			ID: p.CreateOperationID, TenantID: p.TenantID, WorkloadID: p.WorkloadID,
 			AllocationID: p.AllocationID, ProviderID: p.ProviderID,
 			IdempotencyKey: "test-create", RequestDigest: "sha256:" + strings.Repeat("b", 64),
-			Generation: p.AllocationGeneration, Version: p.CreateOperationVersion,
+			Generation: uint64(p.AllocationGeneration), Version: uint64(p.CreateOperationVersion),
 			Kind: operation.Create, Status: operation.Succeeded,
 			ProviderResourceID: p.TargetResourceID, ProviderResourceUID: p.TargetResourceUID,
 		},
@@ -80,7 +80,7 @@ func signedSameTxFixture(t *testing.T, p ReleaseCommitFence, asOf time.Time) (
 			ID: p.DeleteOperationID, TenantID: p.TenantID, WorkloadID: p.WorkloadID,
 			ProviderID: p.ProviderID, IdempotencyKey: "test-delete",
 			RequestDigest: "sha256:" + strings.Repeat("c", 64),
-			Generation:    p.DeleteGeneration, Version: p.DeleteOperationVersion,
+			Generation: uint64(p.DeleteGeneration), Version: uint64(p.DeleteOperationVersion),
 			Kind: operation.Delete, Status: operation.Succeeded,
 			TargetResourceID: p.TargetResourceID, TargetResourceUID: p.TargetResourceUID,
 		},
@@ -109,7 +109,7 @@ func signedSameTxFixture(t *testing.T, p ReleaseCommitFence, asOf time.Time) (
 	}
 	candidate.ProviderAbsence = operation.Observation{
 		OperationID: p.DeleteOperationID, TenantID: p.TenantID, WorkloadID: p.WorkloadID,
-		ProviderID: p.ProviderID, DesiredGeneration: p.DeleteGeneration,
+		ProviderID: p.ProviderID, DesiredGeneration: uint64(p.DeleteGeneration),
 		Result: operation.TargetAbsent, TargetResourceID: p.TargetResourceID,
 		TargetResourceUID: p.TargetResourceUID,
 		ResourceVersion:   "delete-rv-5", ObservedAt: asOf.Add(-time.Minute),
