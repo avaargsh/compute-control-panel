@@ -117,6 +117,52 @@ func TestProjectAdmissionWithoutPlacementRejectsContradictoryPodEvidence(t *test
 // correlation (#98) must not reinterpret admitted/reserved quota as a
 // previously placed, device-assigned Allocation. Even fabricated later Pod,
 // quota and Claim-clear observations do not upgrade this historical stage.
+// Admission is not a positive state if native Kueue has simultaneously
+// reported preemption, eviction, or an unknown transition. Such snapshots
+// must not be rendered as healthy admitted capacity even if quota is still
+// marked reserved in this non-transactional read.
+func TestProjectAdmissionWithoutPlacementRejectsPreemptionOrUnknown(t *testing.T) {
+	cases := []struct {
+		name string
+		change func(*KueueJobEvidence)
+	}{
+		{"evicted boolean", func(e *KueueJobEvidence) {
+			e.KueueEvicted = true
+			e.KueueEvictedCondition = KueueConditionEvidence{Status: "True", Reason: "Preempted"}
+		}},
+		{"preempted boolean", func(e *KueueJobEvidence) {
+			e.KueuePreempted = true
+			e.KueuePreemptedCondition = KueueConditionEvidence{Status: "True", Reason: "InCohortReclamation"}
+		}},
+		{"unknown eviction", func(e *KueueJobEvidence) {
+			e.KueueEvictedCondition = KueueConditionEvidence{Status: "Unknown"}
+		}},
+		{"unknown preemption", func(e *KueueJobEvidence) {
+			e.KueuePreemptedCondition = KueueConditionEvidence{Status: "Unknown"}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := kueueEvidenceFixture()
+			e.Pod = KubernetesResourceRef{}
+			e.PodOwnerJobUID = ""
+			e.PodScheduled = false
+			e.PodNodeName = ""
+			tc.change(&e)
+			// Assess only classifies structural placement. The projection
+			// must independently refuse unsafe preemption evidence.
+			stage, err := AssessKueueJobObservation(e)
+			if err != nil || stage != KueueAdmitted {
+				t.Fatalf("fixture did not reproduce admission condition: stage=%s err=%v", stage, err)
+			}
+			got, err := ProjectAdmissionWithoutPlacement(e)
+			if !errors.Is(err, ErrInvalidKueueObservation) || got != (AdmissionPlacementProjection{}) {
+				t.Fatalf("ambiguous or preempted snapshot reported admission: %+v err=%v", got, err)
+			}
+		})
+	}
+}
+
 func TestAdmittedUnplacedPodCannotBeSplicedIntoReleaseEvidence(t *testing.T) {
 	candidate := releaseCandidateFixture()
 	job := &candidate.PriorQueue.Job
