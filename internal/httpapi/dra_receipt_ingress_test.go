@@ -55,6 +55,11 @@ func draReceiptTestPrincipal() WorkloadPrincipal {
 	return WorkloadPrincipal{Subject: draReceiptTestSubject, TenantID: "platform", Service: "dra-node-driver"}
 }
 
+func draReceiptTestTLS() *tls.ConnectionState {
+	leaf := &x509.Certificate{Raw: []byte("verified-client-cert")}
+	return &tls.ConnectionState{PeerCertificates: []*x509.Certificate{leaf}, VerifiedChains: [][]*x509.Certificate{{leaf}}}
+}
+
 func draReceiptTestSigned() provider.SignedDRAUnprepare {
 	return provider.SignedDRAUnprepare{
 		Event: provider.DRAUnprepareEvent{
@@ -179,6 +184,7 @@ func TestDRAReceiptIngestRejectsClientEvidenceAndAmbiguousJSON(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/internal/v1/dra/node-unprepare-receipts", strings.NewReader(tc.body))
 			req.Header.Set("Content-Type", "application/json")
+			req.TLS = draReceiptTestTLS()
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, req)
 			if rec.Code != http.StatusBadRequest || resolver.calls != 0 || journal.calls != 0 {
@@ -195,6 +201,7 @@ func TestDRAReceiptIngestRecordsOnlyEvidenceAndFailsClosedOnDependencies(t *test
 		journal.created = created
 		req := httptest.NewRequest(http.MethodPost, "/internal/v1/dra/node-unprepare-receipts", bytes.NewReader(draReceiptTestBody(t, signed)))
 		req.Header.Set("Content-Type", "application/json")
+		req.TLS = draReceiptTestTLS()
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
 		want := http.StatusAccepted
@@ -214,6 +221,7 @@ func TestDRAReceiptIngestRecordsOnlyEvidenceAndFailsClosedOnDependencies(t *test
 	resolver.err = errors.New("trusted evidence unavailable")
 	req := httptest.NewRequest(http.MethodPost, "/internal/v1/dra/node-unprepare-receipts", bytes.NewReader(draReceiptTestBody(t, signed)))
 	req.Header.Set("Content-Type", "application/json")
+	req.TLS = draReceiptTestTLS()
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusServiceUnavailable || journal.calls != 2 {
@@ -223,6 +231,7 @@ func TestDRAReceiptIngestRecordsOnlyEvidenceAndFailsClosedOnDependencies(t *test
 	journal.err = provider.ErrDRAReceiptJournalRole
 	req = httptest.NewRequest(http.MethodPost, "/internal/v1/dra/node-unprepare-receipts", bytes.NewReader(draReceiptTestBody(t, signed)))
 	req.Header.Set("Content-Type", "application/json")
+	req.TLS = draReceiptTestTLS()
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusServiceUnavailable || journal.calls != 3 {
