@@ -121,8 +121,10 @@ func validReleaseQueueCorrelation(e ReleaseEvidenceCandidate) bool {
 		qc.ClusterQueue.UID != q.ClusterQueue.UID ||
 		qc.ClusterQueue.ResourceVersion == "" ||
 		qc.ClusterQueue.ResourceVersion != strings.TrimSpace(qc.ClusterQueue.ResourceVersion) ||
+		strings.ContainsRune(qc.ClusterQueue.ResourceVersion, 0) ||
 		qc.WorkloadListResourceVersion == "" ||
-		qc.WorkloadListResourceVersion != strings.TrimSpace(qc.WorkloadListResourceVersion) {
+		qc.WorkloadListResourceVersion != strings.TrimSpace(qc.WorkloadListResourceVersion) ||
+		strings.ContainsRune(qc.WorkloadListResourceVersion, 0) {
 		return false
 	}
 	return true
