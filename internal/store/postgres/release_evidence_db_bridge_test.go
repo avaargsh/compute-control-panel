@@ -52,6 +52,7 @@ func TestCorrelatedReleaseIdentityMustMatchDurableFence(t *testing.T) {
 		{"successor Job name", func(c *provider.ReleaseEvidenceCorrelation) { c.Job.Name = "successor" }},
 		{"successor Job namespace", func(c *provider.ReleaseEvidenceCorrelation) { c.Job.Namespace = "tenant-b" }},
 		{"missing Job resourceVersion", func(c *provider.ReleaseEvidenceCorrelation) { c.Job.ResourceVersion = "" }},
+		{"Job UID path separator", func(c *provider.ReleaseEvidenceCorrelation) { c.Job.UID = "job/uid" }},
 		{"missing Pod UID", func(c *provider.ReleaseEvidenceCorrelation) { c.Pod.UID = "" }},
 		{"Pod in other namespace", func(c *provider.ReleaseEvidenceCorrelation) { c.Pod.Namespace = "tenant-b" }},
 		{"missing Pod resourceVersion", func(c *provider.ReleaseEvidenceCorrelation) { c.Pod.ResourceVersion = "" }},
@@ -110,6 +111,16 @@ func TestCorrelatedReleaseBridgeRejectsMalformedKubernetesAndDRATokens(t *testin
 		}},
 		{"invalid Pod name", func(_ *ReleaseCommitFence, c *provider.ReleaseEvidenceCorrelation) {
 			c.Pod.Name = "pod/other"
+		}},
+		{"Job UID path separator matching durable UID", func(p *ReleaseCommitFence, c *provider.ReleaseEvidenceCorrelation) {
+			p.TargetResourceUID = "job/uid"
+			c.Job.UID = "job/uid"
+		}},
+		{"Pod UID path separator", func(_ *ReleaseCommitFence, c *provider.ReleaseEvidenceCorrelation) {
+			c.Pod.UID = "pod/uid"
+		}},
+		{"Claim UID path separator", func(_ *ReleaseCommitFence, c *provider.ReleaseEvidenceCorrelation) {
+			c.Claim.UID = "claim/uid"
 		}},
 		{"invalid Claim name", func(_ *ReleaseCommitFence, c *provider.ReleaseEvidenceCorrelation) {
 			c.Claim.Name = "claim_bad"
