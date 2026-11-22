@@ -88,4 +88,21 @@ jobs:
       - name: SIGKILL recovery repeatability
         env:
           DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
-        run: go test -race -count=3 -run '^TestSIGKILLRecoveryLeaseIsFencedBeforeInspection$' ./internal/recovery
+        run: go test -race -count=3 -run '^TestSIGKILLRecoveryLeaseIsFencedBeforeInspection ./internal/recovery
+      - name: Checkout exact PR source for admission-before-Pod regression
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6 immutable commit
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Verify exact PR source and run admission projection regressions
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse --verify HEAD)"
+          test "$actual" = "$EXPECTED_SOURCE_SHA"
+          printf 'verified_admission_projection_source_sha=%s\\n' "$actual"
+          go test -count=1 ./internal/provider -run '^(TestProjectAdmissionWithoutPlacementBeforePodCreation|TestProjectAdmissionWithoutPlacementRejectsContradictoryPodEvidence|TestProjectAdmissionWithoutPlacementRejectsPreemptionOrUnknown|TestKubernetesObservationReaderAdmittedBeforePodProjectsNotReady|TestAdmittedUnplacedPodCannotBeSplicedIntoReleaseEvidence)
