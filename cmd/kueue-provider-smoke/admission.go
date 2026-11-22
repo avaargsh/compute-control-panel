@@ -160,6 +160,14 @@ func retryableAdmissionRead(err error) bool {
 		!strings.Contains(err.Error(), "Kubernetes API returned HTTP")
 }
 
+// This disposable acceptance path later validates placement, deletion and
+// successor safety using the original Pod UID. A valid Kueue admission before
+// Pod creation is observable but is not enough to finish this specific smoke.
+// This is not a readiness requirement for the normal read-only projection.
+func admissionSmokeHasPodIdentity(p provider.AdmissionPlacementProjection) bool {
+	return p.PodUID != "" && p.PodResourceVersion != ""
+}
+
 func admissionCreate(getenv func(string) string, out io.Writer) error {
 	adapter, err := openAdmissionAdapter(getenv)
 	if err != nil {
@@ -183,10 +191,10 @@ func admissionCreate(getenv func(string) string, out io.Writer) error {
 			return errors.New("pod was node-bound; admission was not kept separate from placement")
 		} else if collected.Stage == provider.KueueAdmitted {
 			projected, err = provider.ProjectAdmissionWithoutPlacement(collected.Evidence)
-			if err == nil {
+			if err == nil && admissionSmokeHasPodIdentity(projected) {
 				break
 			}
-			if collected.Evidence.Pod.UID != "" {
+			if err != nil && collected.Evidence.Pod.UID != "" {
 				return fmt.Errorf("admitted pod was not an unplaced projection: %w", err)
 			}
 		}
