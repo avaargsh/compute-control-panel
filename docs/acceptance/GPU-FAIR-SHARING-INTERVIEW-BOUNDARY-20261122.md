@@ -36,6 +36,39 @@ go test ./internal/provider -count=1
 These are synthetic observation fixtures, not proof that two live ClusterQueues
 actually borrowed/reclaimed GPU quota.
 
+## Disposable real-controller Cohort test added (verification pending)
+
+`scripts/kueue_cohort_kind_smoke.sh` is now sourced after the existing
+Kueue v0.19.6 / Kubernetes 1.34 disposable-kind suite. It is a *new*
+acceptance fixture, not an already passed test. The fixture uses the pinned
+**v1beta1 `spec.cohort`** API; do not substitute the newer v1beta2
+`spec.cohortName` field.
+
+Two distinct namespaces, LocalQueues and ClusterQueues share one Cohort,
+each with 100m CPU nominal quota. A begins at 50m, B starts at 100m
+then admits a 50m lower-priority Job by borrowing A's unused quota.
+A submits a higher-priority 50m Job; A's reclaim policy must cause the
+borrowed B Job's *native Kueue Workload* to report
+`Evicted=True / Preempted=True / InCohortReclamation`,
+`QuotaReserved=False`, and `Admitted=False`.
+The fixture also requires the A reclaim Job to be admitted,
+the original A/B nominal Jobs to remain admitted, and the evicted
+borrower's Pods to disappear. Every observation is tied to the
+Job/Workload UID; assertions fail closed rather than being skipped.
+
+The CPU requests are intentionally small so this test exercises Kueue
+**quota policy without physical GPU hardware**. The runtime output
+explicitly marks `gpu_physical_release_verified=false`,
+`allocation_released=false`, and `cost_final=false`.
+It also does not prove CCP's own controller invoked the reclaim.
+
+Required evidence before counting as passed: automatic **Kueue kind smoke**
+workflow at the latest PR HEAD, successful shell syntax + controller run,
+and a `cohort_acceptance` output containing native UID/reason evidence.
+An earlier successful v0.19.6 kind run at SHA
+`3f216af8884c225e923ff8f09ce2f315397b9d58` does **not**
+cover the new fixture.
+
 ## Minimum real-cluster acceptance still outstanding
 
 For a disposable cluster whose tested Kueue version supports the policies,
@@ -71,8 +104,7 @@ extended resource name, DRA/device-plugin mode, and node availability.
 
 This PR is a read-only projection compatibility fix. It does not enable
 preemption policies, provision quota, perform a reclaim, change billing,
-or claim live physical-GPU tests. Existing same-ClusterQueue disposable-kind
-smoke remains separate from the unimplemented two-tenant cohort acceptance.
+or claim live physical-GPU tests. Existing same-ClusterQueue smoke and the newly added disposable CPU Cohort fixture are independent of full 16-GPU physical acceptance.
 
 Upstream compatibility references:
 - https://kueue.sigs.k8s.io/docs/concepts/preemption/
