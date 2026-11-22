@@ -58,7 +58,7 @@ func TestProjectAdmissionWithoutPlacementBeforePodCreation(t *testing.T) {
 	}
 }
 
-func TestProjectAdmissionWithoutPlacementRejectsPlacementAndMissingPod(t *testing.T) {
+func TestProjectAdmissionWithoutPlacementRejectsContradictoryPodEvidence(t *testing.T) {
 	cases := []struct {
 		name   string
 		change func(*KueueJobEvidence)
@@ -72,6 +72,12 @@ func TestProjectAdmissionWithoutPlacementRejectsPlacementAndMissingPod(t *testin
 		{name: "absent pod with scheduled flag", change: func(e *KueueJobEvidence) {
 			e.Pod = KubernetesResourceRef{}
 			e.PodOwnerJobUID = ""
+			e.PodScheduled = true
+			e.PodNodeName = ""
+		}},
+		{name: "partially observed pod without UID", change: func(e *KueueJobEvidence) {
+			e.Pod.UID = ""
+			e.PodScheduled = false
 			e.PodNodeName = ""
 		}},
 		{name: "quota not reserved", change: func(e *KueueJobEvidence) {
