@@ -57,7 +57,7 @@ func (h *observationReadHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		writeWorkloadAPIError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Only GET is supported")
 		return
 	}
-	if r.URL.RawQuery != "" {
+	if r.URL.RawQuery != "" || r.URL.ForceQuery {
 		writeWorkloadAPIError(w, http.StatusBadRequest, "INVALID_QUERY", "Query parameters are not supported")
 		return
 	}

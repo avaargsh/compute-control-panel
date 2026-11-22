@@ -1437,3 +1437,6 @@ echo "PASS: disposable CPU-only Kueue quota-denial/QuotaReserved/Admitted, exact
 # Exercise independent per-tenant Kueue DRA device-count quota and readmission.
 # This is disposable API evidence only, not authenticated GPU release.
 bash scripts/kueue_dra_quota_kind_smoke.sh
+# Independent upstream Kueue CPU-quota Cohort borrowing/reclaim acceptance.
+# This is not physical GPU release or CCP provider write evidence.
+. scripts/kueue_cohort_kind_smoke.sh
