@@ -164,6 +164,7 @@ func TestObservationReadShowsStaleNotGreen(t *testing.T) {
 		t.Fatalf("expired source shown as green: %d %s", w.Code, w.Body.String())
 	}
 }
+
 // Even an empty literal '?' is query syntax; scope is server-owned and
 // must not be interpreted differently by proxies or downstream services.
 func TestObservationReadRejectsExplicitEmptyQuery(t *testing.T) {
