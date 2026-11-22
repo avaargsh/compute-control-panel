@@ -56,8 +56,21 @@ func draReceiptTestPrincipal() WorkloadPrincipal {
 }
 
 func draReceiptTestTLS() *tls.ConnectionState {
-	leaf := &x509.Certificate{Raw: []byte("verified-client-cert")}
+	leaf := &x509.Certificate{Raw: []byte("verified-client-cert"), URIs: []*url.URL{{
+		Scheme: "spiffe", Host: "example.org", Path: "/ns/dra/sa/driver",
+	}}}
 	return &tls.ConnectionState{PeerCertificates: []*x509.Certificate{leaf}, VerifiedChains: [][]*x509.Certificate{{leaf}}}
+}
+
+func draReceiptSPIFFEAuthenticator(t *testing.T) WorkloadAuthenticator {
+	t.Helper()
+	auth, err := NewSPIFFEWorkloadAuthenticator("example.org", &testWorkloadIdentityResolver{
+		expected: draReceiptTestSubject, principal: draReceiptTestPrincipal(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return auth
 }
 
 func draReceiptTestSigned() provider.SignedDRAUnprepare {
@@ -194,7 +207,7 @@ func TestDRAReceiptIngestRequiresVerifiedSPIFFEIdentityAndExactSource(t *testing
 }
 
 func TestDRAReceiptIngestRejectsClientEvidenceAndAmbiguousJSON(t *testing.T) {
-	h, resolver, journal := draReceiptTestHandler(t, draReceiptTestAuthenticator{principal: draReceiptTestPrincipal()})
+	h, resolver, journal := draReceiptTestHandler(t, draReceiptSPIFFEAuthenticator(t))
 	payload := string(draReceiptTestBody(t, draReceiptTestSigned()))
 	for _, tc := range []struct{ name, body string }{
 		{"caller-supplied allocation evidence", strings.TrimSuffix(payload, "}") + ",\"candidate\":{\"allocation_id\":\"forged\"}}"},
@@ -216,7 +229,7 @@ func TestDRAReceiptIngestRejectsClientEvidenceAndAmbiguousJSON(t *testing.T) {
 }
 
 func TestDRAReceiptIngestRecordsOnlyEvidenceAndFailsClosedOnDependencies(t *testing.T) {
-	h, resolver, journal := draReceiptTestHandler(t, draReceiptTestAuthenticator{principal: draReceiptTestPrincipal()})
+	h, resolver, journal := draReceiptTestHandler(t, draReceiptSPIFFEAuthenticator(t))
 	signed := draReceiptTestSigned()
 	for i, created := range []bool{true, false} {
 		journal.created = created

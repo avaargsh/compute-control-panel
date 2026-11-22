@@ -127,6 +127,14 @@ type draReceiptIngestHandler struct {
 // This provides an evidence-only transport boundary; it does not establish
 // that a real DRA driver executed NodeUnprepareResources or release a GPU.
 func NewDRAReceiptIngestHandler(deps DRAReceiptIngestDependencies) (http.Handler, error) {
+	// An arbitrary Authenticator could claim a Subject unrelated to the
+	// TLS peer. Only the built-in SPIFFE implementation checks the verified
+	// URI SAN against the independently resolved directory Subject.
+	identity, ok := deps.Authenticator.(*SPIFFEWorkloadAuthenticator)
+	if !ok || identity == nil || identity.trustDomain == "" ||
+		missingProviderManagementDependency(identity.resolver) {
+		return nil, errors.New("DRA receipt ingress requires the verified SPIFFE workload authenticator")
+	}
 	if missingProviderManagementDependency(deps.Authenticator) ||
 		missingProviderManagementDependency(deps.Authorizer) ||
 		missingProviderManagementDependency(deps.Resolver) ||
