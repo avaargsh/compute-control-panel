@@ -228,6 +228,10 @@ func TestConsoleAuthRejectsInvalidConfigAndUnsafeRoutes(t *testing.T) {
 	if _, err := NewHandler(cfg, nil); err == nil {
 		t.Fatal("nil observation reader accepted")
 	}
+	var typedNilReader *testReader
+	if _, err := NewHandler(cfg, typedNilReader); err == nil {
+		t.Fatal("typed-nil observation reader accepted")
+	}
 	cases := []struct {
 		name   string
 		change func(*Config)
