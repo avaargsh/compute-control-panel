@@ -36,13 +36,26 @@ go test ./internal/provider -count=1
 These are synthetic observation fixtures, not proof that two live ClusterQueues
 actually borrowed/reclaimed GPU quota.
 
-## Disposable real-controller Cohort test added (verification pending)
+## Disposable real-controller Cohort test — first controller pass verified
 
 `scripts/kueue_cohort_kind_smoke.sh` is now sourced after the existing
-Kueue v0.19.6 / Kubernetes 1.34 disposable-kind suite. It is a *new*
-acceptance fixture, not an already passed test. The fixture uses the pinned
-**v1beta1 `spec.cohort`** API; do not substitute the newer v1beta2
-`spec.cohortName` field.
+Kueue v0.19.6 / Kubernetes 1.34 disposable-kind suite. The fixture
+**writes** the legacy `v1beta1 spec.cohort` API and **reads back** the
+served `v1beta2 spec.cohortName` representation; a real Actions failure
+at commit `c9ad4d9` proved these fields cannot be interchanged.
+
+**First passed real-controller smoke:** GitHub Actions
+[#44984809622](https://github.com/avaargsh/compute-control-panel/actions/runs/44984809622),
+reported PR HEAD `cf6e838ab157604938f4227846cfdb4f2fbd34f1`,
+with native `cohort_acceptance` evidence. This run's source checkout,
+however, was the GitHub PR synthetic merge SHA
+`e5a2545b4a3dd3d67ab59bd8945777d59445256f`, not the literal
+PR HEAD. That source identity difference is a **distinct outstanding
+gate** for exact-head reproducibility, not a reason to erase the
+successful controller evidence. The workflow now pins
+`github.event.pull_request.head.sha || github.sha` and asserts
+`git rev-parse HEAD` equality; that new workflow needs its own
+successful latest-HEAD run.
 
 Two distinct namespaces, LocalQueues and ClusterQueues share one Cohort,
 each with 100m CPU nominal quota. A begins at 50m, B starts at 100m
@@ -62,12 +75,15 @@ explicitly marks `gpu_physical_release_verified=false`,
 `allocation_released=false`, and `cost_final=false`.
 It also does not prove CCP's own controller invoked the reclaim.
 
-Required evidence before counting as passed: automatic **Kueue kind smoke**
-workflow at the latest PR HEAD, successful shell syntax + controller run,
-and a `cohort_acceptance` output containing native UID/reason evidence.
-An earlier successful v0.19.6 kind run at SHA
-`3f216af8884c225e923ff8f09ce2f315397b9d58` does **not**
-cover the new fixture.
+Evidence from the first passing controller test:
+`quota_borrowing_observed=true`,
+`preempted_reason=InCohortReclamation`,
+`borrowed_workload_uid=27903bb5-02b1-4630-9f31-82f6d131ae4e`,
+and `reclaimed_workload_uid=34e2536b-e6fa-48f3-8f95-702f085bacea`.
+The test does not attest actual GPU allocation or release; no `READY`
+or physical `RELEASED` promotion follows. **For merge:** confirm a
+new exact-checkout HEAD with successful shell syntax, Go/race and
+controller-run evidence; independently review the diff.
 
 ## Minimum real-cluster acceptance still outstanding
 
@@ -102,9 +118,12 @@ extended resource name, DRA/device-plugin mode, and node availability.
 
 ## Scope
 
-This PR is a read-only projection compatibility fix. It does not enable
-preemption policies, provision quota, perform a reclaim, change billing,
-or claim live physical-GPU tests. Existing same-ClusterQueue smoke and the newly added disposable CPU Cohort fixture are independent of full 16-GPU physical acceptance.
+This PR fixes a read-only projection and adds a **disposable CPU-only
+controller acceptance fixture**. The fixture configures its own disposable
+Kueue preemption policy, but does not change production policy, create
+CCP provider writes, mutate billing, or claim physical-GPU results.
+Same-ClusterQueue smoke and the CPU Cohort fixture do not replace
+the separate 16-GPU physical acceptance.
 
 Upstream compatibility references:
 - https://kueue.sigs.k8s.io/docs/concepts/preemption/
