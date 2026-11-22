@@ -23,6 +23,7 @@ on:
       - 'scripts/dra_example_kind_smoke.sh'
       - 'scripts/kueue_dra_quota_kind_smoke.sh'
       - 'scripts/kueue_preemption_kind_smoke.sh'
+      - 'scripts/kueue_cohort_kind_smoke.sh'
       - 'cmd/kueue-observe/**'
       - 'cmd/kueue-provider-smoke/**'
       - 'internal/provider/kueue_*.go'
