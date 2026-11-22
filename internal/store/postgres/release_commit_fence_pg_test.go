@@ -200,6 +200,49 @@ func TestReleaseCommitFenceMatchesLivePostgresGenerationAndUID(t *testing.T) {
 			t.Fatalf("workload lock remained unavailable after rollback: %v", err)
 		}
 	})
+	// A contending release preflight must honor its Activity/HTTP Context
+	// deadline rather than lingering behind another transaction's lock.
+	// The deadline returns only a fail-closed observation, never RELEASED.
+	t.Run("blocked preflight obeys context deadline and safely recovers", func(t *testing.T) {
+		holder, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer holder.Rollback()
+		var version int64
+		if err := holder.QueryRowContext(ctx,
+			`SELECT version FROM public.compute_workloads
+			 WHERE tenant_id=$1 AND workload_id=$2 FOR UPDATE`,
+			tenant, workload).Scan(&version); err != nil {
+			t.Fatalf("holder did not lock workload: %v", err)
+		}
+		contender, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer contender.Rollback()
+		deadlineCtx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
+		defer cancel()
+		if err := ValidateReleaseCommitFence(deadlineCtx, contender, want); !errors.Is(err, ErrReleaseCommitFence) {
+			t.Fatalf("lock-blocked preflight must fail closed: %v", err)
+		}
+		if !errors.Is(deadlineCtx.Err(), context.DeadlineExceeded) {
+			t.Fatalf("preflight did not honor the lock-wait deadline: %v", deadlineCtx.Err())
+		}
+		// Context cancellation can retire the pgx connection. Rollback may
+		// surface a driver cleanup error rather than sql.ErrTxDone; it is
+		// neither evidence of a committed transaction nor a release effect.
+		// Require a fresh successful preflight after releasing the holder.
+		_ = contender.Rollback()
+		if err := holder.Rollback(); err != nil {
+			t.Fatalf("holder rollback: %v", err)
+		}
+		// Recovery is a new read-only preflight after the blocking
+		// transaction exits; no release writer or second effect is invoked.
+		if err := check(want); err != nil {
+			t.Fatalf("unchanged durable snapshot rejected after deadline: %v", err)
+		}
+	})
 	var allocationPhase, workloadPhase string
 	if err := db.QueryRowContext(ctx, `SELECT a.phase,w.observed_phase
         FROM public.compute_allocations a
