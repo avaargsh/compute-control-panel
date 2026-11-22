@@ -155,9 +155,24 @@ cohort_evicted() {
     any(.status.conditions[]?; .type == "QuotaReserved" and .status == "False") and
     any(.status.conditions[]?; .type == "Admitted" and .status == "False")' >/dev/null
 }
+cohort_owned_pod_uid() {
+  kubectl -n "$1" get pods -o json | jq -er --arg job_uid "$2" '
+    [.items[] | select(any(.metadata.ownerReferences[]?;
+      .kind == "Job" and .controller == true and .uid == $job_uid))
+      | .metadata.uid]
+    | if length == 1 and .[0] != "" then .[0] else empty end'
+}
+cohort_pod_observed() {
+  cohort_owned_pod_uid "$1" "$2" >/dev/null
+}
 cohort_pods_gone() {
-  kubectl -n "$1" get pods -o json | jq -e --arg uid "$2" '
-    [.items[] | select(.metadata.labels["batch.kubernetes.io/controller-uid"] == $uid)]
+  kubectl -n "$1" get pods -o json | jq -e --arg uid "$2" --arg pod_uid "$3" '
+    [.items[] | select(
+      .metadata.uid == $pod_uid or
+      .metadata.labels["batch.kubernetes.io/controller-uid"] == $uid or
+      any(.metadata.ownerReferences[]?;
+        .kind == "Job" and .controller == true and .uid == $uid)
+    )]
     | length == 0' >/dev/null
 }
 
@@ -171,11 +186,16 @@ cohort_wait "B base admitted" cohort_admitted ccp-cohort-b "$b_base" ccp-cohort-
 cohort_create_job ccp-cohort-b ccp-cohort-b-borrow 50m ccp-cohort-low
 b_borrow="$(cohort_uid ccp-cohort-b ccp-cohort-b-borrow)"
 cohort_wait "B borrow admitted" cohort_admitted ccp-cohort-b "$b_borrow" ccp-cohort-b
+# A later absence check is not proof of Pod teardown unless the same Job
+# actually owned a Pod beforehand. Capture the immutable original Pod UID.
+cohort_wait "B borrowed Job actually created an owner-linked Pod" cohort_pod_observed ccp-cohort-b "$b_borrow"
+b_borrow_pod_uid="$(cohort_owned_pod_uid ccp-cohort-b "$b_borrow")"
+[[ -n "$b_borrow_pod_uid" ]] || cohort_fail "borrowed Job had no attested Pod UID"
 
 cohort_borrowed_quota_reported() {
   kubectl get clusterqueue ccp-cohort-b -o json > "$dir/cohort-b-borrowed.json" || return 1
   jq -e 'any(.status.flavorsReservation[]?.resources[]?;
-    .name == "cpu" and .total == "150m")' "$dir/cohort-b-borrowed.json" >/dev/null
+    .name == "cpu" and .total == "150m" and .borrowed == "50m")' "$dir/cohort-b-borrowed.json" >/dev/null
 }
 # Admission and ClusterQueue status are updated in separate controller passes.
 # Never assume a status snapshot is instantly consistent after Workload admission.
@@ -186,7 +206,7 @@ cohort_create_job ccp-cohort-a ccp-cohort-a-reclaim 50m ccp-cohort-high
 a_reclaim="$(cohort_uid ccp-cohort-a ccp-cohort-a-reclaim)"
 cohort_wait "B borrower evicted by cohort reclaim" cohort_evicted ccp-cohort-b "$b_borrow"
 cohort_wait "A reclaim admitted" cohort_admitted ccp-cohort-a "$a_reclaim" ccp-cohort-a
-cohort_wait "preempted B pods gone" cohort_pods_gone ccp-cohort-b "$b_borrow"
+cohort_wait "same B borrowed Pod UID deleted after preemption" cohort_pods_gone ccp-cohort-b "$b_borrow" "$b_borrow_pod_uid"
 cohort_admitted ccp-cohort-b "$b_base" ccp-cohort-b || cohort_fail "B nominal base disrupted"
 cohort_admitted ccp-cohort-a "$a_base" ccp-cohort-a || cohort_fail "A nominal base disrupted"
 
@@ -194,11 +214,12 @@ b_workload="$(cohort_workload ccp-cohort-b "$b_borrow")"
 a_workload="$(cohort_workload ccp-cohort-a "$a_reclaim")"
 jq -n --arg sha "$CCP_SMOKE_SOURCE_COMMIT" \
   --arg a_base "$a_base" --arg b_base "$b_base" \
-  --arg b "$b_borrow" --arg a "$a_reclaim" \
+  --arg b "$b_borrow" --arg a "$a_reclaim" --arg b_pod "$b_borrow_pod_uid" \
   --argjson wb "$b_workload" --argjson wa "$a_workload" '{
     source_sha:$sha, case:"Kueue-v0.19.6-CPU-Cohort",
     a_base_job_uid:$a_base, b_base_job_uid:$b_base,
     borrowed_job_uid:$b, reclaimed_job_uid:$a,
+    borrowed_pod_uid_before_reclaim:$b_pod,
     borrowed_workload_uid:$wb.metadata.uid, reclaimed_workload_uid:$wa.metadata.uid,
     preempted_reason:([ $wb.status.conditions[] |
       select(.type == "Preempted") | .reason ][0]),
@@ -207,6 +228,7 @@ jq -n --arg sha "$CCP_SMOKE_SOURCE_COMMIT" \
   }' > "$dir/cohort-acceptance.json"
 jq -e '.preempted_reason == "InCohortReclamation" and
   .borrowed_job_uid != .reclaimed_job_uid and
+  (.borrowed_pod_uid_before_reclaim | type == "string" and length > 0) and
   .borrowed_workload_uid != .reclaimed_workload_uid and
   .gpu_physical_release_verified == false and
   .allocation_released == false and .cost_final == false' "$dir/cohort-acceptance.json" >/dev/null ||
