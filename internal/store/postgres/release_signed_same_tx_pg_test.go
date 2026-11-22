@@ -20,7 +20,7 @@ import (
 
 func signedSameTxFixture(t *testing.T, p ReleaseCommitFence, asOf time.Time) (
 	provider.ReleaseEvidenceCandidate, provider.SignedDRAUnprepare,
-	*provider.DRAUnprepareVerifier,
+	*provider.DRAUnprepareVerifier, ed25519.PrivateKey,
 ) {
 	t.Helper()
 	ns, jobName, ok := strings.Cut(p.TargetResourceID, "/")
@@ -133,7 +133,7 @@ func signedSameTxFixture(t *testing.T, p ReleaseCommitFence, asOf time.Time) (
 	if err != nil { t.Fatal(err) }
 	signed := provider.SignedDRAUnprepare{Event:event,
 		Signature:ed25519.Sign(privateKey, append([]byte("CCP:DRA:NodeUnprepareResources:v1\n"), payload...))}
-	return candidate, signed, verifier
+	return candidate, signed, verifier, privateKey
 }
 
 func TestSignedRecordedAndCurrentGenerationOneTransaction(t *testing.T) {
@@ -177,7 +177,7 @@ func TestSignedRecordedAndCurrentGenerationOneTransaction(t *testing.T) {
 		p.DeleteOperationID,p.TenantID,p.WorkloadID,p.ProviderID,
 		"sha256:"+strings.Repeat("c",64),"delete-req-"+suffix,p.TargetResourceID,p.TargetResourceUID)
 	asOf := time.Now().UTC()
-	candidate,signed,verifier:=signedSameTxFixture(t,p,asOf)
+	candidate,signed,verifier,privateKey:=signedSameTxFixture(t,p,asOf)
 	probe := func(f ReleaseCommitFence, c provider.ReleaseEvidenceCandidate, s provider.SignedDRAUnprepare) error {
 		t.Helper()
 		tx,e:=db.BeginTx(ctx,&sql.TxOptions{Isolation:sql.LevelReadCommitted})
@@ -188,12 +188,92 @@ func TestSignedRecordedAndCurrentGenerationOneTransaction(t *testing.T) {
 	if e:=probe(p,candidate,signed); !errors.Is(e,provider.ErrDRAReceiptNotRecorded) {
 		t.Fatalf("signed but not journaled accepted: %v",e)
 	}
+	// A separate disposable-DBA test principal registers the exact signer.
+	// This does not represent a real driver's authenticated RPC transport.
 	_,err=db.ExecContext(ctx,"INSERT INTO public.dra_unprepare_source_keys(cluster_id,source_id,key_id,tenant_id,provider_id,driver,public_key,valid_from,valid_until,maximum_age_seconds,future_skew_seconds) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,600,30)",
 		signed.Event.ClusterID,signed.Event.SourceID,signed.Event.KeyID,p.TenantID,p.ProviderID,signed.Event.Driver,
-		// The verifier does not export key custody; a test-only copy
-		// of the exact authority key comes from signedSameTxFixture.
-		nil,asOf.Add(-time.Hour),asOf.Add(time.Hour))
-	if err==nil {t.Fatal("test source must be separately supplied, not auto-provisioned")}
-	_ = url.URL{} // compile-time placeholder until fixture returns DBA source key
-	_ = os.Getenv("DATABASE_URL")
+		privateKey.Public().(ed25519.PublicKey),asOf.Add(-time.Hour),asOf.Add(time.Hour))
+	if err!=nil { t.Fatal(err) }
+	if e:=probe(p,candidate,signed); !errors.Is(e,provider.ErrDRAReceiptNotRecorded) {
+		t.Fatalf("registered but not recorded event accepted: %v",e)
+	}
+	dsn,err:=url.Parse(os.Getenv("DATABASE_URL"))
+	if err!=nil {t.Fatal(err)}
+	dsn.User=url.UserPassword("ccp_dra_receipt_ingest","dra-ingest-ci-only")
+	journal,writerDB,err:=provider.OpenRestrictedDRAUnprepareReceiptJournal(ctx,dsn.String())
+	if err!=nil {t.Fatal(err)}
+	defer writerDB.Close()
+	if fresh,e:=journal.VerifyAndRecord(ctx,verifier,candidate,signed,asOf);e!=nil||!fresh{
+		t.Fatalf("restricted signed journal append: fresh=%t err=%v",fresh,e)
+	}
+	if e:=probe(p,candidate,signed);e!=nil {
+		t.Fatalf("matching current generation and recorded source refused: %v",e)
+	}
+	t.Run("successor Job UID rejected",func(t *testing.T){
+		bad:=p;bad.TargetResourceUID="successor-uid"
+		if e:=probe(bad,candidate,signed);!errors.Is(e,ErrReleaseCommitFence){
+			t.Fatalf("successor UID accepted: %v",e)
+		}
+	})
+	t.Run("signed but unrecorded new event rejected",func(t *testing.T){
+		other:=signed
+		other.Event.EventID="other-"+suffix
+		payload,e:=json.Marshal(other.Event)
+		if e!=nil { t.Fatal(e) }
+		other.Signature=ed25519.Sign(privateKey,append([]byte("CCP:DRA:NodeUnprepareResources:v1\n"),payload...))
+		if e:=probe(p,candidate,other);!errors.Is(e,provider.ErrDRAReceiptNotRecorded){
+			t.Fatalf("unrecorded event accepted: %v",e)
+		}
+	})
+	t.Run("tampered receipt rejected",func(t *testing.T){
+		tampered:=signed
+		tampered.Signature=append([]byte(nil),signed.Signature...)
+		tampered.Signature[0]^=0xff
+		if e:=probe(p,candidate,tampered);!errors.Is(e,provider.ErrUncorrelatedDRAUnprepare) {
+			t.Fatalf("bad signature accepted: %v",e)
+		}
+	})
+	t.Run("same transaction holds state and source-key locks",func(t *testing.T){
+		holder,e:=db.BeginTx(ctx,&sql.TxOptions{Isolation:sql.LevelReadCommitted})
+		if e!=nil { t.Fatal(e) }
+		defer holder.Rollback()
+		if e:=ValidateRecordedReleaseSameTx(ctx,holder,p,verifier,candidate,signed,asOf);e!=nil {
+			t.Fatalf("same-transaction preflight: %v",e)
+		}
+		for _,tc:=range []struct{name,query string; args []any}{
+			{"workload", "SELECT version FROM public.compute_workloads WHERE tenant_id=$1 AND workload_id=$2 FOR UPDATE NOWAIT",[]any{p.TenantID,p.WorkloadID}},
+			{"source key", "SELECT lock_token FROM public.dra_unprepare_source_keys WHERE cluster_id=$1 AND source_id=$2 AND key_id=$3 FOR KEY SHARE NOWAIT",[]any{signed.Event.ClusterID,signed.Event.SourceID,signed.Event.KeyID}},
+		} {
+			contender,e:=db.BeginTx(ctx,&sql.TxOptions{Isolation:sql.LevelReadCommitted})
+			if e!=nil {t.Fatal(e)}
+			var value int64
+			e=contender.QueryRowContext(ctx,tc.query,tc.args...).Scan(&value)
+			_ = contender.Rollback()
+			var pgErr *pgconn.PgError
+			if !errors.As(e,&pgErr)||pgErr.Code!="55P03" {
+				t.Fatalf("%s not locked through caller transaction: %v",tc.name,e)
+			}
+		}
+		if e:=holder.Rollback();e!=nil{t.Fatal(e)}
+	})
+	t.Run("revoked registered source rejects persisted receipt",func(t *testing.T){
+		_,e:=db.ExecContext(ctx,"INSERT INTO public.dra_unprepare_source_revocations(cluster_id,source_id,key_id,reason) VALUES ($1,$2,$3,'signed-same-tx-test-revocation')",
+			signed.Event.ClusterID,signed.Event.SourceID,signed.Event.KeyID)
+		if e!=nil{t.Fatal(e)}
+		if e:=probe(p,candidate,signed);!errors.Is(e,provider.ErrDRAReceiptSourceUntrusted){
+			t.Fatalf("revoked signer accepted: %v",e)
+		}
+	})
+	t.Run("superseding generation remains fail closed",func(t *testing.T){
+		mustExecOne("UPDATE public.compute_workloads SET desired_generation=3, version=version+1 WHERE tenant_id=$1 AND workload_id=$2",p.TenantID,p.WorkloadID)
+		if e:=probe(p,candidate,signed);!errors.Is(e,ErrReleaseCommitFence){
+			t.Fatalf("stale generation passed: %v",e)
+		}
+	})
+	var allocPhase,workloadPhase string
+	if e:=db.QueryRowContext(ctx,"SELECT a.phase,w.observed_phase FROM public.compute_allocations a JOIN public.compute_workloads w ON w.tenant_id=a.tenant_id AND w.workload_id=a.workload_id WHERE a.tenant_id=$1 AND a.allocation_id=$2",
+		p.TenantID,p.AllocationID).Scan(&allocPhase,&workloadPhase);e!=nil{t.Fatal(e)}
+	if allocPhase!="RELEASING"||workloadPhase!="RELEASING"{
+		t.Fatalf("read-only composite changed protected state: Allocation=%s Workload=%s",allocPhase,workloadPhase)
+	}
 }
