@@ -80,7 +80,7 @@ func signedSameTxFixture(t *testing.T, p ReleaseCommitFence, asOf time.Time) (
 			ID: p.DeleteOperationID, TenantID: p.TenantID, WorkloadID: p.WorkloadID,
 			ProviderID: p.ProviderID, IdempotencyKey: "test-delete",
 			RequestDigest: "sha256:" + strings.Repeat("c", 64),
-			Generation: uint64(p.DeleteGeneration), Version: uint64(p.DeleteOperationVersion),
+			Generation:    uint64(p.DeleteGeneration), Version: uint64(p.DeleteOperationVersion),
 			Kind: operation.Delete, Status: operation.Succeeded,
 			TargetResourceID: p.TargetResourceID, TargetResourceUID: p.TargetResourceUID,
 		},
