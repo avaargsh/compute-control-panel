@@ -65,9 +65,13 @@ borrowed B Job's *native Kueue Workload* to report
 `Evicted=True / Preempted=True / InCohortReclamation`,
 `QuotaReserved=False`, and `Admitted=False`.
 The fixture also requires the A reclaim Job to be admitted,
-the original A/B nominal Jobs to remain admitted, and the evicted
-borrower's Pods to disappear. Every observation is tied to the
-Job/Workload UID; assertions fail closed rather than being skipped.
+the original A/B nominal Jobs to remain admitted, **native Kueue CPU
+`flavorsReservation` to show `total=150m` and `borrowed=50m`**, and
+the evicted borrower's exact *previously observed* owner-linked Pod UID
+to disappear. Job/Workload/Pod identity is captured before reclaim;
+assertions fail closed rather than being skipped. This Pod-UID and
+native-borrowed-value strengthening was added *after* the first successful
+controller run and requires a fresh exact-head CI result.
 
 The CPU requests are intentionally small so this test exercises Kueue
 **quota policy without physical GPU hardware**. The runtime output
