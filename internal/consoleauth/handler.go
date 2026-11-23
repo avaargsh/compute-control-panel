@@ -195,7 +195,7 @@ func (m *Manager) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || mediaType != "application/json" || r.URL.RawQuery != "" {
+	if err != nil || mediaType != "application/json" || r.URL.RawQuery != "" || r.URL.ForceQuery {
 		http.Error(w, "invalid login request", http.StatusBadRequest)
 		return
 	}
