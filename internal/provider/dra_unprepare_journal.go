@@ -239,3 +239,16 @@ func (j *DRAUnprepareReceiptJournal) VerifyAndRecord(
 	}
 	return false, nil
 }
+
+// VerifyAndRecordRestricted is the sole interface exposed to authenticated
+// inbound driver-receipt ingress. The legacy unchecked journal constructor is
+// permitted in disposable tests but cannot acquire production ingest authority.
+func (j *DRAUnprepareReceiptJournal) VerifyAndRecordRestricted(
+	ctx context.Context, verifier *DRAUnprepareVerifier,
+	candidate ReleaseEvidenceCandidate, signed SignedDRAUnprepare, asOf time.Time,
+) (bool, error) {
+	if j == nil || j.db == nil || !j.restricted {
+		return false, ErrDRAReceiptJournalRole
+	}
+	return j.VerifyAndRecord(ctx, verifier, candidate, signed, asOf)
+}
