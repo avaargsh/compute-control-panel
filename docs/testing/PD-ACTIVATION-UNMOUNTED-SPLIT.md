@@ -1,0 +1,11 @@
+# Offline PD activation admission policy — standalone split
+
+Source: #115 Draft `33ac22204b586c6612c22f5c9f733505fb3a8897`; extracted as **unmounted** and non-actuating code on `main@563687e8023b1ffc23c02337c14effa557ef54c6`.
+
+The `internal/pdactivation` Go package provides scoped signed Permit validation and an in-process admission-review HTTP handler for an **optional future** validating webhook. The verifier checks exact JobSet identity and pre/post object delta, bounded TTL, Ed25519 trust, current independently loaded authority/revocation and the binding to the signed spec digest. Missing, stale or mismatched authority denies. It can construct a UID/RV-pinned JSON Patch **as bytes only**; it never sends a Kubernetes PATCH.
+
+No validating-webhook registration, server/TLS listener, configured independent issuer/key rotation, current authenticated AuthorityLoader, AdmissionReview webhook RBAC, production admission failurePolicy or JobSet activation exists in this split. It cannot unlock, unsuspend or otherwise modify a workload. A `NewAdmissionHandler` returned handler is **not mounted** by any CCP service here.
+
+A valid simulated AdmissionReview or permit is not a production approval or physical GPU claim. Before deployment require independently administered trust roots and issuance, signed source-revocation state, stringent webhook matching rules and `failurePolicy=Fail`, verified API-server authentication/TLS, canary and failure/timeout testing, and real Kueue JobSet integration. Only the source authority should decide when an admitted JobSet is eligible to run. Allocation, DRA driver Prepare/Unprepare, GPU release, evidence provenance and Cost FINAL remain separate fail-closed trust boundaries.
+
+**CI for this unmounted Go-only PR:** exact PR head full Go suite, `go vet ./...`, race, SIGKILL, real PostgreSQL release-source fence and evidence declaration. Kueue disposable kind is **not triggered by this package-only diff** and must not be claimed as executed. Real paired JobSet/Kueue activation, fail-closed webhook policy and physical DRA devices are separate future predeployment gates. Go unit tests validate positive and negative scoped permits, alteration, revocation, staleness, malformed payloads and prohibited PATCH mutations. These tests **do not** prove actual running validating admission.
