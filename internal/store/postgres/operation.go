@@ -271,12 +271,22 @@ func (r *Repository) ClaimOperation(ctx context.Context, tenantID, operationID s
 	if !operation.ValidLeaseTTL(ttl) {
 		return operation.Operation{}, operation.ErrInvalid
 	}
+	// Reserved PD operations are not generic provider dispatch authority.
+	// Only the independent, same-transaction PD staging lease path may claim one.
+	if strings.HasPrefix(operationID, "pd-operation-") {
+		return operation.Operation{}, operation.ErrTransition
+	}
 	return r.mutateOperation(ctx, tenantID, operationID, expectedVersion, func(o operation.Operation, now time.Time) (operation.Operation, error) {
 		return o.Claim(expectedVersion, owner, now, ttl)
 	})
 }
 
 func (r *Repository) StartOperation(ctx context.Context, tenantID, operationID string, expectedVersion uint64, owner string, fence uint64) (operation.Operation, error) {
+	// Generic Start must never bypass PD source revocation or generation fencing.
+	// StartPDStagingOperation verifies the current authority in its own DB transaction.
+	if strings.HasPrefix(operationID, "pd-operation-") {
+		return operation.Operation{}, operation.ErrTransition
+	}
 	return r.mutateOperation(ctx, tenantID, operationID, expectedVersion, func(o operation.Operation, now time.Time) (operation.Operation, error) {
 		return o.Start(expectedVersion, owner, fence, now)
 	})
