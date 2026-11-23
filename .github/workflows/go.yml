@@ -220,3 +220,16 @@ jobs:
             exit 1
           fi
           printf 'verified_release_bridge_source_sha=%s\n' "$(git rev-parse --verify HEAD)"
+      - name: Require real PostgreSQL recorded DRA receipt acceptance (no skip)
+        shell: bash
+        env:
+          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
+        run: |
+          set -euo pipefail
+          go test -count=1 -v -run '^TestRecordedDRAReceipt(SameTransactionPresenceReplayAndRevocation|RejectsUnrestrictedTestOnlyJournalIngress)$' ./internal/provider | tee dra-receipt-reader-pg.log
+          grep -F -- '--- PASS: TestRecordedDRAReceiptSameTransactionPresenceReplayAndRevocation' dra-receipt-reader-pg.log
+          grep -F -- '--- PASS: TestRecordedDRAReceiptRejectsUnrestrictedTestOnlyJournalIngress' dra-receipt-reader-pg.log
+          if grep -F -- '--- SKIP: TestRecordedDRAReceipt' dra-receipt-reader-pg.log; then
+            echo 'real PostgreSQL recorded receipt reader acceptance was skipped' >&2
+            exit 1
+          fi
