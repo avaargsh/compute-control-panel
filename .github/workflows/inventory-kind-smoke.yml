@@ -1,0 +1,44 @@
+name: Kubernetes inventory real-kind L2 (no GPU evidence)
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/inventory-kind-smoke.yml'
+      - 'scripts/kubeinventory_kind_smoke.sh'
+      - 'internal/kubeinventory/**'
+      - 'internal/observation/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  disposable-kind-inventory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6 immutable commit
+        with:
+          # Test the exact PR head; workflow_dispatch uses the selected ref.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6 immutable commit
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - name: Assert patched Go toolchain
+        run: |
+          test "$(go env GOVERSION)" = "go1.27.4"
+          go version
+      - name: Install kind v0.30.0
+        run: |
+          go install sigs.k8s.io/kind@v0.30.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Check shell syntax
+        run: bash -n scripts/kubeinventory_kind_smoke.sh
+      - name: Real Kubernetes node inventory and RBAC acceptance
+        env:
+          CCP_DISPOSABLE_KIND_SMOKE: '1'
+        run: bash scripts/kubeinventory_kind_smoke.sh
