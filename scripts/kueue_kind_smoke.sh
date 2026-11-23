@@ -1437,6 +1437,27 @@ echo "PASS: disposable CPU-only Kueue quota-denial/QuotaReserved/Admitted, exact
 # Exercise independent per-tenant Kueue DRA device-count quota and readmission.
 # This is disposable API evidence only, not authenticated GPU release.
 bash scripts/kueue_dra_quota_kind_smoke.sh
+# Separate real JobSet v0.13.0 controller acceptance on a disposable kind.
+# These tests assert one paired Kueue Workload / two DRA PodSets and a
+# fail-closed AdmissionGatedBy controller policy. No actual GPU or driver.
+jobset_release="v0.13.0"
+curl -fLSs --retry 3 --retry-delay 2 -o "$dir/jobset.yaml" \
+  "https://github.com/kubernetes-sigs/jobset/releases/download/$jobset_release/manifests.yaml"
+jobset_manifest_sha256="41b599b721eca22af5bcb7a1802b976c389933759aab510daeeb40afcc775a90"
+jobset_downloaded_sha256="$(sha256sum "$dir/jobset.yaml" | cut -d' ' -f1)"
+if [[ "$jobset_downloaded_sha256" != "$jobset_manifest_sha256" ]]; then
+  echo "FAIL: JobSet v0.13.0 release manifest digest changed; refuse unreviewed controller" >&2
+  exit 1
+fi
+printf 'jobset_release=%s manifest_sha256=%s source_sha=%s\n' \
+  "$jobset_release" "$jobset_downloaded_sha256" "$CCP_SMOKE_SOURCE_COMMIT"
+kubectl apply --server-side -f "$dir/jobset.yaml"
+kubectl wait --for=condition=Established crd/jobsets.jobset.x-k8s.io --timeout=300s
+kubectl wait -n jobset-system deploy/jobset-controller-manager \
+  --for=condition=Available --timeout=300s
+bash scripts/pd_jobset_dra_kind_smoke.sh
+bash scripts/pd_jobset_activation_gate_kind_smoke.sh
+
 # Independent upstream Kueue CPU-quota Cohort borrowing/reclaim acceptance.
 # This is not physical GPU release or CCP provider write evidence.
 . scripts/kueue_cohort_kind_smoke.sh
