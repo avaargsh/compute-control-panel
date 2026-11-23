@@ -349,3 +349,48 @@ func TestPDJobSetPinnedControllerDefaultsAreStrictlyNonExecutable(t *testing.T) 
 		})
 	}
 }
+
+// A UID match alone does not make an externally owned or cleanup-blocked
+// JobSet safe to adopt. OwnerReferences can trigger unrelated garbage
+// collection, and finalizers can prevent the inert resource from being
+// removed after a failed/expired staging attempt.
+func TestPDJobSetRejectsUnexpectedLifecycleOwnershipOnReadback(t *testing.T) {
+	plan := pdJobSetTestConfig()
+	req := pdJobSetTestRequest(plan)
+	a, stop := pdJobSetTestAdapter(t, &pdJobSetAPI{}, NewMemoryKueueJobBindingStore(), plan)
+	defer stop()
+	for _, tc := range []struct {
+		name string
+		key  string
+		data any
+	}{
+		{"foreign-owner", "ownerReferences", []any{map[string]any{
+			"apiVersion": "v1", "kind": "Pod", "name": "foreign",
+			"uid": "foreign-uid", "controller": true,
+		}}},
+		{"unexpected-finalizer", "finalizers", []any{"other.example.com/hold"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := json.Marshal(a.expected(req))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var object map[string]any
+			if err := json.Unmarshal(raw, &object); err != nil {
+				t.Fatal(err)
+			}
+			metadata := object["metadata"].(map[string]any)
+			metadata["uid"] = "pinned-uid"
+			metadata["resourceVersion"] = "19"
+			metadata[tc.key] = tc.data
+			wire, err := json.Marshal(object)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := parsePDJobSet(wire)
+			if err == nil && a.exact(got, req) {
+				t.Fatalf("accepted unexpected %s in lifecycle metadata", tc.key)
+			}
+		})
+	}
+}
