@@ -34,11 +34,11 @@ type AdmissionPlacementProjection struct {
 	Released                bool
 }
 
-// ProjectAdmissionWithoutPlacement records one admitted, quota-reserved
-// Workload whose Pod has a UID and no node binding. A placed Pod, a missing
-// Pod, or contradictory evidence returns no projection. The returned phase is
-// NOT_READY. It never reports the Allocation as allocated, active, READY,
-// costable, or RELEASED.
+// ProjectAdmissionWithoutPlacement records an admitted, quota-reserved
+// Workload before placement. A Pod may be absent or may have a UID without
+// a node binding; an absent Pod retains empty Pod identity fields. A placed
+// Pod or contradictory evidence returns no projection. The returned phase is
+// NOT_READY, never allocated, active, READY, costable, or RELEASED.
 func ProjectAdmissionWithoutPlacement(e KueueJobEvidence) (AdmissionPlacementProjection, error) {
 	reject := func() (AdmissionPlacementProjection, error) {
 		return AdmissionPlacementProjection{}, ErrInvalidKueueObservation
@@ -51,14 +51,29 @@ func ProjectAdmissionWithoutPlacement(e KueueJobEvidence) (AdmissionPlacementPro
 		e.KueuePodSetAssignmentsJSON == "" || e.KueueOwnerJobUID != e.Job.UID {
 		return reject()
 	}
-	if !validKubernetesRef(e.KueueWorkload) || !validKubernetesRef(e.Job) || !validKubernetesRef(e.Pod) {
+	// The reader preserves absent native conditions as explicit MISSING.
+	// Do not accept zero-value, malformed, or future-unknown condition data
+	// as proof that this admitted Workload has not been evicted/preempted.
+	if !conditionObserved(e.KueueEvictedCondition) ||
+		!conditionObserved(e.KueuePreemptedCondition) ||
+		evictedOrPreempted(e) ||
+		e.KueueEvictedCondition.Status == "Unknown" ||
+		e.KueuePreemptedCondition.Status == "Unknown" {
 		return reject()
 	}
-	if e.KueueWorkload.Namespace != e.Job.Namespace || e.Pod.Namespace != e.Job.Namespace ||
-		e.PodOwnerJobUID != e.Job.UID || e.PodScheduled || e.PodNodeName != "" {
+	podPresent := presentKubernetesRef(e.Pod)
+	if !validKubernetesRef(e.KueueWorkload) || !validKubernetesRef(e.Job) ||
+		e.KueueWorkload.Namespace != e.Job.Namespace || e.PodScheduled || e.PodNodeName != "" ||
+		e.Job.UID == e.KueueWorkload.UID {
 		return reject()
 	}
-	if e.Job.UID == e.Pod.UID || e.Job.UID == e.KueueWorkload.UID || e.Pod.UID == e.KueueWorkload.UID {
+	if podPresent {
+		if !validKubernetesRef(e.Pod) || e.Pod.Namespace != e.Job.Namespace ||
+			e.PodOwnerJobUID != e.Job.UID || e.Job.UID == e.Pod.UID ||
+			e.Pod.UID == e.KueueWorkload.UID {
+			return reject()
+		}
+	} else if e.PodOwnerJobUID != "" {
 		return reject()
 	}
 	return AdmissionPlacementProjection{
@@ -121,6 +136,8 @@ func ProjectPlacementWithoutDeviceProof(e KueueJobEvidence) (AdmissionPlacementP
 		e.Pod.Namespace != e.Job.Namespace || e.PodOwnerJobUID != e.Job.UID ||
 		e.Job.UID == e.KueueWorkload.UID || e.Job.UID == e.Pod.UID ||
 		e.KueueWorkload.UID == e.Pod.UID ||
+		!conditionObserved(e.KueueEvictedCondition) ||
+		!conditionObserved(e.KueuePreemptedCondition) ||
 		evictedOrPreempted(e) ||
 		e.KueueEvictedCondition.Status == "Unknown" ||
 		e.KueuePreemptedCondition.Status == "Unknown" {
