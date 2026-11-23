@@ -1,0 +1,30 @@
+name: Demo Console static checks
+
+on:
+  pull_request:
+    paths:
+      - 'cmd/ccp-demo/**'
+      - 'internal/demoinventory/**'
+      - 'internal/observation/**'
+      - '.github/workflows/demo-console.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  syntax-and-safety:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # pinned v6
+      - name: Check browser JavaScript syntax without npm installs
+        run: |
+          node --version
+          node --check cmd/ccp-demo/assets/app.js
+      - name: Verify permanent synthetic-only Demo banner
+        run: |
+          grep -q '模拟数据 · 非真实 GPU 监控' cmd/ccp-demo/assets/index.html
+          grep -q 'payload.data_mode !== "demo"' cmd/ccp-demo/assets/app.js
+          grep -q 'host != "127.0.0.1"' cmd/ccp-demo/main.go
+          grep -q 'No production credentials' cmd/ccp-demo/main.go

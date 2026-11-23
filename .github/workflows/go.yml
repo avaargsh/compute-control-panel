@@ -213,7 +213,7 @@ jobs:
           DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
         run: |
           set -euo pipefail
-          go test -count=1 -v -run '^TestCorrelatedReleasePreflightChecksCurrentPostgresRows ./internal/store/postgres | tee release-bridge-pg.log
+          go test -count=1 -v -run '^TestCorrelatedReleasePreflightChecksCurrentPostgresRows$' ./internal/store/postgres | tee release-bridge-pg.log
           grep -F -- '--- PASS: TestCorrelatedReleasePreflightChecksCurrentPostgresRows' release-bridge-pg.log
           if grep -F -- '--- SKIP:' release-bridge-pg.log; then
             echo 'real PostgreSQL release bridge test skipped: no evidence' >&2
