@@ -107,7 +107,7 @@ type VerifiedRelease struct {
 }
 
 func releaseSeal(encoded string) [32]byte {
-	return sha256.Sum256([]byte("ccp/pd-verified-release/v1\\x00" + encoded))
+	return sha256.Sum256([]byte("ccp/pd-verified-release/v1\x00" + encoded))
 }
 
 func validDNSName(s string) bool {
