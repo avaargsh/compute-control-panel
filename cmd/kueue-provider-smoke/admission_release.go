@@ -54,12 +54,23 @@ func observeAdmissionRelease(ctx context.Context, reader *provider.KubernetesObs
 	snapshot, snapshotErr := reader.ObserveKubernetesReleaseSnapshot(ctx, seed.Queue, p)
 	if snapshotErr == nil {
 		report["api_snapshot_complete"] = true
-		report["pod_absent"], report["quota_cleared"], report["claim_unallocated"] = true, true, true
+		report["pod_absent"], report["quota_cleared"] = true, true
 		versions["pod_list"] = snapshot.PodAbsent.PodListResourceVersion
 		versions["workload_list"] = snapshot.QuotaCleared.WorkloadListResourceVersion
 		versions["cluster_queue"] = snapshot.QuotaCleared.ClusterQueue.ResourceVersion
 		versions["local_queue"] = snapshot.QuotaCleared.LocalQueue.ResourceVersion
-		versions["resourceclaim"] = snapshot.ClaimUnallocated.CurrentClaim.ResourceVersion
+		switch {
+		case snapshot.ClaimUnallocated.CurrentClaim.UID != "" && snapshot.ClaimAbsent.PreviousClaim.UID == "":
+			report["claim_unallocated"] = true
+			versions["resourceclaim"] = snapshot.ClaimUnallocated.CurrentClaim.ResourceVersion
+		case snapshot.ClaimAbsent.PreviousClaim.UID != "" && snapshot.ClaimUnallocated.CurrentClaim.UID == "":
+			// A deleted Claim is NOT an existing, unallocated Claim.
+			report["claim_uid_absent"] = true
+			versions["resourceclaim_list"] = snapshot.ClaimAbsent.ClaimListResourceVersion
+		default:
+			report["api_snapshot_complete"] = false
+			failures["snapshot"] = "no unique Claim API observation"
+		}
 	} else {
 		failures["snapshot"] = snapshotErr.Error()
 		// Report each independent observation when a composite cannot be collected.

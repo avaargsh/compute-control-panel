@@ -271,27 +271,12 @@ func (r *Repository) ClaimOperation(ctx context.Context, tenantID, operationID s
 	if !operation.ValidLeaseTTL(ttl) {
 		return operation.Operation{}, operation.ErrInvalid
 	}
-	// A PD promotion is a durable, non-dispatchable intent, not authority to
-	// create a single provider resource. Until the paired JobSet writer is
-	// authenticated and integrated, generic workers must not lease its CREATE
-	// Operation even though the canonical journal records it as PENDING.
-	// The exact PD operation ID is assigned by PromotePDIntent and immutable.
-	if strings.HasPrefix(operationID, "pd-operation-") {
-		return operation.Operation{}, operation.ErrTransition
-	}
 	return r.mutateOperation(ctx, tenantID, operationID, expectedVersion, func(o operation.Operation, now time.Time) (operation.Operation, error) {
 		return o.Claim(expectedVersion, owner, now, ttl)
 	})
 }
 
 func (r *Repository) StartOperation(ctx context.Context, tenantID, operationID string, expectedVersion uint64, owner string, fence uint64) (operation.Operation, error) {
-	// A PD operation may only start after the independently administered
-	// source/revision fence is rechecked under the SAME PostgreSQL transaction
-	// via StartPDStagingOperation. Generic Start cannot bypass revocation even
-	// if a previous worker already obtained a valid PD lease.
-	if strings.HasPrefix(operationID, "pd-operation-") {
-		return operation.Operation{}, operation.ErrTransition
-	}
 	return r.mutateOperation(ctx, tenantID, operationID, expectedVersion, func(o operation.Operation, now time.Time) (operation.Operation, error) {
 		return o.Start(expectedVersion, owner, fence, now)
 	})

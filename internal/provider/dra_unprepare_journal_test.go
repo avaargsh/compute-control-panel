@@ -26,6 +26,16 @@ func journalReceiptFixture(t *testing.T) (*DRAUnprepareVerifier, ed25519.Private
 	return verifier, private, receipt
 }
 
+func TestDRAReceiptIngressRejectsUncheckedJournalConstructor(t *testing.T) {
+	for _, j := range []*DRAUnprepareReceiptJournal{nil, {}} {
+		newReceipt, err := j.VerifyAndRecordRestricted(context.Background(), nil,
+			ReleaseEvidenceCandidate{}, SignedDRAUnprepare{}, time.Now())
+		if !errors.Is(err, ErrDRAReceiptJournalRole) || newReceipt {
+			t.Fatalf("unchecked/test-only journal obtained ingress authority: new=%t err=%v", newReceipt, err)
+		}
+	}
+}
+
 func TestDRASignedReceiptJournalDurableReplayAndEpochFence(t *testing.T) {
 	db := openProviderPostgresDB(t)
 	journal, err := NewDRAUnprepareReceiptJournal(db)

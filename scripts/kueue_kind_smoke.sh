@@ -240,7 +240,6 @@ kubectl -n "$ns" get localqueue ccp-smoke -o name
 
 CGO_ENABLED=0 go build -trimpath -o "$dir/kueue-observe" ./cmd/kueue-observe
 CGO_ENABLED=0 go build -trimpath -o "$dir/kueue-provider-smoke" ./cmd/kueue-provider-smoke
-CGO_ENABLED=0 go build -trimpath -o "$dir/pd-jobset-provider-smoke" ./cmd/pd-jobset-provider-smoke
 set +e
 wait "$pg_boot_pid"
 pg_boot_code=$?
@@ -261,7 +260,6 @@ cat > "$dir/Dockerfile" <<'DOCKER'
 FROM scratch
 COPY kueue-observe /kueue-observe
 COPY kueue-provider-smoke /kueue-provider-smoke
-COPY pd-jobset-provider-smoke /pd-jobset-provider-smoke
 USER 65532:65532
 ENTRYPOINT ["/kueue-observe"]
 DOCKER
@@ -1439,38 +1437,6 @@ echo "PASS: disposable CPU-only Kueue quota-denial/QuotaReserved/Admitted, exact
 # Exercise independent per-tenant Kueue DRA device-count quota and readmission.
 # This is disposable API evidence only, not authenticated GPU release.
 bash scripts/kueue_dra_quota_kind_smoke.sh
-
-# M5.7 real JobSet controller integration. Unlike the existing Go HTTPS mock
-# and Kubernetes Job smoke, this executes the actual JobSet controller and
-# Kueue's single paired Workload with a simulated DRA device quota. This is
-# still NOT a physical GPU/Driver Prepare/Allocation READY/FINAL test.
-#
-# Do this AFTER the existing DRA driver/device-class mapping and quota tests:
-# a fresh JobSet operator is installed only into this disposable kind cluster.
-jobset_release="v0.13.0"
-curl -fLSs --retry 3 --retry-delay 2 -o "$dir/jobset.yaml" \
-  "https://github.com/kubernetes-sigs/jobset/releases/download/$jobset_release/manifests.yaml"
-printf 'jobset_release=%s manifest_sha256=%s\n' \
-  "$jobset_release" "$(sha256sum "$dir/jobset.yaml" | cut -d' ' -f1)"
-kubectl apply --server-side -f "$dir/jobset.yaml"
-kubectl wait --for=condition=Established crd/jobsets.jobset.x-k8s.io --timeout=300s
-kubectl wait -n jobset-system deploy/jobset-controller-manager \
-  --for=condition=Available --timeout=300s
-bash scripts/pd_jobset_dra_kind_smoke.sh
-# Fail-closed activation gate must hold even with spare paired GPU quota.
-# Feature-gate acceptance is verified against the actual JobSet+Kueue
-# controllers, not assumed from a JobSet annotation or fake HTTPS API.
-bash scripts/pd_jobset_activation_gate_kind_smoke.sh
-# Exercise the actual PDJobSetAdapter against the real Kind API using
-# the previously created staging-only ServiceAccount, not kubectl CREATE.
-bash scripts/pd_jobset_provider_kind_smoke.sh
-
-# One signed PD Intent across the SAME disposable PG16 and actual Kind API.
-# Uses a GET/CREATE-only ServiceAccount and an independently attested UID
-# binding DB login. A controlled post-POST ACK drop MUST persist UNKNOWN.
-CCP_PD_KIND_ADMIN_DSN="$binding_dsn" \
-CCP_PD_KIND_BINDING_DSN="$binding_role_dsn" \
-CCP_PD_KIND_API_URL="https://${api_host}:${api_port}" \
-CCP_PD_KIND_CA_PATH="$dir/kube-ca.crt" \
-  bash scripts/pd_jobset_pg_kind_golden_smoke.sh
-
+# Independent upstream Kueue CPU-quota Cohort borrowing/reclaim acceptance.
+# This is not physical GPU release or CCP provider write evidence.
+. scripts/kueue_cohort_kind_smoke.sh

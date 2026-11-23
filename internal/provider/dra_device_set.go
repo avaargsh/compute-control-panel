@@ -83,10 +83,18 @@ func (q DRADeviceSetQuery) validate() ([]DRAAllocatedDevice, bool) {
 	return nil, false
 }
 
+// draDeviceReadMeta deliberately avoids depending on the PD JobSet writer's
+// metadata structs. The read-only DRA inventory module must compile without
+// importing or promoting its mutating control-plane implementation.
+type draDeviceReadMeta struct {
+	kubeMeta
+	DeletionTimestamp *string `json:"deletionTimestamp"`
+}
+
 type draDeviceSetClaim struct {
-	APIVersion string       `json:"apiVersion"`
-	Kind       string       `json:"kind"`
-	Metadata   pdNativeMeta `json:"metadata"`
+	APIVersion string            `json:"apiVersion"`
+	Kind       string            `json:"kind"`
+	Metadata   draDeviceReadMeta `json:"metadata"`
 	Status     struct {
 		ReservedFor []struct {
 			APIGroup string `json:"apiGroup"`
@@ -135,7 +143,7 @@ func assessDRADeviceSetClaim(c draDeviceSetClaim, q DRAClaimQuery, want []DRAAll
 
 type draDeviceSetPod struct {
 	draPodObject
-	Metadata pdNativeMeta `json:"metadata"`
+	Metadata draDeviceReadMeta `json:"metadata"`
 }
 
 func (p draDeviceSetPod) consumer(q DRAPodClaimQuery) (string, bool) {

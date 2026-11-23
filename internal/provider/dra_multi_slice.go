@@ -36,9 +36,9 @@ type DRAMultiSliceObservation struct {
 }
 
 type draNodeRead struct {
-	APIVersion string       `json:"apiVersion"`
-	Kind       string       `json:"kind"`
-	Metadata   pdNativeMeta `json:"metadata"`
+	APIVersion string            `json:"apiVersion"`
+	Kind       string            `json:"kind"`
+	Metadata   draDeviceReadMeta `json:"metadata"`
 }
 
 func (q DRAMultiSliceQuery) validate() ([]DRAAllocatedDevice, bool) {

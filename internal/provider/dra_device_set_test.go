@@ -94,29 +94,47 @@ func TestObserveDRAPodDeviceSet(t *testing.T) {
 	}
 }
 
-func TestPDReplicaDeviceSetRequiresExactCountAndUniqueAddresses(t *testing.T) {
-	q := PDJobSetQuery{TenantID: "tenant", WorkloadID: "w", IntentID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Generation: 2, Namespace: "tenant", JobSetName: "pd", JobSetUID: "js", KueueName: "wl", KueueUID: "wluid", LocalQueue: "lq", ClusterQueue: "cq", GPUResource: "example.com/gpu", Prefill: PDPhaseQuota{1, 2}, Decode: PDPhaseQuota{1, 1}}
-	replica := func(phase string, count int) PDReplicaClaimQuery {
-		c := DRAClaimQuery{Namespace: "tenant", ClaimName: phase + "-claim", ExpectedClaimUID: phase + "-claim-uid", PodName: phase + "-pod", ExpectedPodUID: phase + "-pod-uid", Request: "gpu", Driver: "driver", Pool: "pool", Device: phase + "-gpu"}
-		d := DRAAllocatedDevice{Request: c.Request, Driver: c.Driver, Pool: c.Pool, Device: c.Device}
-		r := PDReplicaClaimQuery{Phase: phase, JobUID: phase + "-job", Pod: DRAPodClaimQuery{Claim: c, ExpectedJobUID: phase + "-job", ExpectedNodeName: "node", PodClaimAlias: "gpu", ClaimTemplateName: "template"}, Devices: []DRAAllocatedDevice{d}}
-		if count > 1 {
-			d.Device += "-2"
-			r.Devices = append(r.Devices, d)
+// The DRA reader must remain testable without importing the unmerged PD
+// JobSet writer types. Replica counts and cross-phase ownership are validated
+// in that writer's separate acceptance suite, not by this GET-only query.
+func TestDRADeviceSetQueryRejectsInvalidCompleteSet(t *testing.T) {
+	base := draTestQuery()
+	base.ShareID = ""
+	a := DRAAllocatedDevice{Request: base.Request, Driver: base.Driver, Pool: base.Pool, Device: base.Device}
+	b := a
+	b.Device = "device-b"
+	makeQuery := func() DRADeviceSetQuery {
+		return DRADeviceSetQuery{
+			Pod: DRAPodClaimQuery{
+				Claim: base, ExpectedJobUID: "job-a", ExpectedNodeName: "node-a",
+				PodClaimAlias: "gpu", ClaimTemplateName: "template-a",
+			},
+			Devices: []DRAAllocatedDevice{a, b},
 		}
-		return r
 	}
-	p, d := replica("prefill", 2), replica("decode", 1)
-	if !validPDReplicaClaims(q, []PDReplicaClaimQuery{p, d}) {
-		t.Fatal("exact multi-device pair rejected")
+	q := makeQuery()
+	devices, ok := q.validate()
+	if !ok || !reflect.DeepEqual(devices, []DRAAllocatedDevice{a, b}) {
+		t.Fatalf("exact direct device set rejected: %+v", devices)
 	}
-	p.Devices[1] = d.Devices[0]
-	if validPDReplicaClaims(q, []PDReplicaClaimQuery{p, d}) {
-		t.Fatal("second device overlaps decode")
+	cases := []struct {
+		name   string
+		change func(*DRADeviceSetQuery)
+	}{
+		{"missing pinned device", func(q *DRADeviceSetQuery) { q.Devices = q.Devices[1:] }},
+		{"duplicate address", func(q *DRADeviceSetQuery) { q.Devices[1] = q.Devices[0] }},
+		{"shared device", func(q *DRADeviceSetQuery) { q.Devices[1].ShareID = "shared" }},
+		{"wrong request", func(q *DRADeviceSetQuery) { q.Devices[1].Request = "other" }},
+		{"missing template", func(q *DRADeviceSetQuery) { q.Pod.ClaimTemplateName = "" }},
+		{"shared pinned claim", func(q *DRADeviceSetQuery) { q.Pod.Claim.ShareID = "shared" }},
 	}
-	p = replica("prefill", 2)
-	p.Devices = p.Devices[:1]
-	if validPDReplicaClaims(q, []PDReplicaClaimQuery{p, d}) {
-		t.Fatal("partial multi-device replica accepted")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate := makeQuery()
+			tc.change(&candidate)
+			if got, valid := candidate.validate(); valid || got != nil {
+				t.Fatalf("unsafe source device set accepted: %+v", got)
+			}
+		})
 	}
 }

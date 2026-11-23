@@ -68,7 +68,9 @@ func TestOutboxCrashLeaseRecoveryFencesLateACK(t *testing.T) {
 	ctx := context.Background()
 	tenant := "tenant-outbox-" + randomSuffix(t)
 	id := insertOutboxFixture(t, db, tenant, "aggregate-"+randomSuffix(t), 1)
-	first, err := repo.ClaimOutbox(ctx, tenant, "dead-worker", 40*time.Millisecond)
+	// Keep the early-claim assertion independent of variable shared CI / race
+	// runner latency. Expiry is later advanced using PostgreSQL's clock.
+	first, err := repo.ClaimOutbox(ctx, tenant, "dead-worker", time.Minute)
 	if err != nil || first.ID != id {
 		t.Fatalf("first claim %+v %v", first, err)
 	}
@@ -78,7 +80,20 @@ func TestOutboxCrashLeaseRecoveryFencesLateACK(t *testing.T) {
 	if _, err := repo.ClaimOutbox(ctx, tenant, "early-worker", time.Minute); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("active lease stolen: %v", err)
 	}
-	time.Sleep(125 * time.Millisecond)
+	// Deterministically simulate a crashed worker's expired lease in the
+	// authoritative database instead of sleeping for 125ms: the old 40ms
+	// lease could expire before the preceding wrong-owner ACK on busy CI.
+	result, err := db.ExecContext(ctx, `UPDATE compute_outbox_events
+		SET lease_expires_at=clock_timestamp() - interval '1 millisecond'
+		WHERE tenant_id=$1 AND event_id=$2 AND lease_owner='dead-worker'
+		AND delivery_state='PUBLISHING' AND attempts=$3
+		AND lease_expires_at > clock_timestamp()`, tenant, id, first.Attempts)
+	if err != nil {
+		t.Fatalf("force expired DB lease: %v", err)
+	}
+	if n, err := result.RowsAffected(); err != nil || n != 1 {
+		t.Fatalf("expected one active DB lease to expire; rows=%d err=%v", n, err)
+	}
 	second, err := repo.ClaimOutbox(ctx, tenant, "replacement", time.Minute)
 	if err != nil || second.ID != id || second.Attempts != first.Attempts+1 {
 		t.Fatalf("reclaim %+v %v", second, err)
