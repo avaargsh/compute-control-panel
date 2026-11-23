@@ -95,9 +95,19 @@ type OldNew struct {
 	New json.RawMessage
 }
 
+// VerifiedRelease is created only by VerifyGateRelease after a live
+// authority/revocation lookup. The private seal prevents external callers
+// from constructing a trusted patch token from a signed annotation alone.
+// A sealed value is NOT approval for execution without the separately
+// deployed validating admission webhook and a fresh authority lookup.
 type VerifiedRelease struct {
 	Claims
 	EncodedPermit string
+	seal [32]byte
+}
+
+func releaseSeal(encoded string) [32]byte {
+	return sha256.Sum256([]byte("ccp/pd-verified-release/v1\\x00" + encoded))
 }
 
 func validDNSName(s string) bool {
@@ -294,7 +304,7 @@ func VerifyGateRelease(ctx context.Context, pair OldNew, trust Trust,
 		state.JobSetUID != c.JobSetUID {
 		return deny()
 	}
-	return VerifiedRelease{Claims: c, EncodedPermit: encoded}, nil
+	return VerifiedRelease{Claims: c, EncodedPermit: encoded, seal: releaseSeal(encoded)}, nil
 }
 
 // GateRemovalPatch produces a five-op UID+resourceVersion+gate guarded patch,
@@ -302,7 +312,8 @@ func VerifyGateRelease(ctx context.Context, pair OldNew, trust Trust,
 // not send the patch; ONLY a separately authorized service with a deployed
 // validating admission webhook and current authority may do so.
 func GateRemovalPatch(v VerifiedRelease) ([]byte, error) {
-	if v.EncodedPermit == "" || v.JobSetUID == "" || v.JobSetResourceVersion == "" {
+	if v.EncodedPermit == "" || v.JobSetUID == "" || v.JobSetResourceVersion == "" ||
+		v.seal == ([32]byte{}) || v.seal != releaseSeal(v.EncodedPermit) {
 		return nil, ErrActivationDenied
 	}
 	// Round-trip this encoded transport to ensure it was already verified

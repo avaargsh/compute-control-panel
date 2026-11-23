@@ -315,8 +315,7 @@ func trustFixture(keys map[string]ed25519.PublicKey) Trust {
 // lookup. An arbitrary caller must not construct VerifiedRelease directly and
 // obtain an activation patch without passing VerifyGateRelease first.
 func TestGateRemovalPatchRejectsCallerFabricatedVerifiedRelease(t *testing.T) {
-	pair, signed, _, _, _ := permitFixture(t)
-	_ = pair
+	_, signed, _, _, _ := permitFixture(t)
 	raw, err := json.Marshal(signed)
 	if err != nil {
 		t.Fatal(err)
@@ -324,5 +323,20 @@ func TestGateRemovalPatchRejectsCallerFabricatedVerifiedRelease(t *testing.T) {
 	forged := VerifiedRelease{Claims: signed.Claims, EncodedPermit: string(raw)}
 	if patch, err := GateRemovalPatch(forged); !errors.Is(err, ErrActivationDenied) || len(patch) != 0 {
 		t.Fatalf("unverified caller-fabricated permit generated a JobSet patch: %s, %v", patch, err)
+	}
+}
+
+// The proof seals the original exact encoded annotation; a caller cannot
+// relabel a verified approval to an otherwise equivalent transport payload.
+func TestGateRemovalPatchRejectsModifiedVerifiedTransport(t *testing.T) {
+	pair, _, authority, keys, now := permitFixture(t)
+	verified, err := VerifyGateRelease(context.Background(), pair, trustFixture(keys),
+		func(context.Context, Claims) (Authority, error) { return authority, nil }, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verified.EncodedPermit += " "
+	if patch, err := GateRemovalPatch(verified); !errors.Is(err, ErrActivationDenied) || len(patch) != 0 {
+		t.Fatalf("changed previously verified transport generated patch: %s, %v", patch, err)
 	}
 }
