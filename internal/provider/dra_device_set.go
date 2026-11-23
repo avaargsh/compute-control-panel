@@ -92,8 +92,8 @@ type draDeviceReadMeta struct {
 }
 
 type draDeviceSetClaim struct {
-	APIVersion string       `json:"apiVersion"`
-	Kind       string       `json:"kind"`
+	APIVersion string            `json:"apiVersion"`
+	Kind       string            `json:"kind"`
 	Metadata   draDeviceReadMeta `json:"metadata"`
 	Status     struct {
 		ReservedFor []struct {
