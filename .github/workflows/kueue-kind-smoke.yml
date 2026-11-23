@@ -16,6 +16,10 @@ on:
       - 'cmd/kueue-provider-smoke/**'
       - 'internal/provider/kueue_*.go'
       - 'internal/provider/dra_*.go'
+      - 'internal/provider/pd_*.go'
+      - 'internal/pdstaging/**'
+      - 'internal/store/postgres/pd_*.go'
+      - 'cmd/pd-jobset-provider-smoke/**'
   push:
     branches: [main]
     paths:
@@ -32,6 +36,10 @@ on:
       - 'cmd/kueue-provider-smoke/**'
       - 'internal/provider/kueue_*.go'
       - 'internal/provider/dra_*.go'
+      - 'internal/provider/pd_*.go'
+      - 'internal/pdstaging/**'
+      - 'internal/store/postgres/pd_*.go'
+      - 'cmd/pd-jobset-provider-smoke/**'
   workflow_dispatch:
 
 permissions:
