@@ -68,6 +68,8 @@ type pdJobSetMeta struct {
 	DeletionTimestamp *string           `json:"deletionTimestamp,omitempty"`
 	Labels            map[string]string `json:"labels,omitempty"`
 	Annotations       map[string]string `json:"annotations,omitempty"`
+	OwnerReferences   []json.RawMessage `json:"ownerReferences,omitempty"`
+	Finalizers        []string          `json:"finalizers,omitempty"`
 }
 
 type pdJobSetReplicatedJob struct {
@@ -179,6 +181,9 @@ func (a *PDJobSetAdapter) exact(obj pdJobSetObject, req Request) bool {
 		obj.Metadata.Namespace == want.Metadata.Namespace &&
 		acceptableJobUID(obj.Metadata.UID) && obj.Metadata.ResourceVersion != "" &&
 		obj.Metadata.DeletionTimestamp == nil &&
+		// Foreign ownerReferences may garbage-collect an acknowledged JobSet;
+		// unexpected finalizers may prevent safe teardown or recovery.
+		len(obj.Metadata.OwnerReferences) == 0 && len(obj.Metadata.Finalizers) == 0 &&
 		reflect.DeepEqual(obj.Metadata.Annotations, want.Metadata.Annotations) &&
 		reflect.DeepEqual(obj.Metadata.Labels, want.Metadata.Labels) &&
 		reflect.DeepEqual(obj.Spec, want.Spec)
