@@ -21,7 +21,12 @@ class GoWorkflowCheckoutContractTests(unittest.TestCase):
         self.assertIn("Assert PR integration-tree checkout", verify)
         self.assertIn("EXPECTED_INTEGRATION_SHA: ${{ github.sha }}", verify)
         self.assertIn("refs/pull/*/merge", verify)
-        self.assertNotIn("ref: ${{ github.event.pull_request.head.sha", verify)
+        integration_before_source = verify.split(
+            "      - name: Checkout exact PR source for admission-before-Pod regression", 1
+        )[0]
+        self.assertNotIn("ref: ${{ github.event.pull_request.head.sha", integration_before_source)
+        self.assertIn("go test -race -count=1 ./...", integration_before_source)
+        self.assertIn("TestSIGKILLRecoveryLeaseIsFencedBeforeInspection", integration_before_source)
         self.assertNotIn("Require real PostgreSQL release Generation/UID fence test", verify)
 
     def test_full_verify_keeps_migrations_race_and_recovery(self):
@@ -35,6 +40,16 @@ class GoWorkflowCheckoutContractTests(unittest.TestCase):
         ):
             with self.subTest(required=required):
                 self.assertIn(required, verify)
+
+    def test_admission_focused_source_regressions_follow_merge_verification(self):
+        verify = self.integration
+        checkpoint = "      - name: Checkout exact PR source for admission-before-Pod regression"
+        self.assertIn(checkpoint, verify)
+        before, after = verify.split(checkpoint, 1)
+        self.assertIn("SIGKILL recovery repeatability", before)
+        self.assertIn("ref: ${{ github.event.pull_request.head.sha }}", after)
+        self.assertIn("TestProjectPlacementWithoutDeviceProofRejectsUnobservedConditions", after)
+        self.assertIn("TestAdmissionSmokeWaitsForPodAfterKueueAdmission", after)
 
     def test_source_job_pins_literal_head_and_is_pr_only(self):
         source = self.source
