@@ -32,21 +32,26 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6, immutable commit
         with:
-          # Do not represent synthetic PR-merge checkout as source-HEAD proof.
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Keep default pull_request merge ref; protect full-suite integration coverage.
           persist-credentials: false
-      - name: Assert exact source checkout
+      - name: Assert PR integration-tree checkout
         shell: bash
         env:
-          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_INTEGRATION_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
         run: |
           set -euo pipefail
           actual="$(git rev-parse --verify HEAD)"
-          if [[ ! "$EXPECTED_SOURCE_SHA" =~ ^[a-f0-9]{40}$ || "$actual" != "$EXPECTED_SOURCE_SHA" ]]; then
-            echo "source checkout mismatch: expected=$EXPECTED_SOURCE_SHA actual=$actual" >&2
+          if [[ ! "$EXPECTED_INTEGRATION_SHA" =~ ^[a-f0-9]{40}$ || "$actual" != "$EXPECTED_INTEGRATION_SHA" ]]; then
+            echo "integration-tree mismatch: expected=$EXPECTED_INTEGRATION_SHA actual=$actual" >&2
             exit 1
           fi
-          printf 'verified_release_bridge_source_sha=%s\n' "$actual"
+          if [[ "$EVENT_NAME" == "pull_request" && "$EVENT_REF" != refs/pull/*/merge ]]; then
+            echo "PR verify must run against refs/pull/<number>/merge, got $EVENT_REF" >&2
+            exit 1
+          fi
+          printf 'verified_integration_sha=%s\n' "$actual"
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6, immutable commit
         with:
           go-version: '1.27.4'
@@ -97,6 +102,98 @@ jobs:
         run: psql --host=127.0.0.1 --username=postgres --dbname=postgres --set=ON_ERROR_STOP=1 --file=migrations/tests/0001_compute_core_constraints.sql
       - name: Static analysis
         run: go vet ./...
+      - name: Race-enabled tests
+        env:
+          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
+        run: go test -race -count=1 ./...
+      - name: SIGKILL recovery repeatability
+        env:
+          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
+        run: go test -race -count=3 -run '^TestSIGKILLRecoveryLeaseIsFencedBeforeInspection$' ./internal/recovery
+      - name: Checkout exact PR source for admission-before-Pod regression
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6 immutable commit
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Verify exact PR source and run admission projection regressions
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse --verify HEAD)"
+          test "$actual" = "$EXPECTED_SOURCE_SHA"
+          printf 'verified_admission_projection_source_sha=%s\n' "$actual"
+          go test -count=1 ./internal/provider -run '^(TestProjectAdmissionWithoutPlacementBeforePodCreation|TestProjectAdmissionWithoutPlacementRejectsContradictoryPodEvidence|TestProjectAdmissionWithoutPlacementRejectsPreemptionOrUnknown|TestProjectPlacementWithoutDeviceProofRejectsUnobservedConditions|TestKubernetesObservationReaderAdmittedBeforePodProjectsNotReady|TestAdmittedUnplacedPodCannotBeSplicedIntoReleaseEvidence)$'
+          go test -count=1 ./cmd/kueue-provider-smoke -run '^TestAdmissionSmokeWaitsForPodAfterKueueAdmission$'
+
+  release-fence-source:
+    # Literal PR source checkout is separate from integration-tree verify.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: compute-ci
+          POSTGRES_USER: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6, immutable commit
+        with:
+          # Do not represent synthetic PR-merge checkout as source-HEAD proof.
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Assert exact source checkout for release fence
+        shell: bash
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse --verify HEAD)"
+          if [[ ! "$EXPECTED_SOURCE_SHA" =~ ^[a-f0-9]{40}$ || "$actual" != "$EXPECTED_SOURCE_SHA" ]]; then
+            echo "source checkout mismatch: expected=$EXPECTED_SOURCE_SHA actual=$actual" >&2
+            exit 1
+          fi
+          printf 'checked_out_release_fence_source_sha=%s\n' "$actual"
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6, immutable commit
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - name: Assert patched Go toolchain
+        run: |
+          test "$(go env GOVERSION)" = "go1.27.4"
+          go version
+      - name: Verify module checksums
+        run: go mod verify
+      - name: Provision dedicated database roles in disposable CI database
+        env:
+          PGPASSWORD: compute-ci
+        run: >-
+          psql --host=127.0.0.1 --username=postgres --dbname=postgres
+          --set=ON_ERROR_STOP=1
+          --command="CREATE ROLE ccp_provider_audit_owner NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
+          --command="CREATE ROLE ccp_kueue_job_binding LOGIN PASSWORD 'kueue-binding-ci-only' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
+          --command="CREATE ROLE ccp_dra_receipt_ingest LOGIN PASSWORD 'dra-ingest-ci-only' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
+      - name: Apply PostgreSQL migrations (checksummed runner, run twice for idempotency)
+        env:
+          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
+        run: |
+          go run ./cmd/migrate
+          go run ./cmd/migrate
+      - name: Validate PostgreSQL schema constraints
+        env:
+          PGPASSWORD: compute-ci
+        run: psql --host=127.0.0.1 --username=postgres --dbname=postgres --set=ON_ERROR_STOP=1 --file=migrations/tests/0001_compute_core_constraints.sql
       - name: Require real PostgreSQL release Generation/UID fence test (no skip)
         shell: bash
         env:
@@ -105,11 +202,12 @@ jobs:
           set -euo pipefail
           go test -count=1 -v -run '^TestReleaseCommitFenceMatchesLivePostgresGenerationAndUID$' ./internal/store/postgres | tee release-fence-pg.log
           grep -F -- '--- PASS: TestReleaseCommitFenceMatchesLivePostgresGenerationAndUID' release-fence-pg.log
-          if grep -F -- '--- SKIP: TestReleaseCommitFenceMatchesLivePostgresGenerationAndUID' release-fence-pg.log; then
+          if grep -F -- '--- SKIP:' release-fence-pg.log; then
             echo 'real PostgreSQL release fence test skipped: no evidence' >&2
             exit 1
           fi
-      - name: Require real PostgreSQL release bridge acceptance (no skip)
+          printf 'verified_release_fence_source_sha=%s\n' "$(git rev-parse --verify HEAD)"
+      - name: Require real PostgreSQL correlated release bridge acceptance (no skip)
         shell: bash
         env:
           DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
@@ -117,8 +215,22 @@ jobs:
           set -euo pipefail
           go test -count=1 -v -run '^TestCorrelatedReleasePreflightChecksCurrentPostgresRows$' ./internal/store/postgres | tee release-bridge-pg.log
           grep -F -- '--- PASS: TestCorrelatedReleasePreflightChecksCurrentPostgresRows' release-bridge-pg.log
-          if grep -F -- '--- SKIP: TestCorrelatedReleasePreflightChecksCurrentPostgresRows' release-bridge-pg.log; then
+          if grep -F -- '--- SKIP:' release-bridge-pg.log; then
             echo 'real PostgreSQL release bridge test skipped: no evidence' >&2
+            exit 1
+          fi
+          printf 'verified_release_bridge_source_sha=%s\n' "$(git rev-parse --verify HEAD)"
+      - name: Require real PostgreSQL recorded DRA receipt acceptance (no skip)
+        shell: bash
+        env:
+          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
+        run: |
+          set -euo pipefail
+          go test -count=1 -v -run '^TestRecordedDRAReceipt(SameTransactionPresenceReplayAndRevocation|RejectsUnrestrictedTestOnlyJournalIngress)$' ./internal/provider | tee dra-receipt-reader-pg.log
+          grep -F -- '--- PASS: TestRecordedDRAReceiptSameTransactionPresenceReplayAndRevocation' dra-receipt-reader-pg.log
+          grep -F -- '--- PASS: TestRecordedDRAReceiptRejectsUnrestrictedTestOnlyJournalIngress' dra-receipt-reader-pg.log
+          if grep -F -- '--- SKIP: TestRecordedDRAReceipt' dra-receipt-reader-pg.log; then
+            echo 'real PostgreSQL recorded receipt reader acceptance was skipped' >&2
             exit 1
           fi
       - name: Require real PostgreSQL signed-and-current release preflight (no skip)
@@ -133,11 +245,3 @@ jobs:
             echo 'signed/current same-transaction PG test was skipped: no acceptance evidence' >&2
             exit 1
           fi
-      - name: Race-enabled tests
-        env:
-          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
-        run: go test -race -count=1 ./...
-      - name: SIGKILL recovery repeatability
-        env:
-          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
-        run: go test -race -count=3 -run '^TestSIGKILLRecoveryLeaseIsFencedBeforeInspection$' ./internal/recovery

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/avaargsh/compute-control-panel/internal/operation"
+	"github.com/avaargsh/compute-control-panel/internal/provider"
 )
 
 func TestDisposableLifecycleSmokeRequestIsFixedAndValid(t *testing.T) {
@@ -160,6 +161,35 @@ func TestAdmissionRequestsStayDistinctFromOtherSmokeJobs(t *testing.T) {
 	if remove.Kind != operation.Delete || remove.OperationID == create.OperationID ||
 		remove.TargetResourceUID != "uid-admission" || remove.TargetResourceID == "" {
 		t.Fatalf("unexpected admission delete: %+v", remove)
+	}
+}
+
+// This disposable kind acceptance phase requires a real Pod UID for its
+// later placement and deletion checks. The read-only admission projection
+// intentionally permits no Pod: those two acceptance contracts must differ.
+func TestAdmissionSmokeWaitsForPodAfterKueueAdmission(t *testing.T) {
+	_, placed := placedObservationFixture()
+	e := placed.Evidence
+	e.PodScheduled = false
+	e.PodNodeName = ""
+
+	withoutPod := e
+	withoutPod.Pod = provider.KubernetesResourceRef{}
+	withoutPod.PodOwnerJobUID = ""
+	admitted, err := provider.ProjectAdmissionWithoutPlacement(withoutPod)
+	if err != nil || admitted.Stage != provider.KueueAdmitted || admitted.PodUID != "" {
+		t.Fatalf("legitimate no-Pod admission must be observable: %+v err=%v", admitted, err)
+	}
+	if admissionSmokeHasPodIdentity(admitted) {
+		t.Fatal("smoke acceptance advanced before Pod creation")
+	}
+
+	observed, err := provider.ProjectAdmissionWithoutPlacement(e)
+	if err != nil {
+		t.Fatalf("unplaced Pod projection rejected: %v", err)
+	}
+	if !admissionSmokeHasPodIdentity(observed) {
+		t.Fatalf("smoke acceptance refused a UID-pinned Pod: %+v", observed)
 	}
 }
 
