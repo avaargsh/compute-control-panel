@@ -105,7 +105,7 @@ func TestDRADeviceSetQueryRejectsInvalidCompleteSet(t *testing.T) {
 	b.Device = "device-b"
 	makeQuery := func() DRADeviceSetQuery {
 		return DRADeviceSetQuery{
-			Pod:     DRAPodClaimQuery{
+			Pod: DRAPodClaimQuery{
 				Claim: base, ExpectedJobUID: "job-a", ExpectedNodeName: "node-a",
 				PodClaimAlias: "gpu", ClaimTemplateName: "template-a",
 			},
