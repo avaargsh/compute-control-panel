@@ -44,7 +44,7 @@ func demoHandler(now func() time.Time) (http.Handler, error) {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/observations", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.RawQuery != "" {
+		if (r.URL.RawQuery != "" || r.URL.ForceQuery) {
 			http.Error(w, "Query parameters are not supported in Demo mode", http.StatusBadRequest)
 			return
 		}
@@ -82,7 +82,7 @@ func demoHandler(now func() time.Time) (http.Handler, error) {
 	})
 	mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(assets))))
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" || r.URL.RawQuery != "" {
+		if r.URL.Path != "/" || (r.URL.RawQuery != "" || r.URL.ForceQuery) {
 			http.NotFound(w, r)
 			return
 		}
