@@ -50,11 +50,20 @@ type ResourceRef struct {
 	ResourceVersion string `json:"resource_version,omitempty"`
 }
 
+// Quantity is a Kubernetes Node-reported resource quantity. It is not a
+// measured, physically free, or independently authenticated GPU device count.
+type Quantity struct {
+	ResourceName string `json:"resource_name"`
+	Capacity     string `json:"capacity"`
+	Allocatable  string `json:"allocatable"`
+}
+
 type Record struct {
 	// Scope is resolved and enforced server-side, never from browser data.
 	TenantID       string      `json:"-"`
 	ProjectID      string      `json:"-"`
 	Resource       ResourceRef `json:"resource"`
+	Quantity       *Quantity   `json:"reported_quantity,omitempty"`
 	Condition      Condition   `json:"condition"`
 	Source         string      `json:"source"`
 	SourceRevision string      `json:"source_revision,omitempty"`
@@ -68,6 +77,7 @@ type Record struct {
 type View struct {
 	ProjectID      string      `json:"project_id"`
 	Resource       ResourceRef `json:"resource"`
+	Quantity       *Quantity   `json:"reported_quantity,omitempty"`
 	Status         Status      `json:"status"`
 	ReasonCode     string      `json:"reason_code,omitempty"`
 	Message        string      `json:"message,omitempty"`
@@ -88,7 +98,7 @@ func Project(record Record, now time.Time) (View, error) {
 		return View{}, errors.New("missing observation scope, identity or clock")
 	}
 	view := View{
-		ProjectID: record.ProjectID, Resource: record.Resource, Status: StatusUnknown,
+		ProjectID: record.ProjectID, Resource: record.Resource, Quantity: record.Quantity, Status: StatusUnknown,
 		ReasonCode: record.ReasonCode, Message: record.Message,
 		Source: record.Source, SourceRevision: record.SourceRevision,
 		ObservedAt: record.ObservedAt, ExpiresAt: record.ExpiresAt,
