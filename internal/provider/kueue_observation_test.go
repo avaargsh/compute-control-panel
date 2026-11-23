@@ -18,6 +18,8 @@ func kueueEvidenceFixture() KueueJobEvidence {
 		KueueOwnerJobUID: "job-uid-a", KueueQuotaReserved: true, KueueClusterQueue: "cq-a", KueueAdmitted: true,
 		KueueQuotaCondition:        KueueConditionEvidence{Status: "True"},
 		KueueAdmissionCondition:    KueueConditionEvidence{Status: "True"},
+		KueueEvictedCondition:      KueueConditionEvidence{Status: "MISSING"},
+		KueuePreemptedCondition:    KueueConditionEvidence{Status: "MISSING"},
 		KueuePodSetAssignmentsJSON: `[{"name":"main","resourceUsage":{"cpu":"2","memory":"2Gi"}}]`,
 		Pod: KubernetesResourceRef{
 			Namespace: "tenant-a", Name: "pod-a", UID: "pod-uid-a", ResourceVersion: "103",
