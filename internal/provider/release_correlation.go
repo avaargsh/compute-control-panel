@@ -27,6 +27,15 @@ type ReleaseEvidenceCandidate struct {
 	QuotaCleared     KueueQuotaClearedObservation
 	PriorPodClaim    DRAPodClaimObservation
 	ClaimUnallocated DRAClaimUnallocatedObservation
+	// ClaimAbsent is the alternative to a still-existing unallocated Claim.
+	// It is a Kubernetes API observation, never a driver release receipt.
+	ClaimAbsent *DRAClaimUIDAbsentObservation
+
+	// ExpectedAllocationID is the historical Allocation identity the trusted
+	// durable-state caller intends to correlate. It is only a structural
+	// cross-check: callers must independently authenticate it. A newer
+	// DELETE cannot carry the older Allocation's FK under migration 0003.
+	ExpectedAllocationID string
 }
 
 // ReleaseEvidenceCorrelation contains only identities that matched across
@@ -48,16 +57,20 @@ func sameKubeResourceIdentity(a, b KubernetesResourceRef) bool {
 	return a.Namespace == b.Namespace && a.Name == b.Name && a.UID == b.UID
 }
 
-func validReleaseDeletePair(c, d operation.Operation, obs operation.Observation) bool {
+func validReleaseDeletePair(c, d operation.Operation, obs operation.Observation, expectedAllocationID string) bool {
 	if c.Validate() != nil || d.Validate() != nil ||
 		c.Kind != operation.Create ||
 		(c.Status != operation.Succeeded &&
 			!(c.Status == operation.Superseded && c.CleanupRequired)) ||
 		d.Kind != operation.Delete || d.Status != operation.Succeeded ||
-		c.ID == d.ID || c.AllocationID == "" || d.AllocationID == "" ||
+		c.ID == d.ID || c.AllocationID == "" ||
+		expectedAllocationID == "" || expectedAllocationID != strings.TrimSpace(expectedAllocationID) ||
+		strings.ContainsRune(expectedAllocationID, 0) ||
+		c.AllocationID != expectedAllocationID || d.AllocationID != "" ||
 		c.TenantID != d.TenantID || c.WorkloadID != d.WorkloadID ||
-		c.ProviderID != d.ProviderID || c.AllocationID != d.AllocationID ||
-		d.Generation < c.Generation || c.ProviderResourceID == "" ||
+		c.ProviderID != d.ProviderID ||
+		// DELETE must represent a newer desired transition than the CREATE.
+		d.Generation <= c.Generation || c.ProviderResourceID == "" ||
 		c.ProviderResourceUID == "" ||
 		d.TargetResourceID != c.ProviderResourceID ||
 		d.TargetResourceUID != c.ProviderResourceUID {
@@ -87,6 +100,12 @@ func validReleaseQueueCorrelation(e ReleaseEvidenceCandidate) bool {
 	d := e.Delete
 	qc := e.QuotaCleared
 	if !validPreviousKueueReservation(q) || q.Stage != KueuePodPlaced ||
+		// A historical node-bound Pod is not a legitimate Kueue-placed
+		// snapshot without native Admitted=True. QuotaReserved alone is
+		// insufficient, and an UNKNOWN/absent condition is not a true one.
+		!p.KueueAdmitted || p.KueueAdmissionCondition.Status != "True" ||
+		!validKueueCondition(p.KueueAdmissionCondition) ||
+		!validKueueCondition(p.KueueQuotaCondition) ||
 		p.TenantID != c.TenantID || p.WorkloadID != c.WorkloadID ||
 		p.JobTenantID != c.TenantID || p.JobWorkloadID != c.WorkloadID ||
 		p.DesiredGeneration != c.Generation ||
@@ -108,8 +127,10 @@ func validReleaseQueueCorrelation(e ReleaseEvidenceCandidate) bool {
 		qc.ClusterQueue.UID != q.ClusterQueue.UID ||
 		qc.ClusterQueue.ResourceVersion == "" ||
 		qc.ClusterQueue.ResourceVersion != strings.TrimSpace(qc.ClusterQueue.ResourceVersion) ||
+		strings.ContainsRune(qc.ClusterQueue.ResourceVersion, 0) ||
 		qc.WorkloadListResourceVersion == "" ||
-		qc.WorkloadListResourceVersion != strings.TrimSpace(qc.WorkloadListResourceVersion) {
+		qc.WorkloadListResourceVersion != strings.TrimSpace(qc.WorkloadListResourceVersion) ||
+		strings.ContainsRune(qc.WorkloadListResourceVersion, 0) {
 		return false
 	}
 	return true
@@ -131,8 +152,20 @@ func validReleaseClaimCorrelation(e ReleaseEvidenceCandidate) bool {
 		!validKubeName(d.ConsumerContainer) ||
 		!validPriorDRAAllocation(d.Claim) ||
 		d.Claim.Claim.Namespace != d.Pod.Namespace ||
-		d.Claim.PodUID != d.Pod.UID ||
-		u.PreviousClaim != d.Claim.Claim ||
+		d.Claim.PodUID != d.Pod.UID {
+		return false
+	}
+	// A deleted Claim cannot also be asserted as a still-existing,
+	// unallocated Claim. Never combine competing snapshots.
+	if e.ClaimAbsent != nil {
+		absent := e.ClaimAbsent
+		return u == (DRAClaimUnallocatedObservation{}) &&
+			absent.PreviousClaim == d.Claim.Claim &&
+			absent.ClaimListResourceVersion != "" &&
+			absent.ClaimListResourceVersion == strings.TrimSpace(absent.ClaimListResourceVersion) &&
+			!strings.ContainsRune(absent.ClaimListResourceVersion, 0)
+	}
+	if u.PreviousClaim != d.Claim.Claim ||
 		u.PreviousPodUID != d.Claim.PodUID ||
 		u.PreviousDevice != d.Claim.Device ||
 		!validKubernetesRef(u.CurrentClaim) ||
@@ -143,8 +176,9 @@ func validReleaseClaimCorrelation(e ReleaseEvidenceCandidate) bool {
 	return true
 }
 
-// CorrelateReleaseEvidence only checks same-Allocation durable CREATE/DELETE
-// identities and cross-source structural consistency, including an independent
+// CorrelateReleaseEvidence only checks the historical CREATE Allocation and a
+// newer DELETE's exact resource/operation identities, plus cross-source
+// structural consistency, including an independent
 // API observation that the historical Pod UID/name is absent. Inputs must originate
 // from separate, authenticated stores/collectors; this is not a trust
 // resolver. Even a correlated PodList absence snapshot cannot establish Pod
@@ -153,20 +187,24 @@ func validReleaseClaimCorrelation(e ReleaseEvidenceCandidate) bool {
 //
 // No backend mutation, state transition, capability grant or cost posting.
 func CorrelateReleaseEvidence(e ReleaseEvidenceCandidate) (ReleaseEvidenceCorrelation, error) {
-	if !validReleaseDeletePair(e.Create, e.Delete, e.ProviderAbsence) ||
+	if !validReleaseDeletePair(e.Create, e.Delete, e.ProviderAbsence, e.ExpectedAllocationID) ||
 		!validReleaseQueueCorrelation(e) ||
 		!validReleaseClaimCorrelation(e) {
 		return ReleaseEvidenceCorrelation{}, ErrUncorrelatedReleaseEvidence
 	}
+	claim := e.ClaimUnallocated.CurrentClaim
+	if e.ClaimAbsent != nil {
+		claim = e.ClaimAbsent.PreviousClaim
+	}
 	return ReleaseEvidenceCorrelation{
 		TenantID:          e.Delete.TenantID,
 		WorkloadID:        e.Delete.WorkloadID,
-		AllocationID:      e.Delete.AllocationID,
+		AllocationID:      e.Create.AllocationID,
 		ProviderID:        e.Delete.ProviderID,
 		DeleteOperationID: e.Delete.ID,
 		Job:               e.PriorQueue.Job.Job,
 		Pod:               e.PriorPodClaim.Pod,
-		Claim:             e.ClaimUnallocated.CurrentClaim,
-		Device:            e.ClaimUnallocated.PreviousDevice,
+		Claim:             claim,
+		Device:            e.PriorPodClaim.Claim.Device,
 	}, nil
 }
