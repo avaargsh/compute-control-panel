@@ -293,3 +293,17 @@ func TestConsoleRejectsMalformedLoginAndOversizedBody(t *testing.T) {
 		}
 	}
 }
+
+func TestConsoleLoginRejectsExplicitEmptyQueryMarker(t *testing.T) {
+	now := time.Date(2026, 11, 21, 1, 30, 30, 0, time.UTC)
+	handler, err := NewHandler(sessionConfig(t, func() time.Time { return now }), &testReader{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := `{"username":"admin","password":"this-is-a-long-test-password"}`
+	req := tlsRequest(http.MethodPost, "/api/v1/console/login?", "https://ccp.example.test", body)
+	w := response(handler, req)
+	if w.Code != http.StatusBadRequest || len(w.Result().Cookies()) != 0 {
+		t.Fatalf("explicit empty query marker bypassed login validation: status=%d cookies=%d", w.Code, len(w.Result().Cookies()))
+	}
+}
