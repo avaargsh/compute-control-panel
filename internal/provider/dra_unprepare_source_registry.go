@@ -21,8 +21,11 @@ var ErrDRAReceiptSourceUntrusted = errors.New("DRA receipt signer is not registe
 // PostgreSQL clock_timestamp() is the independent live authorization clock:
 // a caller-chosen historical asOf cannot resurrect expired keys or events.
 // FOR UPDATE on the source key must be held until the journal INSERT commits,
-// serializing concurrent revocation FK KEY SHARE locks. This function must
-// ONLY be called within the restricted journal's write transaction.
+// or until the caller's separate read-only evidence preflight transaction ends.
+// That lock serializes concurrent revocation FK KEY SHARE locks. Use only
+// inside a transaction owned by the restricted journal writer or an
+// independently provisioned evidence reader; the latter's production
+// least-privilege role is NOT established by this helper.
 //
 // A registry row attests only to a provisioned public key and scope. A real
 // driver transport, actual RPC result, device removal and liability end still
