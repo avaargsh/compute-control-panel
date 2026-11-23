@@ -103,7 +103,7 @@ type OldNew struct {
 type VerifiedRelease struct {
 	Claims
 	EncodedPermit string
-	seal [32]byte
+	seal          [32]byte
 }
 
 func releaseSeal(encoded string) [32]byte {
