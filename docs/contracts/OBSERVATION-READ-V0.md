@@ -58,6 +58,8 @@ A proposed `GET /api/v1/observations` handler exists as `NewObservationReadHandl
 
 The handler rejects missing dependencies at construction, accepts GET only, refuses client-supplied query filtering, rechecks every returned row's tenant/project scope, and rejects inconsistent batches rather than returning partial cross-scope data. It uses `no-store` for every response and a 1,000-item temporary bound; pagination should be designed before a production-scale rollout.
 
+Additional unmounted-handler fail-closed limits: a zero-value server clock is rejected even for empty snapshots; duplicate logical identities in a single response (project/cluster/namespace/kind/name, including conflicting UIDs) reject the entire batch; JSON is buffered and must fit within **1 MiB** before any successful response bytes are sent. An over-limit or encoding failure yields a generic 502 without exposing partial observation content. These guards do not replace upstream reader memory, field-length, rate or pagination limits, which remain required before production mounting.
+
 **Security:** the existing SPIFFE WorkloadAuthenticator is for authenticated service identity, not a browser login implementation. No UI or Kubernetes permissions are granted by this PR.
 
 ## Validation evidence

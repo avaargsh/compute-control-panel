@@ -93,6 +93,35 @@ func TestKubernetesObservationReaderStagesFromActualReadOnlyAPI(t *testing.T) {
 	}
 }
 
+// Exercise the real HTTPS reader -> Collector -> admission projection
+// boundary rather than only a constructed in-memory KueueJobEvidence.
+func TestKubernetesObservationReaderAdmittedBeforePodProjectsNotReady(t *testing.T) {
+	reader, reads, closeServer := testKubeReader(t, testKubeJob, testKueueWorkloads, `{"items":[]}`, 0)
+	defer closeServer()
+
+	var collector Collector = reader
+	snapshot, err := collector.Collect(context.Background(), observedJobQuery())
+	if err != nil || snapshot.Stage != KueueAdmitted {
+		t.Fatalf("admitted-before-Pod reader/collector stage=%q err=%v", snapshot.Stage, err)
+	}
+	if snapshot.Provenance.Source != "kubernetes-https-readonly-unattested" ||
+		snapshot.Provenance.ObservedAt.IsZero() || reads.Load() != 4 {
+		t.Fatalf("unattested or incomplete Kubernetes reads: %+v reads=%d", snapshot.Provenance, reads.Load())
+	}
+	projection, err := ProjectAdmissionWithoutPlacement(snapshot.Evidence)
+	if err != nil {
+		t.Fatalf("read-only admitted-before-Pod projection rejected: %v", err)
+	}
+	if projection.Phase != "NOT_READY" || projection.Stage != KueueAdmitted ||
+		!projection.QuotaReserved || !projection.Admitted ||
+		projection.JobUID != "job-uid-a" || projection.WorkloadUID != "kueue-uid-a" ||
+		projection.PodUID != "" || projection.PodName != "" || projection.PodResourceVersion != "" ||
+		projection.PodScheduled || projection.NodeBound || projection.NodeName != "" ||
+		projection.Allocated || projection.Active || projection.Ready || projection.Costable || projection.Released {
+		t.Fatalf("Kubernetes no-Pod admission promoted placement/GPU/cost: %+v", projection)
+	}
+}
+
 func TestKubernetesObservationReaderFailsClosedOnIdentityOrPartialLists(t *testing.T) {
 	tests := []struct {
 		name      string
