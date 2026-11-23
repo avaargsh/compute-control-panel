@@ -106,7 +106,12 @@ func (r *KubernetesObservationReader) ObserveDRAClaimUnallocated(
 	path := fmt.Sprintf("/apis/resource.k8s.io/v1/namespaces/%s/resourceclaims/%s",
 		prior.Claim.Namespace, prior.Claim.Name)
 	var first draUnallocatedClaimState
-	if err := r.read(ctx, path, &first); err != nil || !first.clearFor(prior) {
+	if err := r.read(ctx, path, &first); err != nil {
+		// Preserve a typed API 404 for the composite observer, but never
+		// promote it to a same-UID unallocation assertion here.
+		return DRAClaimUnallocatedObservation{}, fmt.Errorf("%w: %w", ErrInvalidDRAObservation, err)
+	}
+	if !first.clearFor(prior) {
 		return reject()
 	}
 	var second draUnallocatedClaimState

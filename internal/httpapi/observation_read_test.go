@@ -194,3 +194,58 @@ func TestObservationReadRejectsWritesAndUnexpectedQuery(t *testing.T) {
 		t.Fatalf("client-supplied scope admitted: %+v", w)
 	}
 }
+
+func TestObservationReadRejectsZeroClockEvenWhenEmpty(t *testing.T) {
+	deps, src, _ := observationFixture()
+	src.snapshot.Items = nil
+	deps.Now = func() time.Time { return time.Time{} }
+	h, err := NewObservationReadHandler(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := observationRequest(h, http.MethodGet, "/api/v1/observations")
+	if w.Code != http.StatusBadGateway || strings.Contains(w.Body.String(), "generated_at") {
+		t.Fatalf("empty observations bypassed invalid clock: status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestObservationReadRejectsDuplicateLogicalResource(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		uid  string
+	}{
+		{"identical repeated resource", "uid-a"},
+		{"conflicting UID for same logical resource", "uid-b"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deps, src, _ := observationFixture()
+			src.snapshot.Items[0].Resource.UID = "uid-a"
+			second := src.snapshot.Items[0]
+			second.Resource.UID = tc.uid
+			second.Message = "PRIVATE_DUPLICATE_MARKER"
+			src.snapshot.Items = append(src.snapshot.Items, second)
+			h, err := NewObservationReadHandler(deps)
+			if err != nil {
+				t.Fatal(err)
+			}
+			w := observationRequest(h, http.MethodGet, "/api/v1/observations")
+			if w.Code != http.StatusBadGateway || strings.Contains(w.Body.String(), "PRIVATE_DUPLICATE_MARKER") {
+				t.Fatalf("duplicate logical resource must fail closed: status=%d body=%s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestObservationReadRejectsOversizedResponseWithoutPartialPayload(t *testing.T) {
+	deps, src, _ := observationFixture()
+	src.snapshot.Items[0].Message = strings.Repeat("private-observation-payload", 60000)
+	h, err := NewObservationReadHandler(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := observationRequest(h, http.MethodGet, "/api/v1/observations")
+	if w.Code != http.StatusBadGateway || strings.Contains(w.Body.String(), "private-observation-payload") ||
+		w.Body.Len() > 1<<20 {
+		t.Fatalf("oversized response leaked or escaped bounded failure: status=%d bytes=%d", w.Code, w.Body.Len())
+	}
+}

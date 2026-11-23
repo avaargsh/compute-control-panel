@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,30 @@ import (
 
 const observationReadPath = "/api/v1/observations"
 const maxObservationItems = 1000
+const maxObservationResponseBytes = 1 << 20
+
+var errObservationResponseTooLarge = errors.New("observation response size exceeded")
+
+// Buffer the whole response before writing headers or bytes to the client.
+// Reject oversized observations without leaking truncated JSON.
+type boundedObservationResponse struct{ bytes.Buffer }
+
+func (b *boundedObservationResponse) Write(p []byte) (int, error) {
+	if len(p) > maxObservationResponseBytes-b.Len() {
+		return 0, errObservationResponseTooLarge
+	}
+	return b.Buffer.Write(p)
+}
+
+// UID is intentionally not part of this logical key: conflicting versions
+// of the same resource in one snapshot must be rejected, never overwritten.
+type observationLogicalIdentity struct {
+	projectID string
+	clusterID string
+	namespace string
+	kind      string
+	name      string
+}
 
 // ObservationSnapshot contains only observations for the authenticated caller.
 // The reader must assign a single trusted data mode for the whole result.
@@ -81,7 +106,12 @@ func (h *observationReadHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	now := h.deps.Now().UTC()
+	if now.IsZero() {
+		writeWorkloadAPIError(w, http.StatusBadGateway, "OBSERVATION_INVALID", "The observation source cannot be verified")
+		return
+	}
 	items := make([]observation.View, 0, len(snapshot.Items))
+	seen := make(map[observationLogicalIdentity]struct{}, len(snapshot.Items))
 	for _, record := range snapshot.Items {
 		// Always re-check the returned scope even if a Reader promises isolation.
 		// Reject the whole batch instead of selectively leaking partial records.
@@ -89,6 +119,15 @@ func (h *observationReadHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 			writeWorkloadAPIError(w, http.StatusBadGateway, "OBSERVATION_SCOPE_MISMATCH", "The observation source cannot be verified")
 			return
 		}
+		key := observationLogicalIdentity{
+			projectID: record.ProjectID, clusterID: record.Resource.ClusterID,
+			namespace: record.Resource.Namespace, kind: record.Resource.Kind, name: record.Resource.Name,
+		}
+		if _, duplicate := seen[key]; duplicate {
+			writeWorkloadAPIError(w, http.StatusBadGateway, "OBSERVATION_DUPLICATE", "The observation source cannot be verified")
+			return
+		}
+		seen[key] = struct{}{}
 		view, err := observation.Project(record, now)
 		if err != nil {
 			writeWorkloadAPIError(w, http.StatusBadGateway, "OBSERVATION_INVALID", "The observation source cannot be verified")
@@ -109,10 +148,17 @@ func (h *observationReadHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		}
 		return a.Resource.Name < b.Resource.Name
 	})
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(struct {
+	// Do not send a success header or partial JSON until the encoded body has
+	// passed the response byte cap.
+	body := &boundedObservationResponse{}
+	if err := json.NewEncoder(body).Encode(struct {
 		DataMode    observation.Mode   `json:"data_mode"`
 		GeneratedAt time.Time          `json:"generated_at"`
 		Items       []observation.View `json:"items"`
-	}{DataMode: snapshot.DataMode, GeneratedAt: now, Items: items})
+	}{DataMode: snapshot.DataMode, GeneratedAt: now, Items: items}); err != nil {
+		writeWorkloadAPIError(w, http.StatusBadGateway, "OBSERVATION_TOO_LARGE", "The observation source cannot be verified")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(body.Bytes())
 }

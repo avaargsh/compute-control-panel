@@ -22,6 +22,8 @@ func placedObservationFixture() (provider.KueueCreatePin, provider.KueueJobColle
 		KueueQuotaReserved: true, KueueAdmitted: true, KueueClusterQueue: "ccp-smoke",
 		KueueQuotaCondition:        provider.KueueConditionEvidence{Status: "True"},
 		KueueAdmissionCondition:    provider.KueueConditionEvidence{Status: "True"},
+		KueueEvictedCondition:      provider.KueueConditionEvidence{Status: "MISSING"},
+		KueuePreemptedCondition:    provider.KueueConditionEvidence{Status: "MISSING"},
 		KueuePodSetAssignmentsJSON: `[{"name":"main","resourceUsage":{"cpu":"100m"}}]`,
 		Pod:                        provider.KubernetesResourceRef{Namespace: smokeNamespace, Name: "pod-a", UID: "pod-uid-a", ResourceVersion: "103"},
 		PodOwnerJobUID:             pin.UID, PodScheduled: true, PodNodeName: "ccp-kind-node",

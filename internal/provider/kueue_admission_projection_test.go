@@ -6,6 +6,45 @@ import (
 	"time"
 )
 
+// A node-bound Pod is still not GPU-ready. More importantly, it must not
+// appear as a trusted placement snapshot when native preemption evidence was
+// never parsed or was malformed; explicit MISSING is different from zero value.
+func TestProjectPlacementWithoutDeviceProofRejectsUnobservedConditions(t *testing.T) {
+	good := kueueEvidenceFixture()
+	baseline, err := ProjectPlacementWithoutDeviceProof(good)
+	if err != nil || baseline.Stage != KueuePodPlaced || baseline.Phase != "NOT_READY" ||
+		!baseline.PodScheduled || !baseline.NodeBound ||
+		baseline.Allocated || baseline.Active || baseline.Ready || baseline.Costable || baseline.Released {
+		t.Fatalf("legitimate node-bound read-only projection changed: %+v err=%v", baseline, err)
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*KueueJobEvidence)
+	}{
+		{"zero-value eviction", func(e *KueueJobEvidence) { e.KueueEvictedCondition = KueueConditionEvidence{} }},
+		{"zero-value preemption", func(e *KueueJobEvidence) { e.KueuePreemptedCondition = KueueConditionEvidence{} }},
+		{"both unobserved", func(e *KueueJobEvidence) {
+			e.KueueEvictedCondition = KueueConditionEvidence{}
+			e.KueuePreemptedCondition = KueueConditionEvidence{}
+		}},
+		{"malformed eviction", func(e *KueueJobEvidence) {
+			e.KueueEvictedCondition = KueueConditionEvidence{Status: "False", LastTransitionTime: "not-a-time"}
+		}},
+		{"malformed preemption", func(e *KueueJobEvidence) {
+			e.KueuePreemptedCondition = KueueConditionEvidence{Status: "False", ObservedGeneration: -1}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := kueueEvidenceFixture()
+			tc.mutate(&e)
+			got, err := ProjectPlacementWithoutDeviceProof(e)
+			if !errors.Is(err, ErrInvalidKueueObservation) || got != (AdmissionPlacementProjection{}) {
+				t.Fatalf("unobserved/invalid preemption data promoted node binding: %+v err=%v", got, err)
+			}
+		})
+	}
+}
+
 func TestProjectAdmissionWithoutPlacementStaysNotReady(t *testing.T) {
 	e := kueueEvidenceFixture()
 	e.PodScheduled = false
@@ -30,15 +69,53 @@ func TestProjectAdmissionWithoutPlacementStaysNotReady(t *testing.T) {
 	}
 }
 
-func TestProjectAdmissionWithoutPlacementRejectsPlacementAndMissingPod(t *testing.T) {
+// Kueue admission can precede Pod creation. This is quota evidence only;
+// missing Pod identity must not be projected as placement or GPU readiness.
+func TestProjectAdmissionWithoutPlacementBeforePodCreation(t *testing.T) {
+	e := kueueEvidenceFixture()
+	e.Pod = KubernetesResourceRef{}
+	e.PodOwnerJobUID = ""
+	e.PodScheduled = false
+	e.PodNodeName = ""
+
+	stage, err := AssessKueueJobObservation(e)
+	if err != nil || stage != KueueAdmitted {
+		t.Fatalf("admitted Kueue Workload before Pod exists: stage=%s err=%v", stage, err)
+	}
+	got, err := ProjectAdmissionWithoutPlacement(e)
+	if err != nil {
+		t.Fatalf("valid admitted-but-Pod-absent observation rejected: %v", err)
+	}
+	if got.Phase != "NOT_READY" || got.Stage != KueueAdmitted ||
+		!got.QuotaReserved || !got.Admitted ||
+		got.WorkloadUID != e.KueueWorkload.UID || got.JobUID != e.Job.UID ||
+		got.PodNamespace != "" || got.PodName != "" ||
+		got.PodUID != "" || got.PodResourceVersion != "" ||
+		got.PodScheduled || got.NodeBound || got.NodeName != "" ||
+		got.Allocated || got.Active || got.Ready || got.Costable || got.Released {
+		t.Fatalf("Pod-absent admission invented placement or device truth: %+v", got)
+	}
+}
+
+func TestProjectAdmissionWithoutPlacementRejectsContradictoryPodEvidence(t *testing.T) {
 	cases := []struct {
 		name   string
 		change func(*KueueJobEvidence)
 	}{
 		{name: "pod placed on a node", change: func(*KueueJobEvidence) {}},
-		{name: "admitted before a pod exists", change: func(e *KueueJobEvidence) {
+		{name: "absent pod with dangling owner UID", change: func(e *KueueJobEvidence) {
+			e.Pod = KubernetesResourceRef{}
+			e.PodScheduled = false
+			e.PodNodeName = ""
+		}},
+		{name: "absent pod with scheduled flag", change: func(e *KueueJobEvidence) {
 			e.Pod = KubernetesResourceRef{}
 			e.PodOwnerJobUID = ""
+			e.PodScheduled = true
+			e.PodNodeName = ""
+		}},
+		{name: "partially observed pod without UID", change: func(e *KueueJobEvidence) {
+			e.Pod.UID = ""
 			e.PodScheduled = false
 			e.PodNodeName = ""
 		}},
@@ -75,6 +152,67 @@ func TestProjectAdmissionWithoutPlacementRejectsPlacementAndMissingPod(t *testin
 	}
 }
 
+// Admission is not a positive state if native Kueue has simultaneously
+// reported preemption, eviction, or an unknown transition. Such snapshots
+// must not be rendered as healthy admitted capacity even if quota is still
+// marked reserved in this non-transactional read.
+func TestProjectAdmissionWithoutPlacementRejectsPreemptionOrUnknown(t *testing.T) {
+	cases := []struct {
+		name   string
+		change func(*KueueJobEvidence)
+	}{
+		{"evicted boolean", func(e *KueueJobEvidence) {
+			e.KueueEvicted = true
+			e.KueueEvictedCondition = KueueConditionEvidence{Status: "True", Reason: "Preempted"}
+		}},
+		{"preempted boolean", func(e *KueueJobEvidence) {
+			e.KueuePreempted = true
+			e.KueuePreemptedCondition = KueueConditionEvidence{Status: "True", Reason: "InCohortReclamation"}
+		}},
+		{"unknown eviction", func(e *KueueJobEvidence) {
+			e.KueueEvictedCondition = KueueConditionEvidence{Status: "Unknown"}
+		}},
+		{"unknown preemption", func(e *KueueJobEvidence) {
+			e.KueuePreemptedCondition = KueueConditionEvidence{Status: "Unknown"}
+		}},
+		{"missing eviction condition representation", func(e *KueueJobEvidence) {
+			e.KueueEvictedCondition = KueueConditionEvidence{}
+		}},
+		{"invalid eviction condition status", func(e *KueueJobEvidence) {
+			e.KueueEvictedCondition = KueueConditionEvidence{Status: "PENDING"}
+		}},
+		{"malformed eviction transition time", func(e *KueueJobEvidence) {
+			e.KueueEvictedCondition = KueueConditionEvidence{Status: "False", LastTransitionTime: "not-a-time"}
+		}},
+		{"negative preemption observed generation", func(e *KueueJobEvidence) {
+			e.KueuePreemptedCondition = KueueConditionEvidence{Status: "False", ObservedGeneration: -1}
+		}},
+		{"evicted condition true without boolean mirror", func(e *KueueJobEvidence) {
+			e.KueueEvictedCondition = KueueConditionEvidence{Status: "True", Reason: "Preempted"}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := kueueEvidenceFixture()
+			e.Pod = KubernetesResourceRef{}
+			e.PodOwnerJobUID = ""
+			e.PodScheduled = false
+			e.PodNodeName = ""
+			tc.change(&e)
+			// Assess only classifies structural placement. The projection
+			// must independently refuse unsafe preemption evidence.
+			stage, err := AssessKueueJobObservation(e)
+			if err != nil || stage != KueueAdmitted {
+				t.Fatalf("fixture did not reproduce admission condition: stage=%s err=%v", stage, err)
+			}
+			got, err := ProjectAdmissionWithoutPlacement(e)
+			if !errors.Is(err, ErrInvalidKueueObservation) || got != (AdmissionPlacementProjection{}) {
+				t.Fatalf("ambiguous or preempted snapshot reported admission: %+v err=%v", got, err)
+			}
+		})
+	}
+}
+
 // The integration of Kueue admission without placement (#99) and release
 // correlation (#98) must not reinterpret admitted/reserved quota as a
 // previously placed, device-assigned Allocation. Even fabricated later Pod,
@@ -84,6 +222,11 @@ func TestAdmittedUnplacedPodCannotBeSplicedIntoReleaseEvidence(t *testing.T) {
 	job := &candidate.PriorQueue.Job
 	job.KueueAdmitted = true
 	job.KueueAdmissionCondition.Status = "True"
+	// The release fixture predates native eviction/preemption condition reads.
+	// No such conditions were returned; MISSING is explicit reader evidence,
+	// unlike an absent zero-value condition that must fail closed.
+	job.KueueEvictedCondition = KueueConditionEvidence{Status: "MISSING"}
+	job.KueuePreemptedCondition = KueueConditionEvidence{Status: "MISSING"}
 	job.KueuePodSetAssignmentsJSON = `[{"name":"main","resourceUsage":{"cpu":"2"}}]`
 	job.PodScheduled = false
 	job.PodNodeName = ""
