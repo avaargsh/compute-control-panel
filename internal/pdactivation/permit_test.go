@@ -310,3 +310,19 @@ func TestStrictPermitTransportDoesNotIgnoreExtraJSONFields(t *testing.T) {
 func trustFixture(keys map[string]ed25519.PublicKey) Trust {
 	return Trust{Issuer: "independent-approval-service", Audience: "ccp-pd-activation-webhook", Keys: keys}
 }
+
+// A valid signature does not establish a live, scoped approval/revocation
+// lookup. An arbitrary caller must not construct VerifiedRelease directly and
+// obtain an activation patch without passing VerifyGateRelease first.
+func TestGateRemovalPatchRejectsCallerFabricatedVerifiedRelease(t *testing.T) {
+	pair, signed, _, _, _ := permitFixture(t)
+	_ = pair
+	raw, err := json.Marshal(signed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forged := VerifiedRelease{Claims: signed.Claims, EncodedPermit: string(raw)}
+	if patch, err := GateRemovalPatch(forged); !errors.Is(err, ErrActivationDenied) || len(patch) != 0 {
+		t.Fatalf("unverified caller-fabricated permit generated a JobSet patch: %s, %v", patch, err)
+	}
+}
