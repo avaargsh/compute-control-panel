@@ -1,6 +1,6 @@
 # M5.4 paired PD raw phase evidence v1
 
-Status: offline implementation candidate, non-actuating. This is a new narrow trace contract, not a claim that XPUlink/SGLang/vLLM emits this format today. Production collectors, authenticated manifest/artifact retrieval and benchmark acceptance are still open.
+Status: offline implementation candidate, non-actuating. This is a new narrow trace contract, not a claim that any model-serving gateway, SGLang or vLLM already emits this format. Production collectors, authenticated manifest/artifact retrieval and benchmark acceptance are still open.
 
 ## Input contract
 

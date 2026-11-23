@@ -4,7 +4,7 @@ Status: offline implementation candidate; integration gates OPEN. This contract 
 
 ## Evidence paths
 
-- Unified: XPUlink request JSONL -> independently pinned artifact -> rawbenchmark.Verify -> AdviseRawSigned -> advisory result.
+- Unified: independently collected request JSONL -> independently pinned artifact -> rawbenchmark.Verify -> AdviseRawSigned -> advisory result.
 - PD: independently verified jointly executed PD profile -> domain-separated Ed25519 signature -> pd.Plan -> pd.Propose -> pd.RevalidateProposal. The PD raw-phase verifier and authorized policy/observation adapters are not implemented here.
 - Existing Advise / AdviseSigned remain internal, non-actuating primitives. No public route or automated acceptance is mounted.
 
