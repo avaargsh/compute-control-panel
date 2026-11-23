@@ -70,6 +70,8 @@ func TestDemoConsoleOnlyServesStaticAndReadOnlyRoutes(t *testing.T) {
 		{"GET", "/api/v1/observations", 200},
 		{"POST", "/api/v1/observations", 405},
 		{"GET", "/api/v1/observations?project_id=other", 400},
+		{"GET", "/api/v1/observations?", 400},
+		{"GET", "/?", 404},
 		{"GET", "/api/v1/workloads", 404},
 		{"GET", "/admin", 404},
 	} {
