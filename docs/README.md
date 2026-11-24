@@ -2,7 +2,7 @@
 
 This index organizes the design, contracts, and operational documents for the Compute Control Plane.
 
-Documents under `docs/` are **design contracts and architecture decisions**. They are not proof that every integration or production path is implemented and accepted. See the main [README](../README.md#current-status-2026-11-10) for current implementation status and open gates.
+Documents under `docs/` are **design contracts and architecture decisions**. They are not proof that every integration or production path is implemented and accepted. See the main [README](../README.md#current-status-2026-11-24) for current implementation status and open gates.
 
 ## Quick navigation
 
