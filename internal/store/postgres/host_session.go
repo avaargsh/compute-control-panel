@@ -90,7 +90,9 @@ func (r *Repository) StartHostSession(
 	if err != nil {
 		return hostidentity.SessionFence{}, hostSessionPersistenceError("start HostSession", err)
 	}
-	if fence.Epoch <= 0 || !validHostSessionIdentity(fence.SessionID, 256) ||
+	if fence.Binding != binding || fence.Epoch <= 0 ||
+		!validHostSessionIdentity(fence.SessionID, 256) ||
+		!strings.HasPrefix(fence.SessionID, "hs_") ||
 		!fence.IssuedAt.Before(fence.ExpiresAt) {
 		return hostidentity.SessionFence{}, fmt.Errorf("%w: database returned an invalid session fence", ErrHostSessionRejected)
 	}
