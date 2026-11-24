@@ -34,10 +34,10 @@ type draReceiptTestResolver struct {
 	calls              int
 	providerID         string
 	evidenceProviderID string
-	err           error
-	verifier      *provider.DRAUnprepareVerifier
-	serverNow     time.Time
-	candidate     provider.ReleaseEvidenceCandidate
+	err                error
+	verifier           *provider.DRAUnprepareVerifier
+	serverNow          time.Time
+	candidate          provider.ReleaseEvidenceCandidate
 }
 
 func (r *draReceiptTestResolver) ResolveRegisteredDRAUnprepareVerifier(_ context.Context, _ string, _ provider.DRAUnprepareEvent) (string, *provider.DRAUnprepareVerifier, time.Time, error) {
