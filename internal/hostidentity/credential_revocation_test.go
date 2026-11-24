@@ -336,6 +336,58 @@ func TestHostCredentialRevocationListStoreConcurrentReplacementCannotRollBack(t 
 	}
 }
 
+func TestHostCredentialRevocationListStoreConcurrentReadersObserveAtomicSnapshots(t *testing.T) {
+	f := newHostCredentialRevocationFixture(t)
+	initial := f.crlNumber(t, f.issuer, f.key, 1, f.now.Add(-time.Minute), f.now.Add(time.Hour))
+	revoked := f.crlNumber(t, f.issuer, f.key, 2, f.now.Add(-time.Minute), f.now.Add(time.Hour), 42)
+	store, err := NewHostCredentialRevocationListStore([][]byte{initial}, []*x509.Certificate{f.issuer}, f.now)
+	if err != nil {
+		t.Fatalf("create revocation store: %v", err)
+	}
+
+	const readers = 8
+	const iterations = 32
+	start := make(chan struct{})
+	firstReads := make(chan struct{}, readers)
+	errorsSeen := make(chan error, readers*iterations)
+	var wg sync.WaitGroup
+	for i := 0; i < readers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if subject, err := store.VerifyHostCredential([][]byte{f.leafDER}, f.roots, "ccp.example", f.now); err != nil || subject != "spiffe://ccp.example/host/machine-42" {
+				errorsSeen <- ErrHostCredential
+			}
+			firstReads <- struct{}{}
+			<-start
+			for j := 0; j < iterations; j++ {
+				subject, err := store.VerifyHostCredential([][]byte{f.leafDER}, f.roots, "ccp.example", f.now)
+				if err != nil && err != ErrHostCredential {
+					errorsSeen <- err
+				}
+				if err == nil && subject != "spiffe://ccp.example/host/machine-42" {
+					errorsSeen <- ErrHostCredential
+				}
+			}
+		}()
+	}
+	for i := 0; i < readers; i++ {
+		<-firstReads
+	}
+	close(start)
+	if err := store.Replace([][]byte{revoked}, f.now); err != nil {
+		t.Fatalf("replace CRL while readers are active: %v", err)
+	}
+	wg.Wait()
+	close(errorsSeen)
+	for err := range errorsSeen {
+		t.Errorf("reader observed an invalid CRL snapshot: %v", err)
+	}
+	if _, err := store.VerifyHostCredential([][]byte{f.leafDER}, f.roots, "ccp.example", f.now); err == nil {
+		t.Fatal("final snapshot did not enforce the newly revoked serial")
+	}
+}
+
 func TestHostCredentialRevocationListStoreRejectsExpiredSnapshot(t *testing.T) {
 	f := newHostCredentialRevocationFixture(t)
 	initial := f.crlNumber(t, f.issuer, f.key, 1, f.now.Add(-time.Minute), f.now.Add(time.Hour))
