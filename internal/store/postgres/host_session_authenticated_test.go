@@ -40,7 +40,7 @@ func TestHostSessionAuthenticatedStartHeartbeatAndGrantRevocation(t *testing.T) 
 		t.Fatal(err)
 	}
 	start := AuthenticatedHostSessionStartRequest{
-		Subject: binding.Subject,
+		Subject:       binding.Subject,
 		ExpectedEpoch: 0, RequestID: "authenticated-start-" + randomSuffix(t), TTL: 30 * time.Second,
 	}
 	first, err := repo.StartAuthenticatedHostSession(ctx, start)
@@ -53,7 +53,7 @@ func TestHostSessionAuthenticatedStartHeartbeatAndGrantRevocation(t *testing.T) 
 
 	heartbeat := AuthenticatedHostHeartbeatRequest{
 		Subject: binding.Subject,
-		Epoch: first.Epoch, SessionID: first.SessionID, Sequence: 1,
+		Epoch:   first.Epoch, SessionID: first.SessionID, Sequence: 1,
 		Digest: "sha256:" + strings.Repeat("a", 64),
 	}
 	disposition, recordedAt, err := repo.RecordAuthenticatedHostHeartbeat(ctx, heartbeat)
@@ -66,13 +66,13 @@ func TestHostSessionAuthenticatedStartHeartbeatAndGrantRevocation(t *testing.T) 
 	}
 
 	if _, err := repo.StartAuthenticatedHostSession(ctx, AuthenticatedHostSessionStartRequest{
-		Subject: "spiffe://ccp.example/host/unregistered-" + randomSuffix(t),
+		Subject:       "spiffe://ccp.example/host/unregistered-" + randomSuffix(t),
 		ExpectedEpoch: 0, RequestID: "unknown-subject-" + randomSuffix(t), TTL: 30 * time.Second,
 	}); !errors.Is(err, ErrHostSessionUnauthorized) {
 		t.Fatalf("unregistered host subject was accepted: %v", err)
 	}
 	if _, err := repo.StartAuthenticatedHostSession(ctx, AuthenticatedHostSessionStartRequest{
-		Subject: "spiffe://ccp.example/ns/compute-host/sa/host-agent",
+		Subject:       "spiffe://ccp.example/ns/compute-host/sa/host-agent",
 		ExpectedEpoch: 0, RequestID: "workload-subject-" + randomSuffix(t), TTL: 30 * time.Second,
 	}); !errors.Is(err, ErrHostSessionInvalid) {
 		t.Fatalf("workload identity was accepted: %v", err)
@@ -91,7 +91,7 @@ func TestHostSessionAuthenticatedStartHeartbeatAndGrantRevocation(t *testing.T) 
 		t.Fatalf("revoked host subject continued heartbeating: %v", err)
 	}
 	if _, err := repo.StartAuthenticatedHostSession(ctx, AuthenticatedHostSessionStartRequest{
-		Subject: binding.Subject,
+		Subject:       binding.Subject,
 		ExpectedEpoch: 1, RequestID: "revoked-start-" + randomSuffix(t), TTL: 30 * time.Second,
 	}); !errors.Is(err, ErrHostSessionUnauthorized) {
 		t.Fatalf("revoked host subject started a successor session: %v", err)
@@ -116,7 +116,7 @@ func TestHostSessionSubjectGrantRevocationFencesConcurrentHeartbeat(t *testing.T
 		t.Fatal(err)
 	}
 	first, err := repo.StartAuthenticatedHostSession(ctx, AuthenticatedHostSessionStartRequest{
-		Subject: binding.Subject,
+		Subject:       binding.Subject,
 		ExpectedEpoch: 0, RequestID: "revoke-race-start-" + randomSuffix(t), TTL: 30 * time.Second,
 	})
 	if err != nil {
@@ -148,7 +148,7 @@ func TestHostSessionSubjectGrantRevocationFencesConcurrentHeartbeat(t *testing.T
 	go func() {
 		_, _, err := repo.RecordAuthenticatedHostHeartbeat(ctx, AuthenticatedHostHeartbeatRequest{
 			Subject: binding.Subject,
-			Epoch: first.Epoch, SessionID: first.SessionID, Sequence: 1,
+			Epoch:   first.Epoch, SessionID: first.SessionID, Sequence: 1,
 			Digest: "sha256:" + strings.Repeat("c", 64),
 		})
 		done <- err
@@ -255,7 +255,7 @@ func TestAuthenticatedHostSessionCannotOutliveGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = repo.StartAuthenticatedHostSession(ctx, AuthenticatedHostSessionStartRequest{
-		Subject: binding.Subject,
+		Subject:       binding.Subject,
 		ExpectedEpoch: 0, RequestID: "too-long-" + randomSuffix(t), TTL: 120 * time.Second,
 	})
 	if !errors.Is(err, ErrHostSessionUnauthorized) {
@@ -313,7 +313,7 @@ func TestAuthenticatedHostSessionGrantExpiresWhileWaitingForProvider(t *testing.
 		t.Fatal(err)
 	}
 	req := AuthenticatedHostSessionStartRequest{
-		Subject: binding.Subject,
+		Subject:       binding.Subject,
 		ExpectedEpoch: 0, RequestID: "expiry-lock-" + randomSuffix(t), TTL: time.Second,
 	}
 	done := make(chan error, 1)
