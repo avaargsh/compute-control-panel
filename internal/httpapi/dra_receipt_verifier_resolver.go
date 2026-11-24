@@ -46,7 +46,10 @@ func (r *RegisteredDRAReceiptVerifierResolver) ResolveDRAReceiptVerifier(
 	if err != nil {
 		return DRAReceiptVerifierResolution{}, err
 	}
-	if !validDRAReceiptProviderID(providerID) || verifier == nil || databaseNow.IsZero() {
+	if !validDRAReceiptProviderID(providerID) {
+		return DRAReceiptVerifierResolution{}, provider.ErrDRAReceiptSourceUntrusted
+	}
+	if verifier == nil || databaseNow.IsZero() {
 		return DRAReceiptVerifierResolution{}, provider.ErrDRAReceiptJournalUnavailable
 	}
 	return DRAReceiptVerifierResolution{ProviderID: providerID, Verifier: verifier, DatabaseNow: databaseNow}, nil
