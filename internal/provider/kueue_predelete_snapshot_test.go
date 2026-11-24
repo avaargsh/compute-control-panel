@@ -34,7 +34,7 @@ func preDeleteDeleteRequest(create Request, namespace, jobName, jobUID string) R
 	remove.Kind = operation.Delete
 	remove.OperationID = "del-" + create.OperationID
 	remove.IdempotencyKey = "idem-" + remove.OperationID
-	remove.TargetResourceID = namespace + "/" + jobName
+	remove.TargetResourceID = adapter.namespace + "/" + jobName
 	remove.TargetResourceUID = jobUID
 	return remove
 }
