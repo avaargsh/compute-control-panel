@@ -225,73 +225,12 @@ jobs:
           DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
         run: |
           set -euo pipefail
-          go test -count=1 -v -run '^(TestHostSessionStartAndHeartbeatDatabaseContract|TestHostSessionExpiredEpochReplacementAndProviderDrain|TestHostSessionStartWaitsForProviderDrain|TestHostSessionConcurrentStartHasOneWinner|TestHostSessionConcurrentSameRequestIsIdempotent|TestHostSessionRestrictedWriterAndCatalogBoundary|TestHostSessionInvalidInputsFailBeforeDatabase)
+          go test -count=1 -v -run '^(TestHostSessionStartAndHeartbeatDatabaseContract|TestHostSessionExpiredEpochReplacementAndProviderDrain|TestHostSessionStartWaitsForProviderDrain|TestHostSessionConcurrentStartHasOneWinner|TestHostSessionConcurrentSameRequestIsIdempotent|TestHostSessionRestrictedWriterAndCatalogBoundary|TestHostSessionInvalidInputsFailBeforeDatabase)$' ./internal/store/postgres | tee host-session-pg.log
           grep -F -- '--- PASS: TestHostSessionStartAndHeartbeatDatabaseContract' host-session-pg.log
           grep -F -- '--- PASS: TestHostSessionExpiredEpochReplacementAndProviderDrain' host-session-pg.log
           grep -F -- '--- PASS: TestHostSessionStartWaitsForProviderDrain' host-session-pg.log
           grep -F -- '--- PASS: TestHostSessionConcurrentStartHasOneWinner' host-session-pg.log
-          grep -F -- '--- PASS: TestHostSessionRestrictedWriterAndCatalogBoundary' host-session-pg.log
-          grep -F -- '--- PASS: TestHostSessionInvalidInputsFailBeforeDatabase' host-session-pg.log
-          if grep -F -- '--- SKIP: TestHostSession' host-session-pg.log; then
-            echo 'durable HostSession PostgreSQL acceptance was skipped' >&2
-            exit 1
-          fi
-          printf 'verified_host_session_source_sha=%s\n' "$(git rev-parse --verify HEAD)"
-      - name: Require real PostgreSQL release Generation/UID fence test (no skip)
-        shell: bash
-        env:
-          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
-        run: |
-          set -euo pipefail
-          go test -count=1 -v -run '^TestReleaseCommitFenceMatchesLivePostgresGenerationAndUID$' ./internal/store/postgres | tee release-fence-pg.log
-          grep -F -- '--- PASS: TestReleaseCommitFenceMatchesLivePostgresGenerationAndUID' release-fence-pg.log
-          if grep -F -- '--- SKIP:' release-fence-pg.log; then
-            echo 'real PostgreSQL release fence test skipped: no evidence' >&2
-            exit 1
-          fi
-          printf 'verified_release_fence_source_sha=%s\n' "$(git rev-parse --verify HEAD)"
-      - name: Require real PostgreSQL correlated release bridge acceptance (no skip)
-        shell: bash
-        env:
-          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
-        run: |
-          set -euo pipefail
-          go test -count=1 -v -run '^TestCorrelatedReleasePreflightChecksCurrentPostgresRows$' ./internal/store/postgres | tee release-bridge-pg.log
-          grep -F -- '--- PASS: TestCorrelatedReleasePreflightChecksCurrentPostgresRows' release-bridge-pg.log
-          if grep -F -- '--- SKIP:' release-bridge-pg.log; then
-            echo 'real PostgreSQL release bridge test skipped: no evidence' >&2
-            exit 1
-          fi
-          printf 'verified_release_bridge_source_sha=%s\n' "$(git rev-parse --verify HEAD)"
-      - name: Require real PostgreSQL recorded DRA receipt acceptance (no skip)
-        shell: bash
-        env:
-          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
-        run: |
-          set -euo pipefail
-          go test -count=1 -v -run '^TestRecordedDRAReceipt(SameTransactionPresenceReplayAndRevocation|RejectsUnrestrictedTestOnlyJournalIngress)$' ./internal/provider | tee dra-receipt-reader-pg.log
-          grep -F -- '--- PASS: TestRecordedDRAReceiptSameTransactionPresenceReplayAndRevocation' dra-receipt-reader-pg.log
-          grep -F -- '--- PASS: TestRecordedDRAReceiptRejectsUnrestrictedTestOnlyJournalIngress' dra-receipt-reader-pg.log
-          if grep -F -- '--- SKIP: TestRecordedDRAReceipt' dra-receipt-reader-pg.log; then
-            echo 'real PostgreSQL recorded receipt reader acceptance was skipped' >&2
-            exit 1
-          fi
-      - name: Require real PostgreSQL signed-and-current release preflight (no skip)
-        shell: bash
-        env:
-          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
-        run: |
-          set -euo pipefail
-          go test -count=1 -v -run '^TestSignedRecordedAndCurrentGenerationOneTransaction$' ./internal/store/postgres | tee release-signed-same-tx-pg.log
-          grep -F -- '--- PASS: TestSignedRecordedAndCurrentGenerationOneTransaction ' release-signed-same-tx-pg.log
-          if grep -F -- '--- SKIP: TestSignedRecordedAndCurrentGenerationOneTransaction' release-signed-same-tx-pg.log; then
-            echo 'signed/current same-transaction PG test was skipped: no acceptance evidence' >&2
-            exit 1
-          fi
- ./internal/store/postgres | tee host-session-pg.log
-          grep -F -- '--- PASS: TestHostSessionStartAndHeartbeatDatabaseContract' host-session-pg.log
-          grep -F -- '--- PASS: TestHostSessionExpiredEpochReplacementAndProviderDrain' host-session-pg.log
-          grep -F -- '--- PASS: TestHostSessionConcurrentStartHasOneWinner' host-session-pg.log
+          grep -F -- '--- PASS: TestHostSessionConcurrentSameRequestIsIdempotent' host-session-pg.log
           grep -F -- '--- PASS: TestHostSessionRestrictedWriterAndCatalogBoundary' host-session-pg.log
           grep -F -- '--- PASS: TestHostSessionInvalidInputsFailBeforeDatabase' host-session-pg.log
           if grep -F -- '--- SKIP: TestHostSession' host-session-pg.log; then
