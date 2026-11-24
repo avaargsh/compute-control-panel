@@ -70,7 +70,7 @@ The transport identity is a **dedicated machine certificate**, not a workload/Co
 ### Host certificate profile and proof of possession
 
 - The dedicated host trust bundle and trust domain are explicit handler dependencies. The serving listener must independently set `tls.RequireAndVerifyClientCert`, use the same host-only ClientCAs bundle, enforce TLS 1.3 or later, and never share workload/Console trust roots.
-- The HTTP handler requires a TLS peer certificate and a non-empty `VerifiedChains` entry whose leaf matches the peer leaf. It then independently verifies the presented DER chain against the dedicated host roots.
+- The HTTP handler independently requires TLS 1.3 or later, a TLS peer certificate and a non-empty `VerifiedChains` entry whose leaf matches the peer leaf. It then independently verifies the presented DER chain against the dedicated host roots.
 - The leaf must be valid at the verifier's current clock, non-CA, carry `KeyUsageDigitalSignature`, explicitly include `ExtKeyUsageClientAuth`, and must not use `ExtKeyUsageAny`.
 - The original SAN extension must contain exactly one URI GeneralName and no other SAN identity. The URI must be canonical `spiffe://<trust-domain>/host/<machine-id>`; workload namespace paths, aliases, extra SANs, foreign trust domains, malformed chains and expired certificates fail closed.
 - TLS client authentication proves possession of the certificate's private key. It does **not** prove TPM/TEE state, secure boot, image integrity, physical device ownership or Kubernetes Node truth. Those facts still require an independent machine-attestation authority before an operator provisions a subject grant.
