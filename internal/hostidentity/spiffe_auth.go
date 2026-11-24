@@ -162,6 +162,9 @@ func uniqueHostSPIFFEID(uris []*url.URL, trustDomain string) (string, error) {
 			}
 		}
 		canonical := "spiffe://" + trustDomain + uri.Path
+		if len(canonical) > 1024 {
+			return "", errors.New("host SPIFFE identity exceeds maximum length")
+		}
 		if uri.String() != canonical || found != "" {
 			return "", errors.New("ambiguous or non-canonical host SPIFFE identity")
 		}
