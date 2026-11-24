@@ -215,11 +215,11 @@ func TestVerifyHostCredentialRequiresCRLForEveryNonRootCertificate(t *testing.T)
 	}
 	intermediateTemplate := &x509.Certificate{
 		SerialNumber: big.NewInt(10),
-		Subject: pkix.Name{CommonName: "host intermediate CA"},
-		NotBefore: f.now.Add(-time.Hour), NotAfter: f.now.Add(24 * time.Hour),
+		Subject:      pkix.Name{CommonName: "host intermediate CA"},
+		NotBefore:    f.now.Add(-time.Hour), NotAfter: f.now.Add(24 * time.Hour),
 		IsCA: true, BasicConstraintsValid: true,
-		KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
-		SubjectKeyId: []byte{5, 6, 7, 8},
+		KeyUsage:       x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		SubjectKeyId:   []byte{5, 6, 7, 8},
 		AuthorityKeyId: f.issuer.SubjectKeyId,
 	}
 	intermediateDER, err := x509.CreateCertificate(rand.Reader, intermediateTemplate, f.issuer, intermediatePublic, f.key)
@@ -239,11 +239,11 @@ func TestVerifyHostCredentialRequiresCRLForEveryNonRootCertificate(t *testing.T)
 		t.Fatal(err)
 	}
 	leafTemplate := &x509.Certificate{
-		SerialNumber: big.NewInt(77),
-		NotBefore: f.now.Add(-time.Minute), NotAfter: f.now.Add(time.Hour),
-		KeyUsage: x509.KeyUsageDigitalSignature,
-		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
-		URIs: []*url.URL{uri},
+		SerialNumber:   big.NewInt(77),
+		NotBefore:      f.now.Add(-time.Minute), NotAfter: f.now.Add(time.Hour),
+		KeyUsage:       x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:    []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		URIs:           []*url.URL{uri},
 		AuthorityKeyId: intermediate.SubjectKeyId,
 	}
 	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, intermediate, leafPublic, intermediateLeafKey)
