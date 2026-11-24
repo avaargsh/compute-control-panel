@@ -217,7 +217,8 @@ func newHostSessionIngressHandlerWithPolicy(
 	t.Helper()
 	handler, err := NewHostSessionIngressHandler(HostSessionIngressDependencies{
 		HostTrustRoots: authority.roots, HostTrustDomain: "ccp.example",
-		HostRevocationCRLs: crls, Now: now, Repository: repo,
+		HostRevocationCRLs: crls, HostRevocationIssuerCertificates: []*x509.Certificate{authority.ca},
+		Now: now, Repository: repo,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -342,6 +343,69 @@ func TestHostSessionIngressStartsAndRecordsOnlyDedicatedHostCredential(t *testin
 	heartbeatCalls, replayRequest := repo.observedHeartbeat()
 	if replayResponse.StatusCode != http.StatusOK || heartbeatCalls != 2 || replayRequest != heartbeatRequest {
 		t.Fatalf("exact heartbeat replay: HTTP %d calls=%d", replayResponse.StatusCode, heartbeatCalls)
+	}
+}
+
+func TestHostSessionIngressRejectsCredentialAfterAtomicCRLRotation(t *testing.T) {
+	authority := newHostCredentialAuthority(t)
+	clientCert := authority.issue(t, hostSessionIngressSubject, 79)
+	now := time.Now().UTC()
+	revocations, err := hostidentity.NewHostCredentialRevocationListStore([][]byte{authority.crlDER}, []*x509.Certificate{authority.ca}, now)
+	if err != nil {
+		t.Fatalf("create revocation store: %v", err)
+	}
+	issuedAt := now.Truncate(time.Microsecond)
+	binding := hostidentity.Binding{
+		HostID: "machine-001", ProviderID: "provider-001", ClusterScope: "cluster-001",
+		NodeUID: "node-uid-001", Subject: hostSessionIngressSubject,
+	}
+	repo := &hostSessionIngressRepositoryStub{
+		fence: hostidentity.SessionFence{
+			Binding: binding, Epoch: 1, SessionID: "hs_session_001",
+			IssuedAt: issuedAt, ExpiresAt: issuedAt.Add(time.Minute),
+		},
+	}
+	handler, err := NewHostSessionIngressHandler(HostSessionIngressDependencies{
+		HostTrustRoots: authority.roots, HostTrustDomain: "ccp.example",
+		HostRevocationListStore: revocations, Now: time.Now, Repository: repo,
+	})
+	if err != nil {
+		t.Fatalf("create host ingress with revocation store: %v", err)
+	}
+	server, client := startHostSessionIngressTLSServer(t, handler, authority.roots, &clientCert)
+	start := func(requestID string) int {
+		t.Helper()
+		request, err := http.NewRequest(http.MethodPost, server.URL+hostSessionStartPath,
+			strings.NewReader(`{"expected_epoch":0,"ttl_seconds":60}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Idempotency-Key", requestID)
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		return response.StatusCode
+	}
+
+	if status := start("before-crl-rotation"); status != http.StatusCreated {
+		t.Fatalf("valid certificate rejected before rotation: HTTP %d", status)
+	}
+	if calls, _ := repo.observedStart(); calls != 1 {
+		t.Fatalf("expected one repository call before rotation, got %d", calls)
+	}
+
+	rotated := authority.revocationList(t, now.Add(-time.Minute), now.Add(time.Hour), 79)
+	if err := revocations.Replace([][]byte{rotated}, time.Now().UTC()); err != nil {
+		t.Fatalf("install newer CRL: %v", err)
+	}
+	if status := start("after-crl-rotation"); status != http.StatusUnauthorized {
+		t.Fatalf("newly revoked certificate accepted after atomic rotation: HTTP %d", status)
+	}
+	if calls, _ := repo.observedStart(); calls != 1 {
+		t.Fatalf("revoked certificate reached repository after rotation: calls=%d", calls)
 	}
 }
 

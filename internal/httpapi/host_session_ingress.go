@@ -33,17 +33,19 @@ type HostSessionIngressRepository interface {
 }
 
 type HostSessionIngressDependencies struct {
-	HostTrustRoots     *x509.CertPool
-	HostTrustDomain    string
-	HostRevocationCRLs [][]byte
-	Now                func() time.Time
-	Repository         HostSessionIngressRepository
+	HostTrustRoots                   *x509.CertPool
+	HostTrustDomain                  string
+	HostRevocationCRLs               [][]byte
+	HostRevocationIssuerCertificates []*x509.Certificate
+	HostRevocationListStore          *hostidentity.HostCredentialRevocationListStore
+	Now                              func() time.Time
+	Repository                       HostSessionIngressRepository
 }
 
 type hostSessionIngressHandler struct {
 	roots           *x509.CertPool
 	trustDomain     string
-	revocationLists []*x509.RevocationList
+	revocationStore *hostidentity.HostCredentialRevocationListStore
 	now             func() time.Time
 	repo            HostSessionIngressRepository
 }
@@ -58,13 +60,21 @@ func NewHostSessionIngressHandler(deps HostSessionIngressDependencies) (http.Han
 		missingProviderManagementDependency(deps.Repository) {
 		return nil, errors.New("host session ingress requires dedicated trust roots, trust domain, current CRLs, clock and repository")
 	}
-	revocationLists, err := hostidentity.ParseHostCredentialRevocationLists(deps.HostRevocationCRLs)
-	if err != nil {
-		return nil, errors.New("host session ingress requires a valid explicit issuer CRL bundle")
+	revocationStore := deps.HostRevocationListStore
+	if revocationStore != nil {
+		if len(deps.HostRevocationCRLs) != 0 || len(deps.HostRevocationIssuerCertificates) != 0 || revocationStore.ValidateCurrent(deps.Now()) != nil {
+			return nil, errors.New("host session ingress requires one initialized, current issuer CRL source")
+		}
+	} else {
+		var err error
+		revocationStore, err = hostidentity.NewHostCredentialRevocationListStore(deps.HostRevocationCRLs, deps.HostRevocationIssuerCertificates, deps.Now())
+		if err != nil {
+			return nil, errors.New("host session ingress requires a valid explicit issuer CRL bundle")
+		}
 	}
 	h := &hostSessionIngressHandler{
 		roots: deps.HostTrustRoots.Clone(), trustDomain: deps.HostTrustDomain,
-		revocationLists: revocationLists, now: deps.Now, repo: deps.Repository,
+		revocationStore: revocationStore, now: deps.Now, repo: deps.Repository,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST "+hostSessionStartPath, h.start)
@@ -158,7 +168,7 @@ func (h *hostSessionIngressHandler) subject(w http.ResponseWriter, r *http.Reque
 		}
 		chain = append(chain, cert.Raw)
 	}
-	subject, err := hostidentity.VerifyHostCredential(chain, h.roots, h.trustDomain, h.revocationLists, h.now())
+	subject, err := h.revocationStore.VerifyHostCredential(chain, h.roots, h.trustDomain, h.now())
 	if err != nil {
 		writeWorkloadAPIError(w, http.StatusUnauthorized, "HOST_UNAUTHENTICATED", "Dedicated host credential required")
 		return "", false
