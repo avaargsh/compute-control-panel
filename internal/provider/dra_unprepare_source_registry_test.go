@@ -303,8 +303,8 @@ func TestRestrictedDRAJournalRechecksRevocationAfterWaitingForSourceLock(t *test
 	type resolution struct {
 		providerID string
 		verifier   *DRAUnprepareVerifier
-		database time.Time
-		err      error
+		database   time.Time
+		err        error
 	}
 	resolved := make(chan resolution, 1)
 	go func() {
