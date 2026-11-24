@@ -139,7 +139,7 @@ func TestHostIdentityGuardOwnerCatalogBoundary(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	var securityDefiner, publicExecute bool
+	var securityDefiner, publicExecute, unexpectedFunctionExecute bool
 	var owner, config string
 	err := db.QueryRowContext(ctx, `
 		SELECT p.prosecdef,
@@ -151,17 +151,22 @@ func TestHostIdentityGuardOwnerCatalogBoundary(t *testing.T) {
 		           COALESCE(p.proacl, pg_catalog.acldefault('f', p.proowner))
 		         ) a
 		         WHERE a.grantee=0 AND a.privilege_type='EXECUTE'
+		       ),
+		       EXISTS (
+		         SELECT 1
+		         FROM pg_catalog.aclexplode(p.proacl) a
+		         WHERE a.grantee <> p.proowner AND a.privilege_type='EXECUTE'
 		       )
 		FROM pg_catalog.pg_proc p
 		WHERE p.oid='public.compute_host_identity_enrollment_guard()'::pg_catalog.regprocedure
-	`).Scan(&securityDefiner, &owner, &config, &publicExecute)
+	`).Scan(&securityDefiner, &owner, &config, &publicExecute, &unexpectedFunctionExecute)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !securityDefiner || owner != "ccp_host_identity_guard_owner" ||
-		config != "search_path=pg_catalog, pg_temp" || publicExecute {
-		t.Fatalf("unsafe HostIdentity guard: security_definer=%t owner=%q search_path=%q public_execute=%t",
-			securityDefiner, owner, config, publicExecute)
+		config != "search_path=pg_catalog, pg_temp" || publicExecute || unexpectedFunctionExecute {
+		t.Fatalf("unsafe HostIdentity guard: security_definer=%t owner=%q search_path=%q public_execute=%t unexpected_execute=%t",
+			securityDefiner, owner, config, publicExecute, unexpectedFunctionExecute)
 	}
 
 	var canLogin, inherit, superuser bool
@@ -200,5 +205,30 @@ func TestHostIdentityGuardOwnerCatalogBoundary(t *testing.T) {
 	}
 	if alwaysTriggers != 3 {
 		t.Fatalf("HostIdentity ALWAYS guard trigger count=%d, want 3", alwaysTriggers)
+	}
+
+	var unexpectedBindingGrant bool
+	if err := db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM pg_catalog.pg_class c
+			CROSS JOIN LATERAL pg_catalog.aclexplode(c.relacl) a
+			WHERE c.oid='public.compute_host_identity_bindings'::pg_catalog.regclass
+			  AND a.grantee <> c.relowner
+		) OR EXISTS (
+			SELECT 1
+			FROM pg_catalog.pg_attribute col
+			CROSS JOIN LATERAL pg_catalog.aclexplode(col.attacl) a
+			WHERE col.attrelid='public.compute_host_identity_bindings'::pg_catalog.regclass
+			  AND a.grantee <> (
+			    SELECT c.relowner FROM pg_catalog.pg_class c
+			    WHERE c.oid='public.compute_host_identity_bindings'::pg_catalog.regclass
+			  )
+		)
+	`).Scan(&unexpectedBindingGrant); err != nil {
+		t.Fatal(err)
+	}
+	if unexpectedBindingGrant {
+		t.Fatal("HostIdentity binding table has grants beyond its owner")
 	}
 }
