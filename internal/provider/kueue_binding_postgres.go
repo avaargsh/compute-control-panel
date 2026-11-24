@@ -308,7 +308,7 @@ func (s *PostgresKueueJobBindingStore) PutPreDeleteDRASnapshot(
 	if err != nil {
 		return KueuePreDeleteDRASnapshot{}, err
 	}
-	previous, exists, err := queryKueuePreDeleteSnapshot(ctx, tx, selectKueuePreDeleteSnapshotSQL+" FOR UPDATE",
+	previous, exists, err := queryKueuePreDeleteSnapshot(ctx, tx, selectKueuePreDeleteSnapshotSQL,
 		namespace, req.TenantID, req.OperationID)
 	if err != nil {
 		return KueuePreDeleteDRASnapshot{}, err

@@ -24,7 +24,7 @@ func preDeleteSnapshotFixture(create, remove Request, namespace, jobName, jobUID
 		Claim:             KubernetesResourceRef{Namespace: namespace, Name: "claim-" + suffix, UID: "claim-uid-" + suffix, ResourceVersion: "14"},
 		ClaimTemplateName: "gpu-template", PodClaimAlias: "gpu", ConsumerContainer: "worker",
 		Devices: []DRAAllocatedDevice{{Request: "gpu", Driver: "vendor.example", Pool: "pool-a", Device: "gpu-uuid-" + suffix}},
-		Source: "kubernetes-api", AdapterVersion: "kueue-dra-v1",
+		Source:  "kubernetes-api", AdapterVersion: "kueue-dra-v1",
 		ObservedAt: time.Date(2026, 11, 24, 10, 0, 0, 0, time.UTC),
 	}
 }
@@ -135,7 +135,9 @@ func TestKueuePreDeleteDRASnapshotRejectsSnapshotAfterDeleteIntent(t *testing.T)
 		{name: "postgres", open: func(t *testing.T) KueueJobBindingStore {
 			db := openProviderPostgresDB(t)
 			store, err := NewPostgresKueueJobBindingStore(db)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			return store
 		}},
 	} {
@@ -146,8 +148,12 @@ func TestKueuePreDeleteDRASnapshotRejectsSnapshotAfterDeleteIntent(t *testing.T)
 			suffix := strings.TrimPrefix(create.OperationID, "op-")
 			jobName, jobUID := "job-"+suffix, "job-uid-"+suffix
 			remove := preDeleteDeleteRequest(create, namespace, jobName, jobUID)
-			if err := store.PutCreatePin(namespace, create, jobName, jobUID); err != nil { t.Fatal(err) }
-			if err := store.PutDeleteTombstone(namespace, remove, jobName, jobUID, false); err != nil { t.Fatal(err) }
+			if err := store.PutCreatePin(namespace, create, jobName, jobUID); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.PutDeleteTombstone(namespace, remove, jobName, jobUID, false); err != nil {
+				t.Fatal(err)
+			}
 			snapshot := preDeleteSnapshotFixture(create, remove, namespace, jobName, jobUID)
 			if _, err := store.PutPreDeleteDRASnapshot(namespace, remove, snapshot); !errors.Is(err, ErrOperationConflict) {
 				t.Fatalf("snapshot was created after DELETE intent: %v", err)
@@ -162,19 +168,23 @@ func TestKueuePreDeleteDRASnapshotRejectsSnapshotAfterDeleteIntent(t *testing.T)
 func TestPostgresKueuePreDeleteSnapshotSerializesWithDeleteIntent(t *testing.T) {
 	db := openProviderPostgresDB(t)
 	store, err := NewPostgresKueueJobBindingStore(db)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	create := uniqueKueueRequest(t)
 	const namespace = "tenant-a"
 	suffix := strings.TrimPrefix(create.OperationID, "op-")
 	jobName, jobUID := "job-"+suffix, "job-uid-"+suffix
 	remove := preDeleteDeleteRequest(create, namespace, jobName, jobUID)
-	if err := store.PutCreatePin(namespace, create, jobName, jobUID); err != nil { t.Fatal(err) }
+	if err := store.PutCreatePin(namespace, create, jobName, jobUID); err != nil {
+		t.Fatal(err)
+	}
 	snapshot := preDeleteSnapshotFixture(create, remove, namespace, jobName, jobUID)
 
 	start := make(chan struct{})
 	type outcome struct {
 		snapshot bool
-		err error
+		err      error
 	}
 	results := make(chan outcome, 2)
 	go func() {
@@ -192,9 +202,15 @@ func TestPostgresKueuePreDeleteSnapshotSerializesWithDeleteIntent(t *testing.T) 
 	var snapshotErr, tombstoneErr error
 	for i := 0; i < 2; i++ {
 		got := <-results
-		if got.snapshot { snapshotErr = got.err } else { tombstoneErr = got.err }
+		if got.snapshot {
+			snapshotErr = got.err
+		} else {
+			tombstoneErr = got.err
+		}
 	}
-	if tombstoneErr != nil { t.Fatalf("DELETE intent failed: %v", tombstoneErr) }
+	if tombstoneErr != nil {
+		t.Fatalf("DELETE intent failed: %v", tombstoneErr)
+	}
 	if snapshotErr == nil {
 		if _, ok, err := store.GetPreDeleteDRASnapshot(namespace, remove); err != nil || !ok {
 			t.Fatalf("snapshot won lock but is missing: ok=%t err=%v", ok, err)
@@ -205,7 +221,6 @@ func TestPostgresKueuePreDeleteSnapshotSerializesWithDeleteIntent(t *testing.T) 
 		t.Fatalf("tombstone won lock but a late snapshot exists: ok=%t err=%v", ok, err)
 	}
 }
-
 
 func TestKueueJobAdapterRecordsAndRequiresPreDeleteDRASnapshot(t *testing.T) {
 	store := NewMemoryKueueJobBindingStore()
@@ -224,20 +239,20 @@ func TestKueueJobAdapterRecordsAndRequiresPreDeleteDRASnapshot(t *testing.T) {
 		t.Fatalf("DRA delete without pre-delete snapshot was not blocked: %v", err)
 	}
 
-	pod := KubernetesResourceRef{Namespace: namespace, Name: "pod-"+suffix, UID: "pod-uid-"+suffix, ResourceVersion: "13"}
+	pod := KubernetesResourceRef{Namespace: namespace, Name: "pod-" + suffix, UID: "pod-uid-" + suffix, ResourceVersion: "13"}
 	evidence := KueueJobEvidence{
 		TenantID: create.TenantID, WorkloadID: create.WorkloadID, DesiredGeneration: create.DesiredGeneration,
-		Job: KubernetesResourceRef{Namespace: namespace, Name: jobName, UID: jobUID, ResourceVersion: "11"},
+		Job:         KubernetesResourceRef{Namespace: namespace, Name: jobName, UID: jobUID, ResourceVersion: "11"},
 		JobTenantID: create.TenantID, JobWorkloadID: create.WorkloadID,
 		JobDesiredGeneration: create.DesiredGeneration,
-		KueueWorkload: KubernetesResourceRef{Namespace: namespace, Name: "kueue-"+suffix, UID: "kueue-uid-"+suffix, ResourceVersion: "12"},
-		KueueOwnerJobUID: jobUID, KueueQuotaReserved: true, KueueClusterQueue: "cq-a", KueueAdmitted: true,
-		KueueQuotaCondition: KueueConditionEvidence{Status: "True"},
-		KueueAdmissionCondition: KueueConditionEvidence{Status: "True"},
-		KueueEvictedCondition: KueueConditionEvidence{Status: "MISSING"},
-		KueuePreemptedCondition: KueueConditionEvidence{Status: "MISSING"},
+		KueueWorkload:        KubernetesResourceRef{Namespace: namespace, Name: "kueue-" + suffix, UID: "kueue-uid-" + suffix, ResourceVersion: "12"},
+		KueueOwnerJobUID:     jobUID, KueueQuotaReserved: true, KueueClusterQueue: "cq-a", KueueAdmitted: true,
+		KueueQuotaCondition:        KueueConditionEvidence{Status: "True"},
+		KueueAdmissionCondition:    KueueConditionEvidence{Status: "True"},
+		KueueEvictedCondition:      KueueConditionEvidence{Status: "MISSING"},
+		KueuePreemptedCondition:    KueueConditionEvidence{Status: "MISSING"},
 		KueuePodSetAssignmentsJSON: "[]",
-		Pod: pod, PodOwnerJobUID: jobUID, PodScheduled: true, PodNodeName: "node-"+suffix,
+		Pod:                        pod, PodOwnerJobUID: jobUID, PodScheduled: true, PodNodeName: "node-" + suffix,
 	}
 	collection := KueueJobCollection{
 		Evidence: evidence,
@@ -249,8 +264,8 @@ func TestKueueJobAdapterRecordsAndRequiresPreDeleteDRASnapshot(t *testing.T) {
 	deviceSet := DRADeviceSetObservation{
 		Pod: pod, NodeName: evidence.PodNodeName, ClaimTemplateName: "gpu-template",
 		PodClaimAlias: "gpu", ConsumerContainer: "worker",
-		Claim: KubernetesResourceRef{Namespace: namespace, Name: "claim-"+suffix, UID: "claim-uid-"+suffix, ResourceVersion: "14"},
-		Devices: []DRAAllocatedDevice{{Request: "gpu", Driver: "vendor.example", Pool: "pool-a", Device: "gpu-uuid-"+suffix}},
+		Claim:   KubernetesResourceRef{Namespace: namespace, Name: "claim-" + suffix, UID: "claim-uid-" + suffix, ResourceVersion: "14"},
+		Devices: []DRAAllocatedDevice{{Request: "gpu", Driver: "vendor.example", Pool: "pool-a", Device: "gpu-uuid-" + suffix}},
 	}
 	snapshot, err := adapter.RecordPreDeleteDRASnapshot(context.Background(), remove, collection, deviceSet)
 	if err != nil || snapshot.Digest == "" {
@@ -309,10 +324,10 @@ func TestPostgresKueuePreDeleteDRASnapshotIsImmutable(t *testing.T) {
 	}
 }
 
-
 func TestKueueJobAdapterBlocksDRADeleteBeforeExternalSideEffectWithoutSnapshot(t *testing.T) {
 	adapter, api, server := newKueueAdapterFixture(t, &kueueAPI{})
 	defer server.Close()
+	adapter.queueName = "queue-a"
 	if err := adapter.UseQueuedResourceClaimTemplate("gpu-template"); err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +358,6 @@ func TestKueueJobAdapterBlocksDRADeleteBeforeExternalSideEffectWithoutSnapshot(t
 		t.Fatalf("DELETE intent was persisted without pre-delete snapshot: exists=%t err=%v", ok, err)
 	}
 }
-
 
 func TestPostgresKueuePreDeleteSnapshotInsertGuardsRejectTenantAndLateWrites(t *testing.T) {
 	db := openProviderPostgresDB(t)
