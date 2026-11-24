@@ -246,7 +246,7 @@ func TestHostCredentialRevocationListStoreKeepsLastGoodSnapshotOnRejectedUpdate(
 		SerialNumber: big.NewInt(9), Subject: f.issuer.Subject,
 		NotBefore: f.now.Add(-time.Hour), NotAfter: f.now.Add(24 * time.Hour),
 		IsCA: true, BasicConstraintsValid: true,
-		KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		KeyUsage:     x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
 		SubjectKeyId: []byte{9, 8, 7, 6},
 	}
 	wrongDER, err := x509.CreateCertificate(rand.Reader, wrongTemplate, wrongTemplate, wrongPublic, wrongKey)
