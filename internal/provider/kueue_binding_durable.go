@@ -123,17 +123,21 @@ func verifyKueueBindingSchema(ctx context.Context, db *sql.DB) error {
 		    SELECT count(*) FROM pg_catalog.pg_proc p
 		    JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
 		    WHERE n.nspname = 'public'
-		      AND p.proname IN ('kueue_job_create_pin_guard', 'kueue_job_delete_tombstone_guard', 'kueue_job_pre_delete_dra_snapshot_guard')
+		      AND p.proname IN ('kueue_job_create_pin_guard', 'kueue_job_delete_tombstone_guard',
+		        'kueue_job_pre_delete_dra_snapshot_guard', 'kueue_job_delete_tombstone_insert_guard',
+		        'kueue_job_pre_delete_dra_snapshot_insert_guard')
 		      AND p.proconfig = ARRAY['search_path=pg_catalog, pg_temp']::pg_catalog.text[]
-		  ) = 3
+		  ) = 5
 		  AND (
 		    SELECT count(*) FROM (VALUES
 		      ('kueue_job_create_pins'::pg_catalog.name, 'kueue_job_create_pin_no_rewrite'::pg_catalog.name),
 		      ('kueue_job_create_pins'::pg_catalog.name, 'kueue_job_create_pin_no_truncate'::pg_catalog.name),
 		      ('kueue_job_delete_tombstones'::pg_catalog.name, 'kueue_job_delete_tombstone_no_rewrite'::pg_catalog.name),
 		      ('kueue_job_delete_tombstones'::pg_catalog.name, 'kueue_job_delete_tombstone_no_truncate'::pg_catalog.name),
+		      ('kueue_job_pre_delete_dra_snapshots'::pg_catalog.name, 'kueue_job_pre_delete_dra_snapshot_before_insert'::pg_catalog.name),
 		      ('kueue_job_pre_delete_dra_snapshots'::pg_catalog.name, 'kueue_job_pre_delete_dra_snapshot_no_update_delete'::pg_catalog.name),
-		      ('kueue_job_pre_delete_dra_snapshots'::pg_catalog.name, 'kueue_job_pre_delete_dra_snapshot_no_truncate'::pg_catalog.name)
+		      ('kueue_job_pre_delete_dra_snapshots'::pg_catalog.name, 'kueue_job_pre_delete_dra_snapshot_no_truncate'::pg_catalog.name),
+		      ('kueue_job_delete_tombstones'::pg_catalog.name, 'kueue_job_delete_tombstone_before_insert'::pg_catalog.name)
 		    ) AS required(relname, tgname)
 		    JOIN pg_catalog.pg_class c ON c.relname = required.relname
 		    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
@@ -212,6 +216,8 @@ func verifyKueueBindingRole(ctx context.Context, db *sql.DB) error {
 		    AND pg_catalog.has_function_privilege(current_user, 'public.kueue_job_create_pin_guard()'::pg_catalog.regprocedure, 'EXECUTE')
 		    AND pg_catalog.has_function_privilege(current_user, 'public.kueue_job_delete_tombstone_guard()'::pg_catalog.regprocedure, 'EXECUTE')
 		    AND pg_catalog.has_function_privilege(current_user, 'public.kueue_job_pre_delete_dra_snapshot_guard()'::pg_catalog.regprocedure, 'EXECUTE')
+		    AND pg_catalog.has_function_privilege(current_user, 'public.kueue_job_delete_tombstone_insert_guard()'::pg_catalog.regprocedure, 'EXECUTE')
+		    AND pg_catalog.has_function_privilege(current_user, 'public.kueue_job_pre_delete_dra_snapshot_insert_guard()'::pg_catalog.regprocedure, 'EXECUTE')
 		  ) THEN 'missing_binding_dml'
 		  WHEN
 		    pg_catalog.has_table_privilege(current_user, 'public.kueue_job_create_pins'::pg_catalog.regclass, 'DELETE')
