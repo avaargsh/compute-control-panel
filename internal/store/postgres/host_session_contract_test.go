@@ -115,6 +115,14 @@ func TestHostSessionStartAndHeartbeatDatabaseContract(t *testing.T) {
 		t.Fatalf("lost-ACK start replay did not return the original fence: first=%+v replay=%+v err=%v", first, replayedStart, err)
 	}
 
+	changedPayload := HostSessionStartRequest{
+		Binding: binding, ExpectedEpoch: 0, RequestID: "start-initial-" + binding.HostID, TTL: 30 * time.Second,
+	}
+	if _, err := restarted.StartHostSession(ctx, changedPayload); !errors.Is(err, ErrHostSessionRejected) ||
+		hostSessionSQLState(err) != "23514" {
+		t.Fatalf("same start request ID with changed TTL was not rejected: %v", err)
+	}
+
 	// A new repository instance must observe the durable active epoch. It must
 	// not replace it merely because a process restarted or expectedEpoch is stale.
 	restarted, err := NewRepository(db)
@@ -226,6 +234,13 @@ func TestHostSessionExpiredEpochReplacementAndProviderDrain(t *testing.T) {
 		hostSessionSQLState(err) != "23514" {
 		t.Fatalf("DRAINING Provider accepted a host heartbeat: %v", err)
 	}
+	replayedSecond, err := repo.StartHostSession(ctx, HostSessionStartRequest{
+		Binding: binding, ExpectedEpoch: first.Epoch, RequestID: "start-successor-" + binding.HostID, TTL: 30 * time.Second,
+	})
+	if err != nil || replayedSecond.SessionID != second.SessionID || replayedSecond.Epoch != second.Epoch {
+		t.Fatalf("lost-ACK replay after Drain did not return original session: replay=%+v second=%+v err=%v",
+			replayedSecond, second, err)
+	}
 	if _, err := repo.StartHostSession(ctx, HostSessionStartRequest{Binding: binding, ExpectedEpoch: second.Epoch, RequestID: "start-draining-" + binding.HostID, TTL: 30 * time.Second}); !errors.Is(err, ErrHostSessionRejected) ||
 		hostSessionSQLState(err) != "23514" {
 		t.Fatalf("DRAINING Provider accepted a new session: %v", err)
@@ -265,6 +280,47 @@ func TestHostSessionConcurrentStartHasOneWinner(t *testing.T) {
 	}
 	if winners != 1 {
 		t.Fatalf("concurrent first-session winners=%d, want exactly one", winners)
+	}
+}
+
+func TestHostSessionConcurrentSameRequestIsIdempotent(t *testing.T) {
+	db := openIntegrationDB(t)
+	repo, binding := hostSessionFixture(t, db)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	request := HostSessionStartRequest{
+		Binding: binding, ExpectedEpoch: 0,
+		RequestID: "start-same-" + binding.HostID, TTL: 30 * time.Second,
+	}
+	const parallel = 8
+	errs := make([]error, parallel)
+	fences := make([]hostidentity.SessionFence, parallel)
+	var wg sync.WaitGroup
+	for i := range errs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			fences[i], errs[i] = repo.StartHostSession(ctx, request)
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("same idempotency request %d did not replay successfully: %v", i, err)
+		}
+		if fences[i].Epoch != fences[0].Epoch || fences[i].SessionID != fences[0].SessionID ||
+			!fences[i].IssuedAt.Equal(fences[0].IssuedAt) || !fences[i].ExpiresAt.Equal(fences[0].ExpiresAt) {
+			t.Fatalf("same idempotency key returned divergent session fences: first=%+v current=%+v", fences[0], fences[i])
+		}
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM public.compute_host_sessions WHERE host_id=$1`,
+		binding.HostID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("concurrent same-request session rows=%d, want 1", count)
 	}
 }
 
@@ -477,6 +533,13 @@ func TestHostSessionInvalidInputsFailBeforeDatabase(t *testing.T) {
 	if _, err := repo.StartHostSession(ctx, HostSessionStartRequest{Binding: hostidentity.Binding{}, ExpectedEpoch: 0, RequestID: "invalid-binding", TTL: time.Second}); !errors.Is(err, ErrHostSessionInvalid) {
 		t.Fatalf("empty HostIdentity binding accepted: %v", err)
 	}
+	if _, err := repo.StartHostSession(ctx, HostSessionStartRequest{Binding: binding, ExpectedEpoch: 0, RequestID: "", TTL: time.Second}); !errors.Is(err, ErrHostSessionInvalid) {
+		t.Fatalf("empty session start idempotency key accepted: %v", err)
+	}
+	if _, err := repo.StartHostSession(ctx, HostSessionStartRequest{Binding: binding, ExpectedEpoch: -1, RequestID: "negative-epoch", TTL: time.Second}); !errors.Is(err, ErrHostSessionInvalid) {
+		t.Fatalf("negative expected epoch accepted: %v", err)
+	}
+
 	if _, _, err := repo.RecordHostHeartbeat(ctx, hostidentity.Heartbeat{Binding: binding, Epoch: 1, SessionID: "s", Sequence: 1, Digest: "bad"}); !errors.Is(err, ErrHostSessionInvalid) {
 		t.Fatalf("invalid heartbeat digest accepted: %v", err)
 	}
