@@ -20,7 +20,8 @@ func TestVerifyHostCredential(t *testing.T) {
 	ca := &x509.Certificate{
 		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "host fixture CA"},
 		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour),
-		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
+		IsCA: true, BasicConstraintsValid: true,
+		KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign, SubjectKeyId: []byte{1, 2, 3, 4},
 	}
 	rawCA, err := x509.CreateCertificate(rand.Reader, ca, ca, pub, key)
 	if err != nil {
@@ -32,6 +33,16 @@ func TestVerifyHostCredential(t *testing.T) {
 	}
 	roots := x509.NewCertPool()
 	roots.AddCert(root)
+	crlDER, err := x509.CreateRevocationList(rand.Reader, &x509.RevocationList{
+		Number: big.NewInt(1), ThisUpdate: now.Add(-time.Minute), NextUpdate: now.Add(time.Hour),
+	}, root, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revocationLists, err := ParseHostCredentialRevocationLists([][]byte{crlDER})
+	if err != nil {
+		t.Fatal(err)
+	}
 	leafPub, _, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -72,13 +83,13 @@ func TestVerifyHostCredential(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			subject, err := VerifyHostCredential([][]byte{raw}, roots, "ccp.example", tc.when)
+			subject, err := VerifyHostCredential([][]byte{raw}, roots, "ccp.example", revocationLists, tc.when)
 			if tc.ok {
 				if err != nil || subject != tc.uris[0] {
 					t.Fatalf("valid host rejected: %q, %v", subject, err)
 				}
 				for _, untrusted := range []*x509.CertPool{nil, x509.NewCertPool()} {
-					if subject, err := VerifyHostCredential([][]byte{raw}, untrusted, "ccp.example", now); err == nil || subject != "" {
+					if subject, err := VerifyHostCredential([][]byte{raw}, untrusted, "ccp.example", revocationLists, now); err == nil || subject != "" {
 						t.Fatal("accepted without explicit trusted roots")
 					}
 				}
@@ -87,7 +98,7 @@ func TestVerifyHostCredential(t *testing.T) {
 			}
 		})
 	}
-	if subject, err := VerifyHostCredential(nil, roots, "ccp.example", now); err == nil || subject != "" {
+	if subject, err := VerifyHostCredential(nil, roots, "ccp.example", revocationLists, now); err == nil || subject != "" {
 		t.Fatal("accepted missing certificate")
 	}
 }

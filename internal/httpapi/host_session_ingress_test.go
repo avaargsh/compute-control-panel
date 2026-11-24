@@ -83,9 +83,10 @@ func (s *hostSessionIngressRepositoryStub) setStartError(err error) {
 }
 
 type hostCredentialAuthority struct {
-	roots *x509.CertPool
-	ca    *x509.Certificate
-	key   ed25519.PrivateKey
+	roots  *x509.CertPool
+	ca     *x509.Certificate
+	key    ed25519.PrivateKey
+	crlDER []byte
 }
 
 func newHostCredentialAuthority(t *testing.T) *hostCredentialAuthority {
@@ -100,7 +101,8 @@ func newHostCredentialAuthority(t *testing.T) *hostCredentialAuthority {
 		Subject:      pkix.Name{CommonName: "CCP host-only test CA"},
 		NotBefore:    now.Add(-time.Hour), NotAfter: now.Add(time.Hour),
 		IsCA: true, BasicConstraintsValid: true,
-		KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+		KeyUsage:     x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
+		SubjectKeyId: []byte{1, 2, 3, 4},
 	}
 	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, publicKey, privateKey)
 	if err != nil {
@@ -112,7 +114,33 @@ func newHostCredentialAuthority(t *testing.T) *hostCredentialAuthority {
 	}
 	roots := x509.NewCertPool()
 	roots.AddCert(ca)
-	return &hostCredentialAuthority{roots: roots, ca: ca, key: privateKey}
+	crlDER, err := x509.CreateRevocationList(rand.Reader, &x509.RevocationList{
+		Number: big.NewInt(1), ThisUpdate: now.Add(-time.Minute), NextUpdate: now.Add(24 * time.Hour),
+	}, ca, privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &hostCredentialAuthority{roots: roots, ca: ca, key: privateKey, crlDER: crlDER}
+}
+
+func (a *hostCredentialAuthority) revocationList(
+	t *testing.T, thisUpdate, nextUpdate time.Time, revoked ...int64,
+) []byte {
+	t.Helper()
+	entries := make([]x509.RevocationListEntry, 0, len(revoked))
+	for _, serial := range revoked {
+		entries = append(entries, x509.RevocationListEntry{
+			SerialNumber: big.NewInt(serial), RevocationTime: time.Now().UTC().Add(-time.Minute),
+		})
+	}
+	der, err := x509.CreateRevocationList(rand.Reader, &x509.RevocationList{
+		Number: big.NewInt(2), ThisUpdate: thisUpdate, NextUpdate: nextUpdate,
+		RevokedCertificateEntries: entries,
+	}, a.ca, a.key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return der
 }
 
 func (a *hostCredentialAuthority) issue(t *testing.T, subject string, serial int64) tls.Certificate {
@@ -176,11 +204,20 @@ func startHostSessionIngressTLSServer(
 }
 
 func newHostSessionIngressHandler(
-	t *testing.T, roots *x509.CertPool, repo *hostSessionIngressRepositoryStub,
+	t *testing.T, authority *hostCredentialAuthority, repo *hostSessionIngressRepositoryStub,
+) http.Handler {
+	t.Helper()
+	return newHostSessionIngressHandlerWithPolicy(t, authority, [][]byte{authority.crlDER}, time.Now, repo)
+}
+
+func newHostSessionIngressHandlerWithPolicy(
+	t *testing.T, authority *hostCredentialAuthority, crls [][]byte,
+	now func() time.Time, repo *hostSessionIngressRepositoryStub,
 ) http.Handler {
 	t.Helper()
 	handler, err := NewHostSessionIngressHandler(HostSessionIngressDependencies{
-		HostTrustRoots: roots, HostTrustDomain: "ccp.example", Repository: repo,
+		HostTrustRoots: authority.roots, HostTrustDomain: "ccp.example",
+		HostRevocationCRLs: crls, Now: now, Repository: repo,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -198,8 +235,21 @@ func TestNewHostSessionIngressHandlerRequiresDedicatedTrustAndRepository(t *test
 	}
 	if _, err := NewHostSessionIngressHandler(HostSessionIngressDependencies{
 		HostTrustRoots: authority.roots, HostTrustDomain: "ccp.example",
+		HostRevocationCRLs: [][]byte{authority.crlDER}, Now: time.Now,
 	}); err == nil {
 		t.Fatal("missing HostSession repository allowed ingress construction")
+	}
+	if _, err := NewHostSessionIngressHandler(HostSessionIngressDependencies{
+		HostTrustRoots: authority.roots, HostTrustDomain: "ccp.example",
+		Repository: repo, Now: time.Now,
+	}); err == nil {
+		t.Fatal("missing issuer CRL allowed ingress construction")
+	}
+	if _, err := NewHostSessionIngressHandler(HostSessionIngressDependencies{
+		HostTrustRoots: authority.roots, HostTrustDomain: "ccp.example",
+		HostRevocationCRLs: [][]byte{authority.crlDER}, Repository: repo,
+	}); err == nil {
+		t.Fatal("missing verifier clock allowed ingress construction")
 	}
 }
 
@@ -218,7 +268,7 @@ func TestHostSessionIngressStartsAndRecordsOnlyDedicatedHostCredential(t *testin
 		},
 		disposition: hostidentity.Accept, recordedAt: recordedAt,
 	}
-	handler := newHostSessionIngressHandler(t, authority.roots, repo)
+	handler := newHostSessionIngressHandler(t, authority, repo)
 	server, client := startHostSessionIngressTLSServer(t, handler, authority.roots, &clientCert)
 
 	start, err := http.NewRequest(http.MethodPost, server.URL+hostSessionStartPath,
@@ -295,10 +345,63 @@ func TestHostSessionIngressStartsAndRecordsOnlyDedicatedHostCredential(t *testin
 	}
 }
 
+func TestHostSessionIngressRejectsRevokedCertificateBeforeRepository(t *testing.T) {
+	authority := newHostCredentialAuthority(t)
+	clientCert := authority.issue(t, hostSessionIngressSubject, 77)
+	now := time.Now().UTC()
+	crl := authority.revocationList(t, now.Add(-time.Minute), now.Add(time.Hour), 77)
+	repo := &hostSessionIngressRepositoryStub{}
+	handler := newHostSessionIngressHandlerWithPolicy(t, authority, [][]byte{crl}, time.Now, repo)
+	server, client := startHostSessionIngressTLSServer(t, handler, authority.roots, &clientCert)
+
+	request, err := http.NewRequest(http.MethodPost, server.URL+hostSessionStartPath,
+		strings.NewReader(`{"expected_epoch":0,"ttl_seconds":30}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", "revoked-host-start")
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if calls, _ := repo.observedStart(); response.StatusCode != http.StatusUnauthorized || calls != 0 {
+		t.Fatalf("revoked host credential reached repository: HTTP %d calls=%d", response.StatusCode, calls)
+	}
+}
+
+func TestHostSessionIngressUsesInjectedClockForCertificateExpiry(t *testing.T) {
+	authority := newHostCredentialAuthority(t)
+	clientCert := authority.issue(t, hostSessionIngressSubject, 78)
+	repo := &hostSessionIngressRepositoryStub{}
+	future := clientCert.Leaf.NotAfter.Add(time.Second)
+	handler := newHostSessionIngressHandlerWithPolicy(
+		t, authority, [][]byte{authority.crlDER}, func() time.Time { return future }, repo,
+	)
+	server, client := startHostSessionIngressTLSServer(t, handler, authority.roots, &clientCert)
+
+	request, err := http.NewRequest(http.MethodPost, server.URL+hostSessionStartPath,
+		strings.NewReader(`{"expected_epoch":0,"ttl_seconds":30}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", "expired-host-start")
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if calls, _ := repo.observedStart(); response.StatusCode != http.StatusUnauthorized || calls != 0 {
+		t.Fatalf("certificate expired at injected verifier clock was accepted: HTTP %d calls=%d", response.StatusCode, calls)
+	}
+}
+
 func TestHostSessionIngressRejectsMissingOrNonHostCredentials(t *testing.T) {
 	authority := newHostCredentialAuthority(t)
 	repo := &hostSessionIngressRepositoryStub{}
-	handler := newHostSessionIngressHandler(t, authority.roots, repo)
+	handler := newHostSessionIngressHandler(t, authority, repo)
 	server, noCredentialClient := startHostSessionIngressTLSServer(t, handler, authority.roots, nil)
 
 	request, err := http.NewRequest(http.MethodPost, server.URL+hostSessionStartPath,
@@ -338,7 +441,7 @@ func TestHostSessionIngressRejectsAmbiguousJSONAndInvalidSessionFields(t *testin
 	authority := newHostCredentialAuthority(t)
 	clientCert := authority.issue(t, hostSessionIngressSubject, 4)
 	repo := &hostSessionIngressRepositoryStub{}
-	handler := newHostSessionIngressHandler(t, authority.roots, repo)
+	handler := newHostSessionIngressHandler(t, authority, repo)
 	server, client := startHostSessionIngressTLSServer(t, handler, authority.roots, &clientCert)
 
 	for _, body := range []string{
@@ -369,7 +472,7 @@ func TestHostSessionIngressMapsRepositoryFencesWithoutLeakingErrors(t *testing.T
 	authority := newHostCredentialAuthority(t)
 	clientCert := authority.issue(t, hostSessionIngressSubject, 5)
 	repo := &hostSessionIngressRepositoryStub{startErr: postgres.ErrHostSessionUnauthorized}
-	handler := newHostSessionIngressHandler(t, authority.roots, repo)
+	handler := newHostSessionIngressHandler(t, authority, repo)
 	server, client := startHostSessionIngressTLSServer(t, handler, authority.roots, &clientCert)
 
 	request, err := http.NewRequest(http.MethodPost, server.URL+hostSessionStartPath,

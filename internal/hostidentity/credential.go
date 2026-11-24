@@ -1,6 +1,7 @@
 package hostidentity
 
 import (
+	"bytes"
 	"crypto/x509"
 	"encoding/asn1"
 	"errors"
@@ -12,15 +13,101 @@ import (
 var ErrHostCredential = errors.New("host credential verification failed")
 
 var hostTrustLabel = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
-var hostMachineID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,255}$`)
+var hostMachineID = regexp.MustCompile("^[a-zA-Z0-9][a-zA-Z0-9._-]{0,255}$")
+
+var deltaCRLIndicatorOID = asn1.ObjectIdentifier{2, 5, 29, 27}
+var issuingDistributionPointOID = asn1.ObjectIdentifier{2, 5, 29, 28}
+var certificateIssuerOID = asn1.ObjectIdentifier{2, 5, 29, 29}
+
+// ParseHostCredentialRevocationLists parses a bounded, explicit CRL bundle.
+// One CRL per issuer is accepted; delta and indirect CRLs are unsupported.
+func ParseHostCredentialRevocationLists(encoded [][]byte) ([]*x509.RevocationList, error) {
+	if len(encoded) == 0 || len(encoded) > 8 {
+		return nil, ErrHostCredential
+	}
+	lists := make([]*x509.RevocationList, 0, len(encoded))
+	issuers := make(map[string]struct{}, len(encoded))
+	for _, der := range encoded {
+		if len(der) == 0 || len(der) > 1<<20 {
+			return nil, ErrHostCredential
+		}
+		list, err := x509.ParseRevocationList(append([]byte(nil), der...))
+		if err != nil || list.Number == nil || list.Number.Sign() <= 0 ||
+			list.ThisUpdate.IsZero() || list.NextUpdate.IsZero() ||
+			!list.ThisUpdate.Before(list.NextUpdate) || len(list.RawIssuer) == 0 ||
+			len(list.AuthorityKeyId) == 0 {
+			return nil, ErrHostCredential
+		}
+		for _, ext := range list.Extensions {
+			if ext.Critical || ext.Id.Equal(deltaCRLIndicatorOID) || ext.Id.Equal(issuingDistributionPointOID) {
+				return nil, ErrHostCredential
+			}
+		}
+		for _, entry := range list.RevokedCertificateEntries {
+			if entry.SerialNumber == nil || entry.SerialNumber.Sign() <= 0 {
+				return nil, ErrHostCredential
+			}
+			for _, ext := range entry.Extensions {
+				if ext.Critical || ext.Id.Equal(certificateIssuerOID) {
+					return nil, ErrHostCredential
+				}
+			}
+		}
+		issuer := string(list.RawIssuer)
+		if _, exists := issuers[issuer]; exists {
+			return nil, ErrHostCredential
+		}
+		issuers[issuer] = struct{}{}
+		lists = append(lists, list)
+	}
+	return lists, nil
+}
+
+func verifyHostCredentialRevocation(chains [][]*x509.Certificate, lists []*x509.RevocationList, now time.Time) error {
+	if len(chains) == 0 || len(lists) == 0 {
+		return ErrHostCredential
+	}
+	for _, chain := range chains {
+		if len(chain) < 2 {
+			return ErrHostCredential
+		}
+		for i := 0; i < len(chain)-1; i++ {
+			certificate, issuer := chain[i], chain[i+1]
+			if certificate == nil || certificate.SerialNumber == nil || issuer == nil ||
+				!issuer.IsCA || issuer.KeyUsage&x509.KeyUsageCRLSign == 0 || len(issuer.SubjectKeyId) == 0 {
+				return ErrHostCredential
+			}
+			var matched *x509.RevocationList
+			for _, list := range lists {
+				if bytes.Equal(list.RawIssuer, issuer.RawSubject) {
+					if matched != nil {
+						return ErrHostCredential
+					}
+					matched = list
+				}
+			}
+			if matched == nil || !bytes.Equal(matched.AuthorityKeyId, issuer.SubjectKeyId) ||
+				now.Before(matched.ThisUpdate) || !now.Before(matched.NextUpdate) ||
+				matched.CheckSignatureFrom(issuer) != nil {
+				return ErrHostCredential
+			}
+			for _, entry := range matched.RevokedCertificateEntries {
+				if entry.SerialNumber.Cmp(certificate.SerialNumber) == 0 {
+					return ErrHostCredential
+				}
+			}
+		}
+	}
+	return nil
+}
 
 // VerifyHostCredential validates presented DER certificates against an explicit,
 // host-only trust bundle and the v1 spiffe://domain/host/machine-id profile.
-// It is not proof of private-key possession, machine attestation, authorization
-// or revocation. A future direct mTLS transport must prove possession and
-// resolve the returned subject against the current independent host authority.
+// It is not proof of machine attestation or software authorization. A direct
+// mTLS listener must prove private-key possession, and the returned subject
+// must resolve against the current independent host authority.
 // No caller-provided certificate bytes alone may authorize a session write.
-func VerifyHostCredential(chain [][]byte, roots *x509.CertPool, trustDomain string, now time.Time) (string, error) {
+func VerifyHostCredential(chain [][]byte, roots *x509.CertPool, trustDomain string, revocationLists []*x509.RevocationList, now time.Time) (string, error) {
 	if roots == nil || now.IsZero() || len(chain) == 0 || len(chain) > 8 || len(trustDomain) > 253 {
 		return "", ErrHostCredential
 	}
@@ -58,7 +145,11 @@ func VerifyHostCredential(chain [][]byte, roots *x509.CertPool, trustDomain stri
 	if !clientAuth {
 		return "", ErrHostCredential
 	}
-	if _, err := leaf.Verify(x509.VerifyOptions{Roots: roots, Intermediates: intermediates, CurrentTime: now, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}); err != nil {
+	verifiedChains, err := leaf.Verify(x509.VerifyOptions{
+		Roots: roots, Intermediates: intermediates, CurrentTime: now,
+		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	})
+	if err != nil || verifyHostCredentialRevocation(verifiedChains, revocationLists, now) != nil {
 		return "", ErrHostCredential
 	}
 	// Inspect the original SAN encoding to reject aliases that URL parsing may

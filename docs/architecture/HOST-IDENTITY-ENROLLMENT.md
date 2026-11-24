@@ -1,6 +1,6 @@
 # HostIdentity PostgreSQL enrollment boundary
 
-Status: **unmounted authenticated-ingress candidate**. Immutable HostIdentity bindings and durable session-epoch/heartbeat receipts exist in PostgreSQL. The dedicated host-only X.509 verifier, revocable subject-grant boundary and standalone session/heartbeat HTTP handler are implemented in PR #197 but are not mounted. No independent hardware attestation, administrator enrollment workflow, certificate CRL/OCSP revocation, Kubernetes Lease ingestion, hardware trust, or GPU capacity authority is enabled.
+Status: **unmounted authenticated-ingress candidate**. Immutable HostIdentity bindings and durable session-epoch/heartbeat receipts exist in PostgreSQL. The dedicated host-only X.509 verifier, revocable subject-grant boundary and standalone session/heartbeat HTTP handler are implemented in PR #197; static issuer-CRL enforcement is added in PR #203. The handler remains unmounted. No independent hardware attestation, administrator enrollment workflow, OCSP, Kubernetes Lease ingestion, hardware trust, or GPU capacity authority is enabled. The unmounted host verifier now supports an explicit static issuer-CRL bundle; this is not an OCSP or dynamic CRL distribution service.
 
 ## Authority and lifecycle
 
@@ -74,7 +74,9 @@ The transport identity is a **dedicated machine certificate**, not a workload/Co
 - The leaf must be valid at the verifier's current clock, non-CA, carry `KeyUsageDigitalSignature`, explicitly include `ExtKeyUsageClientAuth`, and must not use `ExtKeyUsageAny`.
 - The original SAN extension must contain exactly one URI GeneralName and no other SAN identity. The URI must be canonical `spiffe://<trust-domain>/host/<machine-id>`; workload namespace paths, aliases, extra SANs, foreign trust domains, malformed chains and expired certificates fail closed.
 - TLS client authentication proves possession of the certificate's private key. It does **not** prove TPM/TEE state, secure boot, image integrity, physical device ownership or Kubernetes Node truth. Those facts still require an independent machine-attestation authority before an operator provisions a subject grant.
-- Certificate CRL/OCSP serial revocation is not implemented. Current software authorization revocation is the one-way HostIdentity subject-grant revocation below; emergency CA distrust requires host trust-bundle rotation. Do not describe this as full PKI revocation.
+- The unmounted verifier requires an explicit, bounded issuer-CRL bundle. Every non-root certificate in every verified path must have exactly one current CRL signed by its actual issuer, with matching Authority Key Identifier, issuer `cRLSign` usage, valid signature and current `ThisUpdate` / `NextUpdate` window. Missing, malformed, duplicate-issuer, expired, not-yet-valid, wrong-key, unsupported delta/indirect or serial-revoking CRLs fail closed before repository access.
+- CRLs are parsed once when the standalone handler is constructed. A CRL update takes effect only after the handler is restarted; this candidate does not fetch distribution points or implement OCSP. Operational deployments requiring automatic refresh or OCSP must remain unmounted until that policy is implemented and reviewed.
+- Current software authorization revocation remains the one-way HostIdentity subject-grant revocation below. Emergency CA distrust still requires host trust-bundle rotation. Static CRL verification is not a complete PKI operations system.
 
 ### Subject grant and atomic authorization
 
@@ -136,10 +138,11 @@ The handler registers routes only on a private mux returned by `NewHostSessionIn
 | Requested session TTL exceeds grant expiry | Reject; no durable session row |
 | Drain races with session start/heartbeat | Existing Provider row lock and session fence reject new effect |
 | Lost start ACK / exact heartbeat replay | Original session/receipt only; heartbeat replay does not extend expiry |
-| Certificate serial revoked by CRL/OCSP | **Not implemented**; keep listener unmounted until a serial-revocation authority is selected or explicitly accepted as a residual risk |
+| Certificate serial revoked, missing or expired issuer CRL | Reject before repository access; exact issuer signature, AKI, freshness and serial are checked on every request |
+| CRL rotation or OCSP response required | CRL bundle is startup-loaded and requires handler restart; OCSP is unsupported. Keep listener unmounted if dynamic refresh/OCSP is mandatory |
 | Missing TPM/TEE/Node Lease/device evidence | No hardware trust, GPU READY/free/released or capacity assertion |
 
-This is an internal software identity and durable session boundary only. It does not add an enrollment API, hardware attestation, certificate CRL/OCSP validation, Kubernetes Lease freshness, physical GPU UUID evidence, health, DRA release, G04/G05 or Cost FINAL. Keep the handler unmounted until the independent machine authority, operational grant provisioning, certificate revocation decision, dedicated listener configuration, exact-head CI and branch governance are separately approved.
+This is an internal software identity and durable session boundary only. It does not add an enrollment API, hardware attestation, OCSP validation or dynamic CRL refresh, Kubernetes Lease freshness, physical GPU UUID evidence, health, DRA release, G04/G05 or Cost FINAL. Keep the handler unmounted until the independent machine authority, operational grant provisioning, CRL refresh/OCSP operating requirements, dedicated listener configuration, independent security review, exact-head CI and branch governance are separately approved.
 
 ## Session verification
 

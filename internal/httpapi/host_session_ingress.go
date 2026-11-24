@@ -33,15 +33,19 @@ type HostSessionIngressRepository interface {
 }
 
 type HostSessionIngressDependencies struct {
-	HostTrustRoots  *x509.CertPool
-	HostTrustDomain string
-	Repository      HostSessionIngressRepository
+	HostTrustRoots     *x509.CertPool
+	HostTrustDomain    string
+	HostRevocationCRLs [][]byte
+	Now                func() time.Time
+	Repository         HostSessionIngressRepository
 }
 
 type hostSessionIngressHandler struct {
-	roots       *x509.CertPool
-	trustDomain string
-	repo        HostSessionIngressRepository
+	roots           *x509.CertPool
+	trustDomain     string
+	revocationLists []*x509.RevocationList
+	now             func() time.Time
+	repo            HostSessionIngressRepository
 }
 
 // NewHostSessionIngressHandler constructs a standalone, unmounted host-only
@@ -50,11 +54,17 @@ type hostSessionIngressHandler struct {
 func NewHostSessionIngressHandler(deps HostSessionIngressDependencies) (http.Handler, error) {
 	if deps.HostTrustRoots == nil || strings.TrimSpace(deps.HostTrustDomain) == "" ||
 		strings.TrimSpace(deps.HostTrustDomain) != deps.HostTrustDomain ||
-		len(deps.HostTrustDomain) > 253 || missingProviderManagementDependency(deps.Repository) {
-		return nil, errors.New("host session ingress requires a dedicated host trust bundle, trust domain and repository")
+		len(deps.HostTrustDomain) > 253 || deps.Now == nil ||
+		missingProviderManagementDependency(deps.Repository) {
+		return nil, errors.New("host session ingress requires dedicated trust roots, trust domain, current CRLs, clock and repository")
+	}
+	revocationLists, err := hostidentity.ParseHostCredentialRevocationLists(deps.HostRevocationCRLs)
+	if err != nil {
+		return nil, errors.New("host session ingress requires a valid explicit issuer CRL bundle")
 	}
 	h := &hostSessionIngressHandler{
-		roots: deps.HostTrustRoots.Clone(), trustDomain: deps.HostTrustDomain, repo: deps.Repository,
+		roots: deps.HostTrustRoots.Clone(), trustDomain: deps.HostTrustDomain,
+		revocationLists: revocationLists, now: deps.Now, repo: deps.Repository,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST "+hostSessionStartPath, h.start)
@@ -148,7 +158,7 @@ func (h *hostSessionIngressHandler) subject(w http.ResponseWriter, r *http.Reque
 		}
 		chain = append(chain, cert.Raw)
 	}
-	subject, err := hostidentity.VerifyHostCredential(chain, h.roots, h.trustDomain, time.Now())
+	subject, err := hostidentity.VerifyHostCredential(chain, h.roots, h.trustDomain, h.revocationLists, h.now())
 	if err != nil {
 		writeWorkloadAPIError(w, http.StatusUnauthorized, "HOST_UNAUTHENTICATED", "Dedicated host credential required")
 		return "", false
