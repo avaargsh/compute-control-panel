@@ -126,6 +126,62 @@ for attempt in {1..30}; do
 done
 [[ "$lease_present" == true ]] || { echo "kind kubelet Lease not available" >&2; exit 1; }
 
+# Only this disposable test cluster receives scoped Lease GET permission.
+# Verify the unprivileged baseline before granting it, including denied SA.
+lease_resource="leases.coordination.k8s.io"
+if [[ "$(kubectl auth can-i get "$lease_resource" --resource-name="$node_name" --as="$allow" -n kube-node-lease)" != "no" ]]; then
+  echo "Lease GET unexpectedly granted before test Role" >&2; exit 1
+fi
+if [[ "$(kubectl auth can-i get "$lease_resource" --resource-name="$node_name" --as="$deny" -n kube-node-lease)" != "no" ]]; then
+  echo "denied ServiceAccount unexpectedly has Lease GET" >&2; exit 1
+fi
+kubectl apply -f - <<YAML
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ccp-inventory-smoke-lease-get
+  namespace: kube-node-lease
+rules:
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  resourceNames: ["$node_name"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ccp-inventory-smoke-lease-get
+  namespace: kube-node-lease
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ccp-inventory-smoke-lease-get
+subjects:
+- kind: ServiceAccount
+  name: inventory-allowed
+  namespace: $namespace
+YAML
+
+# Assert exact-name GET is allowed, but wildcard/sibling GET, list/watch,
+# mutations, and the independently denied SA remain forbidden.
+[[ "$(kubectl auth can-i get "$lease_resource" --resource-name="$node_name" --as="$allow" -n kube-node-lease)" == "yes" ]] || {
+  echo "exact-name Node Lease GET was not granted" >&2; exit 1
+}
+[[ "$(kubectl auth can-i get "$lease_resource" --resource-name="$node_name-not-granted" --as="$allow" -n kube-node-lease)" == "no" ]] || {
+  echo "Lease GET escaped its resourceName fence" >&2; exit 1
+}
+[[ "$(kubectl auth can-i get "$lease_resource" --resource-name="$node_name" --as="$deny" -n kube-node-lease)" == "no" ]] || {
+  echo "denied identity gained Lease GET" >&2; exit 1
+}
+[[ "$(kubectl auth can-i get "$lease_resource" --resource-name="$node_name" --as="$allow" -n default)" == "no" ]] || {
+  echo "Lease GET escaped its namespace fence" >&2; exit 1
+}
+for verb in list watch create update patch delete; do
+  [[ "$(kubectl auth can-i "$verb" "$lease_resource" --as="$allow" -n kube-node-lease)" == "no" ]] || {
+    echo "Lease $verb permission exceeds read-only named GET" >&2; exit 1
+  }
+done
+
 CCP_KIND_INVENTORY_SMOKE=1 \
 CCP_KIND_LEASE_NODE_NAME="$node_name" \
 CCP_KIND_API_SERVER="$server" \
