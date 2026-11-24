@@ -191,7 +191,6 @@ func TestRestrictedDRAJournalRequiresExactSourceScopeAndFreshness(t *testing.T) 
 	}
 }
 
-
 func TestRestrictedDRAJournalResolvesRegisteredVerifierBeforeHistoricalCandidate(t *testing.T) {
 	admin := openProviderPostgresDB(t)
 	if !postgresCurrentUserIsSuperuser(t, admin) {
