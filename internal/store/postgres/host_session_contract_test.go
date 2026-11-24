@@ -57,6 +57,26 @@ func TestHostSessionStartAndHeartbeatDatabaseContract(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
+	var functionOwner, tableOwner string
+	var securityDefiner, canSelect, canInsert, schemaUsage, rowSecurity bool
+	if err := db.QueryRowContext(ctx, `
+		SELECT pg_catalog.pg_get_userbyid(p.proowner),
+		       pg_catalog.pg_get_userbyid(c.relowner),
+		       p.prosecdef,
+		       pg_catalog.has_table_privilege(p.proowner, c.oid, 'SELECT'),
+		       pg_catalog.has_table_privilege(p.proowner, c.oid, 'INSERT'),
+		       pg_catalog.has_schema_privilege(p.proowner, 'public', 'USAGE'),
+		       c.relrowsecurity
+		FROM pg_catalog.pg_proc p
+		CROSS JOIN pg_catalog.pg_class c
+		WHERE p.oid='public.compute_host_session_start(text,text,text,text,text,bigint,integer)'::pg_catalog.regprocedure
+		  AND c.oid='public.compute_host_sessions'::pg_catalog.regclass
+	`).Scan(&functionOwner, &tableOwner, &securityDefiner, &canSelect, &canInsert, &schemaUsage, &rowSecurity); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("HostSession definer catalog: function_owner=%s table_owner=%s security_definer=%t select=%t insert=%t schema_usage=%t row_security=%t",
+		functionOwner, tableOwner, securityDefiner, canSelect, canInsert, schemaUsage, rowSecurity)
+
 	var before, after time.Time
 	if err := db.QueryRowContext(ctx, `SELECT pg_catalog.clock_timestamp()`).Scan(&before); err != nil {
 		t.Fatal(err)
