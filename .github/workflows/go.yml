@@ -286,7 +286,44 @@ jobs:
           DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
         run: |
           set -euo pipefail
-          go test -count=1 -v -run '^(TestKueuePreDeleteDRASnapshotStoreConformance|TestKueuePreDeleteDRASnapshotRejectsSnapshotAfterDeleteIntent|TestPostgresKueuePreDeleteSnapshotSerializesWithDeleteIntent|TestKueueJobAdapterRecordsAndRequiresPreDeleteDRASnapshot|TestKueueJobAdapterBlocksDRADeleteBeforeExternalSideEffectWithoutSnapshot|TestPostgresKueuePreDeleteDRASnapshotIsImmutable|TestPostgresKueuePreDeleteSnapshotInsertGuardsRejectTenantAndLateWrites) ./internal/provider | tee kueue-predelete-dra-snapshot-pg.log
+          go test -count=1 -v -run '^(TestKueuePreDeleteDRASnapshotStoreConformance|TestKueuePreDeleteDRASnapshotRejectsSnapshotAfterDeleteIntent|TestPostgresKueuePreDeleteSnapshotSerializesWithDeleteIntent|TestKueueJobAdapterRecordsAndRequiresPreDeleteDRASnapshot|TestKueueJobAdapterBlocksDRADeleteBeforeExternalSideEffectWithoutSnapshot|TestPostgresKueuePreDeleteDRASnapshotIsImmutable|TestPostgresKueuePreDeleteSnapshotInsertGuardsRejectTenantAndLateWrites)        shell: bash
+        env:
+          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
+        run: |
+          set -euo pipefail
+          go test -count=1 -v -run '^TestCorrelatedReleasePreflightChecksCurrentPostgresRows$' ./internal/store/postgres | tee release-bridge-pg.log
+          grep -F -- '--- PASS: TestCorrelatedReleasePreflightChecksCurrentPostgresRows' release-bridge-pg.log
+          if grep -F -- '--- SKIP:' release-bridge-pg.log; then
+            echo 'real PostgreSQL release bridge test skipped: no evidence' >&2
+            exit 1
+          fi
+          printf 'verified_release_bridge_source_sha=%s\n' "$(git rev-parse --verify HEAD)"
+      - name: Require real PostgreSQL recorded DRA receipt acceptance (no skip)
+        shell: bash
+        env:
+          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
+        run: |
+          set -euo pipefail
+          go test -count=1 -v -run '^TestRecordedDRAReceipt(SameTransactionPresenceReplayAndRevocation|RejectsUnrestrictedTestOnlyJournalIngress)$' ./internal/provider | tee dra-receipt-reader-pg.log
+          grep -F -- '--- PASS: TestRecordedDRAReceiptSameTransactionPresenceReplayAndRevocation' dra-receipt-reader-pg.log
+          grep -F -- '--- PASS: TestRecordedDRAReceiptRejectsUnrestrictedTestOnlyJournalIngress' dra-receipt-reader-pg.log
+          if grep -F -- '--- SKIP: TestRecordedDRAReceipt' dra-receipt-reader-pg.log; then
+            echo 'real PostgreSQL recorded receipt reader acceptance was skipped' >&2
+            exit 1
+          fi
+      - name: Require real PostgreSQL signed-and-current release preflight (no skip)
+        shell: bash
+        env:
+          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
+        run: |
+          set -euo pipefail
+          go test -count=1 -v -run '^TestSignedRecordedAndCurrentGenerationOneTransaction$' ./internal/store/postgres | tee release-signed-same-tx-pg.log
+          grep -F -- '--- PASS: TestSignedRecordedAndCurrentGenerationOneTransaction ' release-signed-same-tx-pg.log
+          if grep -F -- '--- SKIP: TestSignedRecordedAndCurrentGenerationOneTransaction' release-signed-same-tx-pg.log; then
+            echo 'signed/current same-transaction PG test was skipped: no acceptance evidence' >&2
+            exit 1
+          fi
+ ./internal/provider | tee kueue-predelete-dra-snapshot-pg.log
           for test in TestKueuePreDeleteDRASnapshotStoreConformance TestKueuePreDeleteDRASnapshotRejectsSnapshotAfterDeleteIntent TestPostgresKueuePreDeleteSnapshotSerializesWithDeleteIntent TestKueueJobAdapterRecordsAndRequiresPreDeleteDRASnapshot TestKueueJobAdapterBlocksDRADeleteBeforeExternalSideEffectWithoutSnapshot TestPostgresKueuePreDeleteDRASnapshotIsImmutable TestPostgresKueuePreDeleteSnapshotInsertGuardsRejectTenantAndLateWrites; do
             grep -F -- "--- PASS: $test" kueue-predelete-dra-snapshot-pg.log
           done
@@ -330,53 +367,6 @@ jobs:
           go test -count=1 -v -run '^TestSignedRecordedAndCurrentGenerationOneTransaction$' ./internal/store/postgres | tee release-signed-same-tx-pg.log
           grep -F -- '--- PASS: TestSignedRecordedAndCurrentGenerationOneTransaction ' release-signed-same-tx-pg.log
           if grep -F -- '--- SKIP: TestSignedRecordedAndCurrentGenerationOneTransaction' release-signed-same-tx-pg.log; then
-            echo 'signed/current same-transaction PG test was skipped: no evidence' >&2
-            exit 1
-          fi
- ./internal/provider | tee kueue-predelete-dra-snapshot-pg.log
-          for test in TestKueuePreDeleteDRASnapshotStoreConformance TestKueuePreDeleteDRASnapshotRejectsSnapshotAfterDeleteIntent TestPostgresKueuePreDeleteSnapshotSerializesWithDeleteIntent TestKueueJobAdapterRecordsAndRequiresPreDeleteDRASnapshot TestKueueJobAdapterBlocksDRADeleteBeforeExternalSideEffectWithoutSnapshot TestPostgresKueuePreDeleteDRASnapshotIsImmutable; do
-            grep -F -- "--- PASS: $test" kueue-predelete-dra-snapshot-pg.log
-          done
-          if grep -F -- '--- SKIP:' kueue-predelete-dra-snapshot-pg.log; then
-            echo 'pre-delete DRA snapshot PostgreSQL acceptance was skipped' >&2
-            exit 1
-          fi
-          printf 'verified_kueue_predelete_dra_snapshot_source_sha=%s\n' "$(git rev-parse --verify HEAD)"
-      - name: Require real PostgreSQL correlated release bridge acceptance (no skip)
-        shell: bash
-        env:
-          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
-        run: |
-          set -euo pipefail
-          go test -count=1 -v -run '^TestCorrelatedReleasePreflightChecksCurrentPostgresRows$' ./internal/store/postgres | tee release-bridge-pg.log
-          grep -F -- '--- PASS: TestCorrelatedReleasePreflightChecksCurrentPostgresRows' release-bridge-pg.log
-          if grep -F -- '--- SKIP:' release-bridge-pg.log; then
-            echo 'real PostgreSQL release bridge test skipped: no evidence' >&2
-            exit 1
-          fi
-          printf 'verified_release_bridge_source_sha=%s\n' "$(git rev-parse --verify HEAD)"
-      - name: Require real PostgreSQL recorded DRA receipt acceptance (no skip)
-        shell: bash
-        env:
-          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
-        run: |
-          set -euo pipefail
-          go test -count=1 -v -run '^TestRecordedDRAReceipt(SameTransactionPresenceReplayAndRevocation|RejectsUnrestrictedTestOnlyJournalIngress)$' ./internal/provider | tee dra-receipt-reader-pg.log
-          grep -F -- '--- PASS: TestRecordedDRAReceiptSameTransactionPresenceReplayAndRevocation' dra-receipt-reader-pg.log
-          grep -F -- '--- PASS: TestRecordedDRAReceiptRejectsUnrestrictedTestOnlyJournalIngress' dra-receipt-reader-pg.log
-          if grep -F -- '--- SKIP: TestRecordedDRAReceipt' dra-receipt-reader-pg.log; then
-            echo 'real PostgreSQL recorded receipt reader acceptance was skipped' >&2
-            exit 1
-          fi
-      - name: Require real PostgreSQL signed-and-current release preflight (no skip)
-        shell: bash
-        env:
-          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
-        run: |
-          set -euo pipefail
-          go test -count=1 -v -run '^TestSignedRecordedAndCurrentGenerationOneTransaction$' ./internal/store/postgres | tee release-signed-same-tx-pg.log
-          grep -F -- '--- PASS: TestSignedRecordedAndCurrentGenerationOneTransaction ' release-signed-same-tx-pg.log
-          if grep -F -- '--- SKIP: TestSignedRecordedAndCurrentGenerationOneTransaction' release-signed-same-tx-pg.log; then
-            echo 'signed/current same-transaction PG test was skipped: no evidence' >&2
+            echo 'signed/current same-transaction PG test was skipped: no acceptance evidence' >&2
             exit 1
           fi
