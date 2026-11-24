@@ -15,7 +15,7 @@ import (
 
 var (
 	ErrPreDeleteDRASnapshotRequired = errors.New("pre-delete DRA allocation snapshot is required")
-	ErrInvalidPreDeleteDRASnapshot = errors.New("invalid pre-delete DRA allocation snapshot")
+	ErrInvalidPreDeleteDRASnapshot  = errors.New("invalid pre-delete DRA allocation snapshot")
 )
 
 // KueuePreDeleteDRASnapshot is immutable structural history captured while the
@@ -23,27 +23,27 @@ var (
 // It is not an authenticated source attestation, driver RPC receipt, physical
 // GPU release proof, Allocation RELEASED decision or cost-finality record.
 type KueuePreDeleteDRASnapshot struct {
-	Namespace          string
-	TenantID           string
-	WorkloadID         string
-	ProviderID         string
-	CreateOperationID  string
-	DeleteOperationID  string
-	CreateGeneration   uint64
-	DeleteGeneration   uint64
-	Job                KubernetesResourceRef
-	KueueWorkload      KubernetesResourceRef
-	Pod                KubernetesResourceRef
-	NodeName           string
-	Claim              KubernetesResourceRef
-	ClaimTemplateName  string
-	PodClaimAlias      string
-	ConsumerContainer  string
-	Devices            []DRAAllocatedDevice
-	Source             string
-	AdapterVersion     string
-	ObservedAt         time.Time
-	Digest             string
+	Namespace         string
+	TenantID          string
+	WorkloadID        string
+	ProviderID        string
+	CreateOperationID string
+	DeleteOperationID string
+	CreateGeneration  uint64
+	DeleteGeneration  uint64
+	Job               KubernetesResourceRef
+	KueueWorkload     KubernetesResourceRef
+	Pod               KubernetesResourceRef
+	NodeName          string
+	Claim             KubernetesResourceRef
+	ClaimTemplateName string
+	PodClaimAlias     string
+	ConsumerContainer string
+	Devices           []DRAAllocatedDevice
+	Source            string
+	AdapterVersion    string
+	ObservedAt        time.Time
+	Digest            string
 }
 
 func cloneKueuePreDeleteDRASnapshot(snapshot KueuePreDeleteDRASnapshot) KueuePreDeleteDRASnapshot {
@@ -107,6 +107,7 @@ func validateKueuePreDeleteDRASnapshot(
 	}
 	return snapshot, nil
 }
+
 // RecordPreDeleteDRASnapshot binds already-collected, read-only Kueue and DRA
 // observations to the durable CREATE Job UID pin and stores them before DELETE
 // intent is written. The caller must obtain collection and deviceSet from the
@@ -172,7 +173,7 @@ func (a *KueueJobAdapter) RecordPreDeleteDRASnapshot(
 		ProviderID: req.ProviderID, CreateOperationID: pin.Request.OperationID,
 		DeleteOperationID: req.OperationID, CreateGeneration: pin.Request.DesiredGeneration,
 		DeleteGeneration: req.DesiredGeneration,
-		Job: bound.Evidence.Job, KueueWorkload: bound.Evidence.KueueWorkload,
+		Job:              bound.Evidence.Job, KueueWorkload: bound.Evidence.KueueWorkload,
 		Pod: deviceSet.Pod, NodeName: deviceSet.NodeName, Claim: deviceSet.Claim,
 		ClaimTemplateName: deviceSet.ClaimTemplateName, PodClaimAlias: deviceSet.PodClaimAlias,
 		ConsumerContainer: deviceSet.ConsumerContainer, Devices: devices,
@@ -181,7 +182,6 @@ func (a *KueueJobAdapter) RecordPreDeleteDRASnapshot(
 	}
 	return a.bindings.PutPreDeleteDRASnapshot(a.namespace, req, snapshot)
 }
-
 
 func (a *KueueJobAdapter) requirePreDeleteDRASnapshot(req Request) error {
 	if a == nil || a.bindings == nil {
@@ -224,7 +224,9 @@ func preDeleteSnapshotMatchesDelete(snapshot KueuePreDeleteDRASnapshot, namespac
 		snapshot.Digest == kueuePreDeleteSnapshotDigest(snapshot) &&
 		reflect.DeepEqual(snapshot.Devices, func() []DRAAllocatedDevice {
 			got, ok := canonicalDRADeviceSet(snapshot.Devices, snapshot.Devices[0].Request)
-			if !ok { return nil }
+			if !ok {
+				return nil
+			}
 			return got
 		}())
 }
