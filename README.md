@@ -75,20 +75,40 @@ A provider ACK, PENDING Allocation, Pod request or queue admission alone is not 
 - Tenant/Project identity comes from authenticated service identity, never from client payload.
 - Cost is derived from immutable evidence and effective-dated rates.
 
-## Current status (2026-11-10)
+## Current status (2026-11-24)
 
-Implemented and CI-passing on main: Go/PostgreSQL foundation, atomic Workload acceptance with Outbox, authenticated Workload/Provider handlers, E1 policy/independent-approval persistence, deterministic cost calculator, migration lineage guards.
+Latest merged main: `04b4608fd8debdb30080e090fc33359c33157fed` (documentation alignment for HostIdentity TLS 1.3). Runtime hardening is in `48e3ba6c49291cd3451e396f669f2862470b0e06` (PR #205 DRA Receipt transport; PR #206 HostSession TLS 1.3). Post-runtime-merge [Go Validation #45358412924](https://github.com/avaargsh/compute-control-panel/actions/runs/45358412924) completed successfully, including PostgreSQL 16 migrations, static analysis, race-enabled tests and SIGKILL recovery.
 
-Not yet: live Provider/Kueue/DRA admission and release evidence, production tenant isolation, authenticated evidence-source acceptance, or production metering. Default service mounts only health/metadata routes; Workload and Provider management handlers remain unmounted.
+Implemented and CI-verified foundations:
+
+- Go/PostgreSQL control-plane foundation, Workload acceptance/Outbox, Provider lifecycle primitives, operation journaling and migration lineage checks.
+- HostIdentity immutable Provider-scoped bindings, durable HostSession epochs and heartbeat receipts, authenticated subject grants, host-only certificate verification and CRL revocation checks. The standalone HostSession ingress remains unmounted; the handler rejects TLS below 1.3. CRL monotonicity/rollback protection is currently in-process only.
+- DRA NodeUnprepare receipt journal, DBA-provisioned source-key checks, signed receipt correlation and read-only same-transaction release preflight. The standalone receipt ingress requires verified SPIFFE mTLS, TLS 1.3 and exactly one `application/json` Content-Type; it remains unmounted and evidence-only.
+- Kueue/Kubernetes/DRA observation and correlation primitives, including admission/placement separation, UID/resourceVersion checks and fail-closed release prerequisites.
+
+Not yet accepted as production capability:
+
+- A production authenticated Provider adapter with authoritative Inspect and exact-UID cleanup/reconciliation.
+- A production DRA receipt evidence resolver and authenticated collector pipeline that ties a real driver RPC result to independently observed device deallocation.
+- Real-cluster Kueue/Kubernetes/DRA GPU allocation, release and restart evidence. Simulated DRA/kind tests are not physical GPU acceptance.
+- Durable cross-restart CRL anti-rollback, independent hardware attestation and production mounting of the HostSession listener.
+- Production tenant-isolation acceptance, the complete E1 trusted-source authorization gate and Cost FINAL eligibility.
+
+Governance:
+
+- GitHub currently reports `main.protected=false` and `GET /rulesets` returns no rulesets. Issue [#166](https://github.com/avaargsh/compute-control-panel/issues/166) is open because required-check enforcement acceptance remains unmet.
+- Green Go, Migration Lineage and Main PR Evidence workflows are real test results, but they are not required GitHub merge checks while branch protection/rulesets are absent.
 
 Key open gates:
 
+- [#166 main branch ruleset enforcement](https://github.com/avaargsh/compute-control-panel/issues/166)
 - [#3 P0 integration gate](https://github.com/avaargsh/compute-control-panel/issues/3)
 - [#32 Provider readiness / reclamation](https://github.com/avaargsh/compute-control-panel/issues/32)
 - [#33 Kubernetes/Kueue/DRA evidence](https://github.com/avaargsh/compute-control-panel/issues/33)
 - [#39 E1 trusted evidence policy and source authentication](https://github.com/avaargsh/compute-control-panel/issues/39)
+- [#182 HostIdentity enrollment and durable session fencing](https://github.com/avaargsh/compute-control-panel/issues/182)
 
-Detailed historical PR lists live in the commit history and linked issues. Older issue/PR descriptions are snapshots, not live status.
+Older issue/PR descriptions are snapshots, not live status. Do not infer physical GPU allocation/release, production listener readiness or financial finality from CI alone.
 
 ## Delivery sequence
 
