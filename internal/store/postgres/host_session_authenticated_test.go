@@ -230,7 +230,7 @@ func TestHostSessionSubjectGrantCannotBeSharedAcrossHostBindings(t *testing.T) {
 }
 
 func TestHostSessionWriterCanOnlyInvokeAuthenticatedFunctions(t *testing.T) {
-	admin := openIntegrationDB(t)
+	_ = openIntegrationDB(t)
 	writer, err := hostSessionWriterDB(t)
 	if err != nil {
 		t.Fatal(err)
@@ -264,12 +264,16 @@ func TestHostSessionWriterCanOnlyInvokeAuthenticatedFunctions(t *testing.T) {
 		`SELECT subject FROM public.compute_host_identity_subject_grants`,
 		`INSERT INTO public.compute_host_identity_subject_grants(subject,tenant_id,service_name,host_id,provider_id,cluster_scope,node_uid)
 		  VALUES('s','t','compute-host-agent','h','p','c','n')`,
+		`UPDATE public.compute_host_identity_subject_grants SET revoked_at=pg_catalog.clock_timestamp(), revocation_reason='DENIED'`,
+		`DELETE FROM public.compute_host_identity_subject_grants`,
+		`TRUNCATE public.compute_host_identity_subject_grants`,
+		`SELECT subject FROM public.compute_host_identity_subject_grant_audit`,
+		`SELECT pg_catalog.nextval('public.compute_host_identity_subject_grant_audit_event_id_seq')`,
 	} {
 		if _, err := writer.ExecContext(ctx, statement); err == nil {
 			t.Fatalf("restricted HostSession writer unexpectedly executed %q", statement)
 		}
 	}
-	_ = admin
 }
 
 func TestAuthenticatedHostSessionCannotOutliveGrant(t *testing.T) {
