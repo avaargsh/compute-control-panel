@@ -120,11 +120,11 @@ type DRAReceiptRestrictedJournal interface {
 }
 
 type DRAReceiptIngestDependencies struct {
-	Authenticator   WorkloadAuthenticator
-	Authorizer      DRAReceiptIngestAuthorizer
+	Authenticator    WorkloadAuthenticator
+	Authorizer       DRAReceiptIngestAuthorizer
 	VerifierResolver DRAReceiptVerifierResolver
-	Resolver        DRAReceiptEvidenceResolver
-	Journal         DRAReceiptRestrictedJournal
+	Resolver         DRAReceiptEvidenceResolver
+	Journal          DRAReceiptRestrictedJournal
 }
 
 type draReceiptIngestHandler struct {
