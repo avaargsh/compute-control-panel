@@ -10,6 +10,7 @@ on:
       - 'scripts/kueue_dra_quota_kind_smoke.sh'
       - 'scripts/pd_jobset_dra_kind_smoke.sh'
       - 'scripts/pd_jobset_activation_gate_kind_smoke.sh'
+      - 'scripts/pd_jobset_provider_kind_smoke.sh'
       - 'scripts/kueue_preemption_kind_smoke.sh'
       - 'scripts/kueue_cohort_kind_smoke.sh'
       - 'cmd/kueue-observe/**'
@@ -30,6 +31,7 @@ on:
       - 'scripts/kueue_dra_quota_kind_smoke.sh'
       - 'scripts/pd_jobset_dra_kind_smoke.sh'
       - 'scripts/pd_jobset_activation_gate_kind_smoke.sh'
+      - 'scripts/pd_jobset_provider_kind_smoke.sh'
       - 'scripts/kueue_preemption_kind_smoke.sh'
       - 'scripts/kueue_cohort_kind_smoke.sh'
       - 'cmd/kueue-observe/**'
@@ -88,6 +90,7 @@ jobs:
           bash -n scripts/kueue_dra_quota_kind_smoke.sh
           bash -n scripts/pd_jobset_dra_kind_smoke.sh
           bash -n scripts/pd_jobset_activation_gate_kind_smoke.sh
+          bash -n scripts/pd_jobset_provider_kind_smoke.sh
           bash -n scripts/kueue_relist_kind_smoke.sh
           bash -n scripts/kueue_preemption_kind_smoke.sh
           bash -n scripts/kueue_cohort_kind_smoke.sh
