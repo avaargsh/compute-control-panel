@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"database/sql"
 	"errors"
+	"net/url"
 	"testing"
 	"time"
 )
@@ -188,5 +189,160 @@ func TestRestrictedDRAJournalRequiresExactSourceScopeAndFreshness(t *testing.T) 
 				t.Fatalf("untrusted source scope accepted: new=%t err=%v", newEvent, err)
 			}
 		})
+	}
+}
+
+func TestRestrictedDRAJournalResolvesRegisteredVerifierBeforeHistoricalCandidate(t *testing.T) {
+	admin := openProviderPostgresDB(t)
+	if !postgresCurrentUserIsSuperuser(t, admin) {
+		t.Skip("disposable PostgreSQL superuser required to seed independently authorized key")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	journal, db, err := OpenRestrictedDRAUnprepareReceiptJournal(ctx,
+		kueueBindingDSN(t, draReceiptIngestRole, draReceiptIngestCITestPassword, ""))
+	if err != nil {
+		t.Fatalf("restricted journal: %v", err)
+	}
+	defer db.Close()
+
+	verifier, receipt, _ := liveJournalReceiptFixture(t)
+	candidate := releaseCandidateFixture()
+	if resolved, databaseNow, err := journal.ResolveRegisteredDRAUnprepareVerifier(
+		ctx, candidate.Delete.TenantID, receipt.Event,
+	); !errors.Is(err, ErrDRAReceiptSourceUntrusted) || resolved != nil || !databaseNow.IsZero() {
+		t.Fatalf("unregistered source resolved: verifier=%v databaseNow=%v err=%v", resolved, databaseNow, err)
+	}
+
+	seedTrustedDRAReceiptSource(t, admin, verifier, receipt, candidate)
+	resolved, databaseNow, err := journal.ResolveRegisteredDRAUnprepareVerifier(
+		ctx, candidate.Delete.TenantID, receipt.Event,
+	)
+	if err != nil || resolved == nil || databaseNow.IsZero() {
+		t.Fatalf("DBA-registered source did not resolve: verifier=%v databaseNow=%v err=%v", resolved, databaseNow, err)
+	}
+	if err := resolved.VerifySignedEnvelope(receipt, databaseNow); err != nil {
+		t.Fatalf("resolved verifier rejected current signed event against PostgreSQL time: %v", err)
+	}
+
+	if resolved, databaseNow, err := journal.ResolveRegisteredDRAUnprepareVerifier(
+		ctx, "tenant-foreign", receipt.Event,
+	); !errors.Is(err, ErrDRAReceiptSourceUntrusted) || resolved != nil || !databaseNow.IsZero() {
+		t.Fatalf("cross-tenant source resolved: verifier=%v databaseNow=%v err=%v", resolved, databaseNow, err)
+	}
+
+	if _, err := admin.ExecContext(ctx, `INSERT INTO public.dra_unprepare_source_revocations
+		(cluster_id, source_id, key_id, reason) VALUES ($1,$2,$3,'DBA revoked test source')`,
+		receipt.Event.ClusterID, receipt.Event.SourceID, receipt.Event.KeyID); err != nil {
+		t.Fatalf("DBA source revocation: %v", err)
+	}
+	if resolved, databaseNow, err := journal.ResolveRegisteredDRAUnprepareVerifier(
+		ctx, candidate.Delete.TenantID, receipt.Event,
+	); !errors.Is(err, ErrDRAReceiptSourceUntrusted) || resolved != nil || !databaseNow.IsZero() {
+		t.Fatalf("revoked source resolved: verifier=%v databaseNow=%v err=%v", resolved, databaseNow, err)
+	}
+}
+
+func TestUncheckedDRAJournalCannotResolveRegisteredVerifier(t *testing.T) {
+	admin := openProviderPostgresDB(t)
+	journal, err := NewDRAUnprepareReceiptJournal(admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, databaseNow, err := journal.ResolveRegisteredDRAUnprepareVerifier(
+		context.Background(), "tenant-a", DRAUnprepareEvent{
+			ClusterID: "cluster-a", SourceID: "source-a", KeyID: "key-a",
+			Driver: "gpu.example.com", CompletedAt: time.Now().UTC(),
+		},
+	)
+	if !errors.Is(err, ErrDRAReceiptJournalRole) || !databaseNow.IsZero() {
+		t.Fatalf("unchecked journal resolved trusted source: databaseNow=%v err=%v", databaseNow, err)
+	}
+}
+
+func TestRestrictedDRAJournalRechecksRevocationAfterWaitingForSourceLock(t *testing.T) {
+	admin := openProviderPostgresDB(t)
+	if !postgresCurrentUserIsSuperuser(t, admin) {
+		t.Skip("disposable PostgreSQL superuser required to coordinate concurrent revocation")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	dsn, err := url.Parse(kueueBindingDSN(t, draReceiptIngestRole, draReceiptIngestCITestPassword, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	appName := kueueTestIdent(t, "ccp_dra_verifier_preflight_")
+	query := dsn.Query()
+	query.Set("application_name", appName)
+	dsn.RawQuery = query.Encode()
+	journal, db, err := OpenRestrictedDRAUnprepareReceiptJournal(ctx, dsn.String())
+	if err != nil {
+		t.Fatalf("restricted journal: %v", err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+
+	verifier, receipt, _ := liveJournalReceiptFixture(t)
+	candidate := releaseCandidateFixture()
+	seedTrustedDRAReceiptSource(t, admin, verifier, receipt, candidate)
+
+	// An uncommitted revocation INSERT owns the FK's KEY SHARE lock on the
+	// source row. The verifier's FOR UPDATE must wait; after the revocation
+	// commits, a fresh statement snapshot must reject the now-revoked source.
+	revocation, err := admin.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer revocation.Rollback()
+	if _, err := revocation.ExecContext(ctx, `INSERT INTO public.dra_unprepare_source_revocations
+		(cluster_id, source_id, key_id, reason) VALUES ($1,$2,$3,'concurrent DBA revocation')`,
+		receipt.Event.ClusterID, receipt.Event.SourceID, receipt.Event.KeyID); err != nil {
+		t.Fatalf("begin concurrent revocation: %v", err)
+	}
+
+	type resolution struct {
+		verifier *DRAUnprepareVerifier
+		database time.Time
+		err      error
+	}
+	resolved := make(chan resolution, 1)
+	go func() {
+		v, databaseNow, err := journal.ResolveRegisteredDRAUnprepareVerifier(
+			ctx, candidate.Delete.TenantID, receipt.Event,
+		)
+		resolved <- resolution{verifier: v, database: databaseNow, err: err}
+	}()
+
+	deadline := time.Now().Add(3 * time.Second)
+	waiting := false
+	for time.Now().Before(deadline) {
+		if err := admin.QueryRowContext(ctx, `
+			SELECT EXISTS (
+			  SELECT 1 FROM pg_catalog.pg_stat_activity
+			  WHERE application_name=$1 AND wait_event_type='Lock'
+			    AND query ILIKE '%FROM public.dra_unprepare_source_keys%'
+			)`, appName).Scan(&waiting); err != nil {
+			t.Fatalf("observe source-lock wait: %v", err)
+		}
+		if waiting {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !waiting {
+		_ = revocation.Rollback()
+		select {
+		case got := <-resolved:
+			t.Fatalf("resolver did not wait for concurrent revocation: verifier=%v databaseNow=%v err=%v", got.verifier, got.database, got.err)
+		case <-time.After(time.Second):
+			t.Fatal("resolver neither waited for source lock nor returned")
+		}
+	}
+	if err := revocation.Commit(); err != nil {
+		t.Fatalf("commit concurrent revocation: %v", err)
+	}
+	got := <-resolved
+	if !errors.Is(got.err, ErrDRAReceiptSourceUntrusted) || got.verifier != nil || !got.database.IsZero() {
+		t.Fatalf("resolver accepted source revoked while acquiring lock: verifier=%v databaseNow=%v err=%v", got.verifier, got.database, got.err)
 	}
 }

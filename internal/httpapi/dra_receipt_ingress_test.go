@@ -37,9 +37,9 @@ type draReceiptTestResolver struct {
 	serverNow     time.Time
 }
 
-func (r *draReceiptTestResolver) ResolveDRAReceiptVerifier(_ context.Context, _ WorkloadPrincipal, _ provider.DRAUnprepareEvent) (DRAReceiptVerifierResolution, error) {
+func (r *draReceiptTestResolver) ResolveRegisteredDRAUnprepareVerifier(_ context.Context, _ string, _ provider.DRAUnprepareEvent) (*provider.DRAUnprepareVerifier, time.Time, error) {
 	r.verifierCalls++
-	return DRAReceiptVerifierResolution{Verifier: r.verifier, DatabaseNow: r.serverNow}, nil
+	return r.verifier, r.serverNow, nil
 }
 
 func (r *draReceiptTestResolver) ResolveDRAReceiptEvidence(_ context.Context, _ WorkloadPrincipal, _ provider.DRAUnprepareEvent) (provider.ReleaseEvidenceCandidate, error) {
@@ -137,7 +137,7 @@ func draReceiptTestHandler(t *testing.T, authenticator WorkloadAuthenticator) (h
 	resolver := &draReceiptTestResolver{verifier: verifier, serverNow: time.Now().UTC()}
 	journal := &draReceiptTestJournal{created: true}
 	h, err := NewDRAReceiptIngestHandler(DRAReceiptIngestDependencies{
-		Authenticator: authenticator, Authorizer: policy, VerifierResolver: resolver, Resolver: resolver, Journal: journal,
+		Authenticator: authenticator, Authorizer: policy, VerifierResolver: &RegisteredDRAReceiptVerifierResolver{source: resolver}, Resolver: resolver, Journal: journal,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -173,7 +173,7 @@ func TestDRAReceiptIngestConstructorRefusesArbitraryAuthenticator(t *testing.T) 
 	}
 	h, err := NewDRAReceiptIngestHandler(DRAReceiptIngestDependencies{
 		Authenticator: draReceiptTestAuthenticator{principal: draReceiptTestPrincipal()},
-		Authorizer:    policy, VerifierResolver: &draReceiptTestResolver{}, Resolver: &draReceiptTestResolver{},
+		Authorizer:    policy, VerifierResolver: &RegisteredDRAReceiptVerifierResolver{source: &draReceiptTestResolver{}}, Resolver: &draReceiptTestResolver{},
 		Journal: &draReceiptTestJournal{},
 	})
 	if err == nil || h != nil {
