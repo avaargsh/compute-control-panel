@@ -230,3 +230,44 @@ func TestHostSessionWriterCanOnlyInvokeAuthenticatedFunctions(t *testing.T) {
 	}
 	_ = admin
 }
+
+func TestAuthenticatedHostSessionCannotOutliveGrant(t *testing.T) {
+	admin := openIntegrationDB(t)
+	_, binding := hostSessionFixture(t, admin)
+	writer, err := hostSessionWriterDB(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	tenant := "tenant-host-expiry-" + randomSuffix(t)
+	_, err = admin.ExecContext(ctx, `
+		INSERT INTO public.compute_host_identity_subject_grants
+			(subject, tenant_id, service_name, host_id, provider_id, cluster_scope, node_uid, expires_at)
+		VALUES ($1,$2,'compute-host-agent',$3,$4,$5,$6,pg_catalog.clock_timestamp()+interval '60 seconds')
+	`, binding.Subject, tenant, binding.HostID, binding.ProviderID, binding.ClusterScope, binding.NodeUID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, err := NewRepository(writer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = repo.StartAuthenticatedHostSession(ctx, AuthenticatedHostSessionStartRequest{
+		TenantID: tenant, Service: "compute-host-agent", Subject: binding.Subject,
+		ExpectedEpoch: 0, RequestID: "too-long-" + randomSuffix(t), TTL: 120 * time.Second,
+	})
+	if !errors.Is(err, ErrHostSessionUnauthorized) {
+		t.Fatalf("session outliving grant must be rejected, got %v", err)
+	}
+	var count int
+	if err := admin.QueryRowContext(ctx, `
+		SELECT count(*) FROM public.compute_host_sessions WHERE host_id=$1
+	`, binding.HostID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("authorization rejection left %d durable sessions", count)
+	}
+}
