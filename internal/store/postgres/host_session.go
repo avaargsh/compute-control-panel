@@ -13,8 +13,9 @@ import (
 )
 
 var (
-	ErrHostSessionInvalid  = errors.New("invalid HostSession start or heartbeat")
-	ErrHostSessionRejected = errors.New("HostSession persistence fence rejected the request")
+	ErrHostSessionInvalid      = errors.New("invalid HostSession start or heartbeat")
+	ErrHostSessionRejected     = errors.New("HostSession persistence fence rejected the request")
+	ErrHostSessionUnauthorized = errors.New("HostSession principal is not authorized")
 )
 
 const maxHostSessionTTL = 24 * time.Hour
@@ -47,8 +48,13 @@ func validHostSessionDigest(value string) bool {
 
 func hostSessionPersistenceError(operation string, err error) error {
 	var state interface{ SQLState() string }
-	if errors.As(err, &state) && state.SQLState() == "23514" {
-		return fmt.Errorf("%w: %w", ErrHostSessionRejected, err)
+	if errors.As(err, &state) {
+		switch state.SQLState() {
+		case "23514":
+			return fmt.Errorf("%w: %w", ErrHostSessionRejected, err)
+		case "42501":
+			return fmt.Errorf("%w: %w", ErrHostSessionUnauthorized, err)
+		}
 	}
 	return fmt.Errorf("%s: %w", operation, err)
 }
@@ -61,6 +67,121 @@ type HostSessionStartRequest struct {
 	ExpectedEpoch int64
 	RequestID     string
 	TTL           time.Duration
+}
+
+// AuthenticatedHostSessionStartRequest is the caller's authenticated intent.
+// Host/provider/cluster/Node UID are resolved from the DBA-provisioned subject
+// grant inside PostgreSQL, never accepted from the remote HTTP request.
+type AuthenticatedHostSessionStartRequest struct {
+	TenantID      string
+	Service       string
+	Subject       string
+	ExpectedEpoch int64
+	RequestID     string
+	TTL           time.Duration
+}
+
+// StartAuthenticatedHostSession requires an exact active tenant/service/SPIFFE
+// subject grant. PostgreSQL serializes this operation with grant revocation,
+// resolves the immutable HostIdentity tuple, then executes the durable epoch CAS.
+func (r *Repository) StartAuthenticatedHostSession(
+	ctx context.Context,
+	request AuthenticatedHostSessionStartRequest,
+) (hostidentity.SessionFence, error) {
+	if r == nil || r.db == nil ||
+		!validHostSessionIdentity(request.TenantID, 256) ||
+		request.Service != "compute-host-agent" ||
+		!validHostSessionIdentity(request.Subject, 1024) ||
+		!strings.HasPrefix(request.Subject, "spiffe://") ||
+		!validHostSessionIdentity(request.RequestID, 256) ||
+		request.ExpectedEpoch < 0 || request.ExpectedEpoch == math.MaxInt64 ||
+		request.TTL < time.Second || request.TTL > maxHostSessionTTL ||
+		request.TTL%time.Second != 0 {
+		if request.Service != "compute-host-agent" {
+			return hostidentity.SessionFence{}, ErrHostSessionUnauthorized
+		}
+		return hostidentity.SessionFence{}, ErrHostSessionInvalid
+	}
+
+	var fence hostidentity.SessionFence
+	err := r.db.QueryRowContext(ctx, `
+		SELECT host_id, epoch, session_id, provider_id, cluster_scope,
+		       node_uid, subject, issued_at, expires_at
+		FROM public.compute_host_session_start_authenticated($1,$2,$3,$4,$5,$6)`,
+		request.TenantID, request.Service, request.Subject, request.ExpectedEpoch,
+		request.RequestID, int64(request.TTL/time.Second),
+	).Scan(
+		&fence.Binding.HostID, &fence.Epoch, &fence.SessionID,
+		&fence.Binding.ProviderID, &fence.Binding.ClusterScope,
+		&fence.Binding.NodeUID, &fence.Binding.Subject,
+		&fence.IssuedAt, &fence.ExpiresAt,
+	)
+	if err != nil {
+		return hostidentity.SessionFence{}, hostSessionPersistenceError("start authenticated HostSession", err)
+	}
+	if !validHostSessionBinding(fence.Binding) ||
+		fence.Binding.Subject != request.Subject ||
+		fence.Epoch <= 0 ||
+		!validHostSessionIdentity(fence.SessionID, 256) ||
+		!strings.HasPrefix(fence.SessionID, "hs_") ||
+		!fence.IssuedAt.Before(fence.ExpiresAt) {
+		return hostidentity.SessionFence{}, fmt.Errorf("%w: database returned an invalid authenticated session fence", ErrHostSessionRejected)
+	}
+	return fence, nil
+}
+
+// AuthenticatedHostHeartbeatRequest contains only session coordinates and a
+// server-computed digest. The binding is resolved from the verified principal's
+// immutable subject grant inside PostgreSQL.
+type AuthenticatedHostHeartbeatRequest struct {
+	TenantID  string
+	Service   string
+	Subject   string
+	Epoch     int64
+	SessionID string
+	Sequence  int64
+	Digest    string
+}
+
+// RecordAuthenticatedHostHeartbeat applies the same subject-grant and
+// revocation fence as authenticated session start before recording the receipt.
+func (r *Repository) RecordAuthenticatedHostHeartbeat(
+	ctx context.Context,
+	heartbeat AuthenticatedHostHeartbeatRequest,
+) (hostidentity.Disposition, time.Time, error) {
+	if r == nil || r.db == nil ||
+		!validHostSessionIdentity(heartbeat.TenantID, 256) ||
+		heartbeat.Service != "compute-host-agent" ||
+		!validHostSessionIdentity(heartbeat.Subject, 1024) ||
+		!strings.HasPrefix(heartbeat.Subject, "spiffe://") ||
+		heartbeat.Epoch <= 0 ||
+		!validHostSessionIdentity(heartbeat.SessionID, 256) ||
+		!strings.HasPrefix(heartbeat.SessionID, "hs_") ||
+		heartbeat.Sequence <= 0 ||
+		!validHostSessionDigest(heartbeat.Digest) {
+		if heartbeat.Service != "compute-host-agent" {
+			return hostidentity.Reject, time.Time{}, ErrHostSessionUnauthorized
+		}
+		return hostidentity.Reject, time.Time{}, ErrHostSessionInvalid
+	}
+
+	var disposition string
+	var recordedAt time.Time
+	err := r.db.QueryRowContext(ctx, `
+		SELECT disposition, recorded_at
+		FROM public.compute_host_session_heartbeat_authenticated($1,$2,$3,$4,$5,$6,$7)`,
+		heartbeat.TenantID, heartbeat.Service, heartbeat.Subject,
+		heartbeat.Epoch, heartbeat.SessionID, heartbeat.Sequence, heartbeat.Digest,
+	).Scan(&disposition, &recordedAt)
+	if err != nil {
+		return hostidentity.Reject, time.Time{}, hostSessionPersistenceError("record authenticated HostSession heartbeat", err)
+	}
+	switch hostidentity.Disposition(disposition) {
+	case hostidentity.Accept, hostidentity.Replay:
+		return hostidentity.Disposition(disposition), recordedAt, nil
+	default:
+		return hostidentity.Reject, time.Time{}, fmt.Errorf("%w: unknown authenticated heartbeat disposition %q", ErrHostSessionRejected, disposition)
+	}
 }
 
 // StartHostSession persists a monotonic session epoch through the restricted
