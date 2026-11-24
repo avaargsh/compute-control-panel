@@ -178,7 +178,49 @@ func TestKindNodeLeaseUIDPinnedRead(t *testing.T) {
 	if !errors.Is(err, ErrScope) || scoped.Assessment.State == nodeLeaseFresh {
 		t.Fatalf("ungranted project was not denied: %+v err=%v", scoped, err)
 	}
+	// Exercise the Lease endpoint directly: denial of the initial Node list
+	// alone cannot prove that the coordination Lease is inaccessible.
+	if _, err := reader.getNodeLease(ctx, nodeName+"-not-granted"); !errors.Is(err, ErrLeaseForbidden) {
+		t.Fatalf("ungranted Lease name not denied: %v", err)
+	}
 	blocked := makeReader(denied)
+	if _, err := blocked.getNodeLease(ctx, nodeName); !errors.Is(err, ErrLeaseForbidden) {
+		t.Fatalf("unprivileged account not denied at exact Lease endpoint: %v", err)
+	}
+	// Verify credential rotation on the same Lease client without changing
+	// the fixture's original ServiceAccount token files.
+	allowBytes, err := os.ReadFile(allowed)
+	if err != nil || len(allowBytes) == 0 {
+		t.Fatal("allowed Lease credential unavailable")
+	}
+	denyBytes, err := os.ReadFile(denied)
+	if err != nil || len(denyBytes) == 0 {
+		t.Fatal("denied Lease credential unavailable")
+	}
+	rotatingPath := filepath.Join(t.TempDir(), "rotating-lease-token")
+	writeToken := func(token []byte) {
+		t.Helper()
+		if err := os.WriteFile(rotatingPath, token, 0600); err != nil {
+			t.Fatal("could not write ephemeral Lease credential")
+		}
+	}
+	writeToken(allowBytes)
+	rotating := makeReader(rotatingPath)
+	if _, err := rotating.getNodeLease(ctx, nodeName); err != nil {
+		t.Fatalf("initial allowed Lease GET failed: %v", err)
+	}
+	writeToken(denyBytes)
+	if _, err := rotating.getNodeLease(ctx, nodeName); !errors.Is(err, ErrLeaseForbidden) {
+		t.Fatalf("rotated denied Lease credential was accepted: %v", err)
+	}
+	writeToken(allowBytes)
+	if _, err := rotating.getNodeLease(ctx, nodeName); err != nil {
+		t.Fatalf("restored Lease credential not accepted: %v", err)
+	}
+	writeToken(nil)
+	if _, err := rotating.getNodeLease(ctx, nodeName); !errors.Is(err, ErrCredentials) {
+		t.Fatalf("empty Lease credential was accepted: %v", err)
+	}
 	rejected, err := blocked.observeNodeLease(ctx, "tenant-kind", []string{"project-kind"}, nodeName, nodeUID, time.Minute)
 	if !errors.Is(err, ErrForbidden) || rejected.Assessment.State == nodeLeaseFresh {
 		t.Fatalf("unprivileged account read Node/Lease: %+v err=%v", rejected, err)
