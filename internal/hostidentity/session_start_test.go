@@ -17,6 +17,7 @@ func TestPrepareSessionStart(t *testing.T) {
 		want   int64
 	}{
 		{name: "expired predecessor can be replaced", want: 4},
+		{name: "predecessor expires at now can be replaced", change: func(_ *Binding, p **SessionFence, _ *int64, _ *string, n, _ *time.Time) { (*p).ExpiresAt = *n }, want: 4},
 		{name: "first epoch", change: func(_ *Binding, p **SessionFence, e *int64, _ *string, _, _ *time.Time) { *p = nil; *e = 0 }, want: 1},
 		{name: "stale expected epoch", change: func(_ *Binding, _ **SessionFence, e *int64, _ *string, _, _ *time.Time) { *e = 2 }},
 		{name: "future expected epoch", change: func(_ *Binding, _ **SessionFence, e *int64, _ *string, _, _ *time.Time) { *e = 4 }},

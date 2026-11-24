@@ -19,7 +19,7 @@ func PrepareSessionStart(binding Binding, previous *SessionFence, expectedEpoch 
 		if expectedEpoch != 0 {
 			return SessionFence{}, false
 		}
-	} else if previous.Binding != binding || previous.Epoch <= 0 || previous.Epoch != expectedEpoch ||
+	} else if now.Before(previous.ExpiresAt) || previous.Binding != binding || previous.Epoch <= 0 || previous.Epoch != expectedEpoch ||
 		!validIdentity(previous.SessionID) || previous.SessionID == sessionID || previous.IssuedAt.IsZero() ||
 		!previous.IssuedAt.Before(previous.ExpiresAt) || now.Before(previous.IssuedAt) || previous.LastSequence < 0 ||
 		(previous.LastSequence == 0 && (previous.LastDigest != "" || !previous.LastRecordedAt.IsZero())) ||
