@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
-	"math"
 	"time"
 
 	"github.com/avaargsh/compute-control-panel/internal/operation"
@@ -526,7 +526,9 @@ func scanKueuePreDeleteSnapshot(row rowScanner) (KueuePreDeleteDRASnapshot, erro
 	snapshot.Pod.Namespace = snapshot.Namespace
 	snapshot.Claim.Namespace = snapshot.Namespace
 	canonicalDevices, ok := canonicalDRADeviceSet(snapshot.Devices, func() string {
-		if len(snapshot.Devices) == 0 { return "" }
+		if len(snapshot.Devices) == 0 {
+			return ""
+		}
 		return snapshot.Devices[0].Request
 	}())
 	if !ok || !reflect.DeepEqual(canonicalDevices, snapshot.Devices) ||
