@@ -53,23 +53,34 @@ func hostSessionPersistenceError(operation string, err error) error {
 	return fmt.Errorf("%s: %w", operation, err)
 }
 
-// StartHostSession persists a new monotonic session epoch through the
-// restricted SECURITY DEFINER entrypoint. PostgreSQL generates the opaque
-// session ID and records issued_at/expires_at from its clock after acquiring
-// Provider and immutable binding locks.
+// HostSessionStartRequest carries a caller-generated idempotency key. The
+// caller must persist RequestID before the first attempt and reuse it for all
+// retries of the same intent; a different payload under the same key is rejected.
+type HostSessionStartRequest struct {
+	Binding       hostidentity.Binding
+	ExpectedEpoch int64
+	RequestID     string
+	TTL           time.Duration
+}
+
+// StartHostSession persists a monotonic session epoch through the restricted
+// SECURITY DEFINER entrypoint. PostgreSQL generates the opaque session ID and
+// records issued_at/expires_at from its clock after acquiring Provider and
+// immutable binding locks. A lost-ACK retry with the same RequestID returns the
+// original fence instead of creating another epoch.
 //
 // This method is intentionally unmounted. Its caller MUST authenticate the
 // machine principal and check revocation before passing the verified binding;
 // the database compares the tuple but is not itself a host attestation system.
 func (r *Repository) StartHostSession(
 	ctx context.Context,
-	binding hostidentity.Binding,
-	expectedEpoch int64,
-	ttl time.Duration,
+	request HostSessionStartRequest,
 ) (hostidentity.SessionFence, error) {
+	binding := request.Binding
 	if r == nil || r.db == nil || !validHostSessionBinding(binding) ||
-		expectedEpoch < 0 || expectedEpoch == math.MaxInt64 ||
-		ttl < time.Second || ttl > maxHostSessionTTL || ttl%time.Second != 0 {
+		!validHostSessionIdentity(request.RequestID, 256) ||
+		request.ExpectedEpoch < 0 || request.ExpectedEpoch == math.MaxInt64 ||
+		request.TTL < time.Second || request.TTL > maxHostSessionTTL || request.TTL%time.Second != 0 {
 		return hostidentity.SessionFence{}, ErrHostSessionInvalid
 	}
 
@@ -78,9 +89,10 @@ func (r *Repository) StartHostSession(
 	err := r.db.QueryRowContext(ctx, `
 		SELECT host_id, epoch, session_id, provider_id, cluster_scope,
 		       node_uid, subject, issued_at, expires_at
-		FROM public.compute_host_session_start($1,$2,$3,$4,$5,$6,$7)`,
+		FROM public.compute_host_session_start($1,$2,$3,$4,$5,$6,$7,$8)`,
 		binding.HostID, binding.ProviderID, binding.ClusterScope,
-		binding.NodeUID, binding.Subject, expectedEpoch, int64(ttl/time.Second),
+		binding.NodeUID, binding.Subject, request.ExpectedEpoch,
+		request.RequestID, int64(request.TTL/time.Second),
 	).Scan(
 		&fence.Binding.HostID, &fence.Epoch, &fence.SessionID,
 		&fence.Binding.ProviderID, &fence.Binding.ClusterScope,
@@ -135,6 +147,6 @@ func (r *Repository) RecordHostHeartbeat(
 }
 
 var _ interface {
-	StartHostSession(context.Context, hostidentity.Binding, int64, time.Duration) (hostidentity.SessionFence, error)
+	StartHostSession(context.Context, HostSessionStartRequest) (hostidentity.SessionFence, error)
 	RecordHostHeartbeat(context.Context, hostidentity.Heartbeat) (hostidentity.Disposition, time.Time, error)
 } = (*Repository)(nil)
