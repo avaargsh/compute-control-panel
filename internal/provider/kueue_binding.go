@@ -1,6 +1,10 @@
 package provider
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/avaargsh/compute-control-panel/internal/operation"
+)
 
 // KueueCreatePin is the trusted UID for one CREATE. It is written only from
 // an acknowledged Job UID. Callers must not fill it from a Job name or
