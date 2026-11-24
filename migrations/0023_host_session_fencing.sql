@@ -457,6 +457,21 @@ REVOKE ALL ON FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT,TEX
 REVOKE ALL ON FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,INTEGER) FROM CURRENT_USER;
 REVOKE ALL ON FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT) FROM CURRENT_USER;
+ALTER TABLE public.compute_host_sessions
+    ENABLE ALWAYS TRIGGER compute_host_sessions_no_update_delete;
+ALTER TABLE public.compute_host_sessions
+    ENABLE ALWAYS TRIGGER compute_host_sessions_no_truncate;
+ALTER TABLE public.compute_host_session_heartbeats
+    ENABLE ALWAYS TRIGGER compute_host_session_heartbeats_no_update_delete;
+ALTER TABLE public.compute_host_session_heartbeats
+    ENABLE ALWAYS TRIGGER compute_host_session_heartbeats_no_truncate;
+
+GRANT USAGE ON SCHEMA public TO ccp_host_session_writer;
+GRANT EXECUTE ON FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,INTEGER)
+    TO ccp_host_session_writer;
+GRANT EXECUTE ON FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT)
+    TO ccp_host_session_writer;
+
 -- The NOLOGIN owner is the only direct table owner. The runtime writer gets
 -- EXECUTE only; Provider and binding reads/locks remain inside the definer.
 GRANT CREATE ON SCHEMA public TO ccp_host_session_guard_owner;
@@ -470,21 +485,6 @@ ALTER FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,BI
 
 REVOKE ccp_host_session_guard_owner FROM CURRENT_USER;
 REVOKE CREATE ON SCHEMA public FROM ccp_host_session_guard_owner;
-
-GRANT USAGE ON SCHEMA public TO ccp_host_session_writer;
-GRANT EXECUTE ON FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,INTEGER)
-    TO ccp_host_session_writer;
-GRANT EXECUTE ON FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT)
-    TO ccp_host_session_writer;
-
-ALTER TABLE public.compute_host_sessions
-    ENABLE ALWAYS TRIGGER compute_host_sessions_no_update_delete;
-ALTER TABLE public.compute_host_sessions
-    ENABLE ALWAYS TRIGGER compute_host_sessions_no_truncate;
-ALTER TABLE public.compute_host_session_heartbeats
-    ENABLE ALWAYS TRIGGER compute_host_session_heartbeats_no_update_delete;
-ALTER TABLE public.compute_host_session_heartbeats
-    ENABLE ALWAYS TRIGGER compute_host_session_heartbeats_no_truncate;
 
 DO $host_session_acl_attestation$
 DECLARE
