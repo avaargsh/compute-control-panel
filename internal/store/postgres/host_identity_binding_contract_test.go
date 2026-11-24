@@ -31,59 +31,91 @@ func TestHostIdentityBindingDatabaseContract(t *testing.T) {
 	const insert = `INSERT INTO public.compute_host_identity_bindings
 		(host_id, provider_id, cluster_scope, node_uid, subject)
 		VALUES($1,$2,$3,$4,$5)`
-	if _, err := db.ExecContext(ctx, insert, hostID, p.ProviderID, p.ClusterScope, nodeUID, subject); err != nil {
+	// The database, not the caller, must supply the enrollment receipt time.
+	var before, recorded, after time.Time
+	if err := db.QueryRowContext(ctx, "SELECT pg_catalog.clock_timestamp()").Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	forged := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := db.QueryRowContext(ctx, `INSERT INTO public.compute_host_identity_bindings
+		(host_id, provider_id, cluster_scope, node_uid, subject, registered_at)
+		VALUES($1,$2,$3,$4,$5,$6) RETURNING registered_at`,
+		hostID, p.ProviderID, p.ClusterScope, nodeUID, subject, forged).Scan(&recorded); err != nil {
 		t.Fatalf("valid immutable binding must persist: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, "SELECT pg_catalog.clock_timestamp()").Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if recorded.Equal(forged) || recorded.Before(before) || recorded.After(after) {
+		t.Fatalf("enrollment receipt is not database-recorded: before=%v recorded=%v after=%v", before, recorded, after)
 	}
 
 	for _, tc := range []struct {
-		name  string
-		query string
-		args  []any
+		name     string
+		query    string
+		args     []any
+		sqlState string
 	}{
 		{
-			name:  "duplicate native node identity",
-			query: insert,
-			args:  []any{hostID + "-duplicate", p.ProviderID, p.ClusterScope, nodeUID, subject},
+			name:     "duplicate native node identity",
+			query:    insert,
+			args:     []any{hostID + "-duplicate", p.ProviderID, p.ClusterScope, nodeUID, subject},
+			sqlState: "23505",
 		},
 		{
-			name:  "unknown provider",
-			query: insert,
-			args:  []any{hostID + "-unknown", p.ProviderID + "-absent", p.ClusterScope, nodeUID + "-new", subject},
+			name:     "unknown provider",
+			query:    insert,
+			args:     []any{hostID + "-unknown", p.ProviderID + "-absent", p.ClusterScope, nodeUID + "-new", subject},
+			sqlState: "23514",
 		},
 		{
-			name:  "cluster mismatch",
-			query: insert,
-			args:  []any{hostID + "-cluster", p.ProviderID, p.ClusterScope + "-foreign", nodeUID + "-new", subject},
+			name:     "cluster mismatch",
+			query:    insert,
+			args:     []any{hostID + "-cluster", p.ProviderID, p.ClusterScope + "-foreign", nodeUID + "-new", subject},
+			sqlState: "23514",
 		},
 		{
-			name:  "missing native UID",
-			query: insert,
-			args:  []any{hostID + "-no-uid", p.ProviderID, p.ClusterScope, "", subject},
+			name:     "missing native UID",
+			query:    insert,
+			args:     []any{hostID + "-no-uid", p.ProviderID, p.ClusterScope, "", subject},
+			sqlState: "23514",
 		},
 		{
-			name:  "missing subject",
-			query: insert,
-			args:  []any{hostID + "-no-subject", p.ProviderID, p.ClusterScope, nodeUID + "-new", ""},
+			name:     "missing subject",
+			query:    insert,
+			args:     []any{hostID + "-no-subject", p.ProviderID, p.ClusterScope, nodeUID + "-new", ""},
+			sqlState: "23514",
 		},
 		{
-			name:  "successor Node adoption",
-			query: "UPDATE public.compute_host_identity_bindings SET node_uid=$2 WHERE host_id=$1",
-			args:  []any{hostID, nodeUID + "-successor"},
+			name:     "successor Node adoption",
+			query:    "UPDATE public.compute_host_identity_bindings SET node_uid=$2 WHERE host_id=$1",
+			args:     []any{hostID, nodeUID + "-successor"},
+			sqlState: "23514",
 		},
 		{
-			name:  "principal reassignment",
-			query: "UPDATE public.compute_host_identity_bindings SET subject=$2 WHERE host_id=$1",
-			args:  []any{hostID, subject + "-successor"},
+			name:     "principal reassignment",
+			query:    "UPDATE public.compute_host_identity_bindings SET subject=$2 WHERE host_id=$1",
+			args:     []any{hostID, subject + "-successor"},
+			sqlState: "23514",
 		},
 		{
-			name:  "deletion of enrolled identity",
-			query: "DELETE FROM public.compute_host_identity_bindings WHERE host_id=$1",
-			args:  []any{hostID},
+			name:     "receipt time mutation",
+			query:    "UPDATE public.compute_host_identity_bindings SET registered_at=$2 WHERE host_id=$1",
+			args:     []any{hostID, forged},
+			sqlState: "23514",
+		},
+		{
+			name:     "deletion of enrolled identity",
+			query:    "DELETE FROM public.compute_host_identity_bindings WHERE host_id=$1",
+			args:     []any{hostID},
+			sqlState: "23514",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := db.ExecContext(ctx, tc.query, tc.args...); err == nil {
-				t.Fatalf("unsafe enrollment mutation succeeded: %s", tc.name)
+			_, err := db.ExecContext(ctx, tc.query, tc.args...)
+			var state interface{ SQLState() string }
+			if !errors.As(err, &state) || state.SQLState() != tc.sqlState {
+				t.Fatalf("want SQLSTATE %s for %s, got %v", tc.sqlState, tc.name, err)
 			}
 		})
 	}
@@ -91,16 +123,32 @@ func TestHostIdentityBindingDatabaseContract(t *testing.T) {
 	if _, err := repo.BeginProviderDrain(ctx, p.ProviderID, 1, "PLANNED_MAINTENANCE"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, insert, hostID+"-after-drain", p.ProviderID, p.ClusterScope, nodeUID+"-new", subject); err == nil {
-		t.Fatal("draining Provider admitted a new host binding")
+	_, err = db.ExecContext(ctx, insert, hostID+"-after-drain", p.ProviderID, p.ClusterScope, nodeUID+"-new", subject)
+	var state interface{ SQLState() string }
+	if !errors.As(err, &state) || state.SQLState() != "23514" {
+		t.Fatalf("draining Provider enrollment must return SQLSTATE 23514, got %v", err)
 	}
-	var provider, cluster, uid, persistedSubject string
-	if err := db.QueryRowContext(ctx,
-		"SELECT provider_id, cluster_scope, node_uid, subject FROM public.compute_host_identity_bindings WHERE host_id=$1",
-		hostID).Scan(&provider, &cluster, &uid, &persistedSubject); err != nil {
+	// Roll back even if the immutability guard is missing. Never destroy the
+	// shared disposable database's fixture rows when a negative test fails.
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if provider != p.ProviderID || cluster != p.ClusterScope || uid != nodeUID || persistedSubject != subject {
+	defer tx.Rollback()
+	_, truncateErr := tx.ExecContext(ctx, "TRUNCATE public.compute_host_identity_bindings")
+	rollbackErr := tx.Rollback()
+	var truncateState interface{ SQLState() string }
+	if rollbackErr != nil || !errors.As(truncateErr, &truncateState) || truncateState.SQLState() != "23514" {
+		t.Fatalf("TRUNCATE must fail with SQLSTATE 23514: truncate=%v rollback=%v", truncateErr, rollbackErr)
+	}
+	var provider, cluster, uid, persistedSubject string
+	var persistedAt time.Time
+	if err := db.QueryRowContext(ctx,
+		"SELECT provider_id, cluster_scope, node_uid, subject, registered_at FROM public.compute_host_identity_bindings WHERE host_id=$1",
+		hostID).Scan(&provider, &cluster, &uid, &persistedSubject, &persistedAt); err != nil {
+		t.Fatal(err)
+	}
+	if provider != p.ProviderID || cluster != p.ClusterScope || uid != nodeUID || persistedSubject != subject || !persistedAt.Equal(recorded) {
 		t.Fatal("rejected writes changed immutable enrollment")
 	}
 	var count int
