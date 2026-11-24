@@ -227,7 +227,7 @@ func TestHostSessionRestrictedWriterAndCatalogBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, binding := hostSessionFixture(t, admin)
+	_, binding := hostSessionFixture(t, admin)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
