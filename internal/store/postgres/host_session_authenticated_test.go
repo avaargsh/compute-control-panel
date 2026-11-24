@@ -188,6 +188,47 @@ func TestHostSessionSubjectGrantRevocationFencesConcurrentHeartbeat(t *testing.T
 	}
 }
 
+
+func TestHostSessionSubjectGrantCannotBeSharedAcrossHostBindings(t *testing.T) {
+	admin := openIntegrationDB(t)
+	_, first := hostSessionFixture(t, admin)
+	_, second := hostSessionFixture(t, admin)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	tenant := "tenant-host-unique-" + randomSuffix(t)
+	provisionHostSessionSubjectGrant(t, admin, first, tenant)
+
+	_, err := admin.ExecContext(ctx, `
+		INSERT INTO public.compute_host_identity_subject_grants
+			(subject, tenant_id, service_name, host_id, provider_id, cluster_scope, node_uid)
+		VALUES ($1,$2,'compute-host-agent',$3,$4,$5,$6)
+	`, first.Subject, tenant, second.HostID, second.ProviderID, second.ClusterScope, second.NodeUID)
+	if err == nil {
+		t.Fatal("one host certificate subject was allowed to bind a second HostID/Node UID")
+	}
+
+	wrongMachineSubject := "spiffe://ccp.example/host/not-" + first.HostID
+	_, err = admin.ExecContext(ctx, `
+		INSERT INTO public.compute_host_identity_subject_grants
+			(subject, tenant_id, service_name, host_id, provider_id, cluster_scope, node_uid)
+		VALUES ($1,$2,'compute-host-agent',$3,$4,$5,$6)
+	`, wrongMachineSubject, tenant, first.HostID, first.ProviderID, first.ClusterScope, first.NodeUID)
+	if err == nil {
+		t.Fatal("certificate URI machine ID was allowed to differ from the immutable HostID")
+	}
+
+	var count int
+	if err := admin.QueryRowContext(ctx, `
+		SELECT count(*) FROM public.compute_host_identity_subject_grants WHERE subject=$1
+	`, first.Subject).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("subject grant uniqueness changed after rejected cross-host insert: rows=%d", count)
+	}
+}
+
 func TestHostSessionWriterCanOnlyInvokeAuthenticatedFunctions(t *testing.T) {
 	admin := openIntegrationDB(t)
 	writer, err := hostSessionWriterDB(t)
