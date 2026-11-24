@@ -27,8 +27,8 @@ type DRAPoolInventoryObservation struct {
 }
 
 type draResourceSlice struct {
-	APIVersion string   `json:"apiVersion"`
-	Kind       string   `json:"kind"`
+	APIVersion string            `json:"apiVersion"`
+	Kind       string            `json:"kind"`
 	Metadata   draDeviceReadMeta `json:"metadata"`
 	Spec       struct {
 		Driver                 string          `json:"driver"`
