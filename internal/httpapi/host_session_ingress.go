@@ -35,7 +35,8 @@ type HostSessionIngressRepository interface {
 type HostSessionIngressDependencies struct {
 	HostTrustRoots          *x509.CertPool
 	HostTrustDomain         string
-	HostRevocationCRLs      [][]byte
+	HostRevocationCRLs               [][]byte
+	HostRevocationIssuerCertificates []*x509.Certificate
 	HostRevocationListStore *hostidentity.HostCredentialRevocationListStore
 	Now                     func() time.Time
 	Repository              HostSessionIngressRepository
@@ -61,12 +62,12 @@ func NewHostSessionIngressHandler(deps HostSessionIngressDependencies) (http.Han
 	}
 	revocationStore := deps.HostRevocationListStore
 	if revocationStore != nil {
-		if len(deps.HostRevocationCRLs) != 0 || revocationStore.ValidateCurrent(deps.Now()) != nil {
+		if len(deps.HostRevocationCRLs) != 0 || len(deps.HostRevocationIssuerCertificates) != 0 || revocationStore.ValidateCurrent(deps.Now()) != nil {
 			return nil, errors.New("host session ingress requires one initialized, current issuer CRL source")
 		}
 	} else {
 		var err error
-		revocationStore, err = hostidentity.NewHostCredentialRevocationListStore(deps.HostRevocationCRLs, deps.Now())
+		revocationStore, err = hostidentity.NewHostCredentialRevocationListStore(deps.HostRevocationCRLs, deps.HostRevocationIssuerCertificates, deps.Now())
 		if err != nil {
 			return nil, errors.New("host session ingress requires a valid explicit issuer CRL bundle")
 		}
