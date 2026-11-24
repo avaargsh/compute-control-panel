@@ -30,14 +30,20 @@ func (a draReceiptTestAuthenticator) Authenticate(_ context.Context, _ *http.Req
 }
 
 type draReceiptTestResolver struct {
-	calls    int
-	err      error
-	verifier *provider.DRAUnprepareVerifier
+	verifierCalls int
+	calls         int
+	err           error
+	verifier      *provider.DRAUnprepareVerifier
 }
 
-func (r *draReceiptTestResolver) ResolveDRAReceiptEvidence(_ context.Context, _ WorkloadPrincipal, _ provider.DRAUnprepareEvent) (provider.ReleaseEvidenceCandidate, *provider.DRAUnprepareVerifier, error) {
+func (r *draReceiptTestResolver) ResolveDRAReceiptVerifier(_ context.Context, _ WorkloadPrincipal, _ provider.DRAUnprepareEvent) (*provider.DRAUnprepareVerifier, error) {
+	r.verifierCalls++
+	return r.verifier, nil
+}
+
+func (r *draReceiptTestResolver) ResolveDRAReceiptEvidence(_ context.Context, _ WorkloadPrincipal, _ provider.DRAUnprepareEvent) (provider.ReleaseEvidenceCandidate, error) {
 	r.calls++
-	return provider.ReleaseEvidenceCandidate{}, r.verifier, r.err
+	return provider.ReleaseEvidenceCandidate{}, r.err
 }
 
 type draReceiptTestJournal struct {
@@ -73,9 +79,12 @@ func draReceiptSPIFFEAuthenticator(t *testing.T) WorkloadAuthenticator {
 	return auth
 }
 
+func draReceiptTestPrivateKey() ed25519.PrivateKey {
+	return ed25519.NewKeyFromSeed(bytes.Repeat([]byte{1}, ed25519.SeedSize))
+}
+
 func draReceiptTestSigned() provider.SignedDRAUnprepare {
-	return provider.SignedDRAUnprepare{
-		Event: provider.DRAUnprepareEvent{
+	event := provider.DRAUnprepareEvent{
 			Version: "ccp.dra.node-unprepare.v1", ClusterID: "cluster-a",
 			SourceID: "source-a", KeyID: "key-a", EventID: "event-a",
 			RPC: "NodeUnprepareResources", Result: "SUCCESS",
@@ -85,10 +94,14 @@ func draReceiptTestSigned() provider.SignedDRAUnprepare {
 			AllocatedDevice: provider.DRAAllocatedDevice{
 				Request: "gpu", Driver: "gpu.example.com", Pool: "pool-a", Device: "gpu-a",
 			},
-			CompletedAt: time.Now().UTC(),
-		},
-		Signature: bytes.Repeat([]byte{7}, ed25519.SignatureSize),
+		CompletedAt: time.Now().UTC(),
 	}
+	payload, err := json.Marshal(event)
+	if err != nil {
+		panic(err)
+	}
+	payload = append([]byte("CCP:DRA:NodeUnprepareResources:v1\n"), payload...)
+	return provider.SignedDRAUnprepare{Event: event, Signature: ed25519.Sign(draReceiptTestPrivateKey(), payload)}
 }
 
 func draReceiptTestBody(t *testing.T, signed provider.SignedDRAUnprepare) []byte {
@@ -111,7 +124,7 @@ func draReceiptTestHandler(t *testing.T, authenticator WorkloadAuthenticator) (h
 	}
 	verifier, err := provider.NewDRAUnprepareVerifier(provider.DRAUnprepareAuthority{
 		ClusterID: "cluster-a", SourceID: "source-a", KeyID: "key-a",
-		Driver: "gpu.example.com", PublicKey: bytes.Repeat([]byte{1}, ed25519.PublicKeySize),
+		Driver: "gpu.example.com", PublicKey: draReceiptTestPrivateKey().Public().(ed25519.PublicKey),
 	}, time.Minute, 10*time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -119,7 +132,7 @@ func draReceiptTestHandler(t *testing.T, authenticator WorkloadAuthenticator) (h
 	resolver := &draReceiptTestResolver{verifier: verifier}
 	journal := &draReceiptTestJournal{created: true}
 	h, err := NewDRAReceiptIngestHandler(DRAReceiptIngestDependencies{
-		Authenticator: authenticator, Authorizer: policy, Resolver: resolver, Journal: journal,
+		Authenticator: authenticator, Authorizer: policy, VerifierResolver: resolver, Resolver: resolver, Journal: journal,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -155,7 +168,7 @@ func TestDRAReceiptIngestConstructorRefusesArbitraryAuthenticator(t *testing.T) 
 	}
 	h, err := NewDRAReceiptIngestHandler(DRAReceiptIngestDependencies{
 		Authenticator: draReceiptTestAuthenticator{principal: draReceiptTestPrincipal()},
-		Authorizer:    policy, Resolver: &draReceiptTestResolver{},
+		Authorizer:    policy, VerifierResolver: &draReceiptTestResolver{}, Resolver: &draReceiptTestResolver{},
 		Journal: &draReceiptTestJournal{},
 	})
 	if err == nil || h != nil {
@@ -203,6 +216,22 @@ func TestDRAReceiptIngestRequiresVerifiedSPIFFEIdentityAndExactSource(t *testing
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden || resolver.calls != 1 || journal.calls != 1 {
 		t.Fatalf("cross-source principal bypassed policy: HTTP %d calls %d/%d", rec.Code, resolver.calls, journal.calls)
+	}
+}
+
+
+func TestDRAReceiptIngestRejectsInvalidSignatureBeforeHistoricalEvidenceResolution(t *testing.T) {
+	h, resolver, journal := draReceiptTestHandler(t, draReceiptSPIFFEAuthenticator(t))
+	signed := draReceiptTestSigned()
+	signed.Signature[0] ^= 0xff
+	req := httptest.NewRequest(http.MethodPost, draReceiptIngestPath, bytes.NewReader(draReceiptTestBody(t, signed)))
+	req.Header.Set("Content-Type", "application/json")
+	req.TLS = draReceiptTestTLS()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden || resolver.verifierCalls != 1 || resolver.calls != 0 || journal.calls != 0 {
+		t.Fatalf("invalid signature reached historical evidence resolver/journal: HTTP %d verifier=%d evidence=%d journal=%d",
+			rec.Code, resolver.verifierCalls, resolver.calls, journal.calls)
 	}
 }
 
