@@ -56,7 +56,7 @@ func newHostCredentialRevocationFixture(t *testing.T) hostCredentialRevocationFi
 	leafTemplate := &x509.Certificate{
 		SerialNumber: big.NewInt(42),
 		NotBefore:    now.Add(-time.Minute), NotAfter: now.Add(time.Hour),
-		KeyUsage:     x509.KeyUsageDigitalSignature,
+		KeyUsage:    x509.KeyUsageDigitalSignature,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 		URIs:        []*url.URL{uri},
 	}
