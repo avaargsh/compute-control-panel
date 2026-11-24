@@ -95,11 +95,11 @@ func (p *ExactDRAReceiptIngestAuthorizer) AuthorizeDRAReceipt(_ context.Context,
 	return nil
 }
 
-// DRAReceiptVerifierResolution carries the signer verifier and the
-// authoritative database clock sampled while resolving its source-key row.
+// DRAReceiptVerifierResolution carries the exact Provider scope, signer
+// verifier and authoritative database clock sampled while resolving its source-key row.
 // DatabaseNow MUST come from PostgreSQL clock_timestamp() in the same trusted
-// registry query/transaction that confirms the exact tenant/cluster/source/key
-// scope, active validity window and absence of revocation. Never use process
+// registry query/transaction that confirms the exact tenant/Provider/cluster/
+// source/key scope, active validity window and absence of revocation. Never use process
 // wall-clock time or a timestamp from the receipt for preflight freshness.
 // The restricted journal independently rechecks the live database clock and
 // revocation state before recording.
@@ -288,7 +288,11 @@ func (h *draReceiptIngestHandler) ingest(w http.ResponseWriter, r *http.Request)
 		}
 		return
 	}
-	if !validDRAReceiptProviderID(resolved.ProviderID) || resolved.Verifier == nil || resolved.DatabaseNow.IsZero() {
+	if !validDRAReceiptProviderID(resolved.ProviderID) {
+		writeWorkloadAPIError(w, http.StatusForbidden, "DRA_RECEIPT_UNTRUSTED", "Registered receipt source has no valid Provider scope")
+		return
+	}
+	if resolved.Verifier == nil || resolved.DatabaseNow.IsZero() {
 		writeWorkloadAPIError(w, http.StatusServiceUnavailable, "DRA_VERIFIER_UNAVAILABLE", "Registered receipt signer or authoritative database clock is unavailable")
 		return
 	}
