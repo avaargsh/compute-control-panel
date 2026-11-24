@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"net/url"
 	"testing"
+	"sync"
 	"time"
 )
 
@@ -71,6 +72,10 @@ func newHostCredentialRevocationFixture(t *testing.T) hostCredentialRevocationFi
 }
 
 func (f hostCredentialRevocationFixture) crl(t *testing.T, issuer *x509.Certificate, key ed25519.PrivateKey, thisUpdate, nextUpdate time.Time, revoked ...int64) []byte {
+	return f.crlNumber(t, issuer, key, 1, thisUpdate, nextUpdate, revoked...)
+}
+
+func (f hostCredentialRevocationFixture) crlNumber(t *testing.T, issuer *x509.Certificate, key ed25519.PrivateKey, number int64, thisUpdate, nextUpdate time.Time, revoked ...int64) []byte {
 	t.Helper()
 	entries := make([]x509.RevocationListEntry, 0, len(revoked))
 	for _, serial := range revoked {
@@ -80,7 +85,7 @@ func (f hostCredentialRevocationFixture) crl(t *testing.T, issuer *x509.Certific
 		})
 	}
 	der, err := x509.CreateRevocationList(rand.Reader, &x509.RevocationList{
-		Number:                    big.NewInt(1),
+		Number:                    big.NewInt(number),
 		ThisUpdate:                thisUpdate,
 		NextUpdate:                nextUpdate,
 		RevokedCertificateEntries: entries,
@@ -204,6 +209,102 @@ func TestParseHostCredentialRevocationListsRejectsUnsupportedCRLScopes(t *testin
 				t.Fatalf("unsupported CRL scope accepted: lists=%v err=%v", lists, err)
 			}
 		})
+	}
+}
+
+func TestHostCredentialRevocationListStoreRotatesAndRejectsNewlyRevokedSerial(t *testing.T) {
+	f := newHostCredentialRevocationFixture(t)
+	initial := f.crlNumber(t, f.issuer, f.key, 1, f.now.Add(-time.Minute), f.now.Add(time.Hour))
+	revoked := f.crlNumber(t, f.issuer, f.key, 2, f.now.Add(-time.Minute), f.now.Add(time.Hour), 42)
+
+	store, err := NewHostCredentialRevocationListStore([][]byte{initial}, f.now)
+	if err != nil {
+		t.Fatalf("create revocation store: %v", err)
+	}
+	if _, err := store.VerifyHostCredential([][]byte{f.leafDER}, f.roots, "ccp.example", f.now); err != nil {
+		t.Fatalf("initial valid CRL rejected: %v", err)
+	}
+	if err := store.Replace([][]byte{revoked}, f.now); err != nil {
+		t.Fatalf("replace with newer current CRL: %v", err)
+	}
+	if _, err := store.VerifyHostCredential([][]byte{f.leafDER}, f.roots, "ccp.example", f.now); err == nil {
+		t.Fatal("credential remained accepted after the replacement CRL revoked its serial")
+	}
+}
+
+func TestHostCredentialRevocationListStoreKeepsLastGoodSnapshotOnRejectedUpdate(t *testing.T) {
+	f := newHostCredentialRevocationFixture(t)
+	initial := f.crlNumber(t, f.issuer, f.key, 2, f.now.Add(-time.Minute), f.now.Add(time.Hour))
+	older := f.crlNumber(t, f.issuer, f.key, 1, f.now.Add(-time.Minute), f.now.Add(time.Hour))
+	sameNumberDifferent := f.crlNumber(t, f.issuer, f.key, 2, f.now.Add(-2*time.Minute), f.now.Add(time.Hour))
+	expired := f.crlNumber(t, f.issuer, f.key, 3, f.now.Add(-time.Hour), f.now)
+	store, err := NewHostCredentialRevocationListStore([][]byte{initial}, f.now)
+	if err != nil {
+		t.Fatalf("create revocation store: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		crls [][]byte
+	}{
+		{name: "malformed DER", crls: [][]byte{[]byte("not a CRL")}},
+		{name: "older CRL number", crls: [][]byte{older}},
+		{name: "same CRL number with different bytes", crls: [][]byte{sameNumberDifferent}},
+		{name: "expired CRL", crls: [][]byte{expired}},
+		{name: "missing issuer CRL", crls: nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := store.Replace(tc.crls, f.now); err == nil {
+				t.Fatal("invalid, stale or regressing CRL update was accepted")
+			}
+			if _, err := store.VerifyHostCredential([][]byte{f.leafDER}, f.roots, "ccp.example", f.now); err != nil {
+				t.Fatalf("rejected update displaced the last known-good CRL snapshot: %v", err)
+			}
+		})
+	}
+}
+
+func TestHostCredentialRevocationListStoreConcurrentReplacementCannotRollBack(t *testing.T) {
+	f := newHostCredentialRevocationFixture(t)
+	initial := f.crlNumber(t, f.issuer, f.key, 1, f.now.Add(-time.Minute), f.now.Add(time.Hour))
+	intermediate := f.crlNumber(t, f.issuer, f.key, 2, f.now.Add(-time.Minute), f.now.Add(time.Hour))
+	latestRevoked := f.crlNumber(t, f.issuer, f.key, 3, f.now.Add(-time.Minute), f.now.Add(time.Hour), 42)
+	store, err := NewHostCredentialRevocationListStore([][]byte{initial}, f.now)
+	if err != nil {
+		t.Fatalf("create revocation store: %v", err)
+	}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	var intermediateErr error
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-start
+		intermediateErr = store.Replace([][]byte{intermediate}, f.now)
+	}()
+	close(start)
+	if err := store.Replace([][]byte{latestRevoked}, f.now); err != nil {
+		t.Fatalf("install latest CRL: %v", err)
+	}
+	wg.Wait()
+	if intermediateErr != nil && intermediateErr != ErrHostCredential {
+		t.Fatalf("concurrent older update returned unexpected error: %v", intermediateErr)
+	}
+	if _, err := store.VerifyHostCredential([][]byte{f.leafDER}, f.roots, "ccp.example", f.now); err == nil {
+		t.Fatal("concurrent lower-numbered CRL rolled back the latest revocation")
+	}
+}
+
+func TestHostCredentialRevocationListStoreRejectsExpiredSnapshot(t *testing.T) {
+	f := newHostCredentialRevocationFixture(t)
+	initial := f.crlNumber(t, f.issuer, f.key, 1, f.now.Add(-time.Minute), f.now.Add(time.Hour))
+	store, err := NewHostCredentialRevocationListStore([][]byte{initial}, f.now)
+	if err != nil {
+		t.Fatalf("create revocation store: %v", err)
+	}
+	if _, err := store.VerifyHostCredential([][]byte{f.leafDER}, f.roots, "ccp.example", f.now.Add(time.Hour)); err == nil {
+		t.Fatal("expired CRL snapshot allowed a host credential")
 	}
 }
 
