@@ -76,7 +76,7 @@ func TestKindLeaseGetLeastPrivilege(t *testing.T) {
 	writeToken(allowToken)
 	reader, err := NewReader(Config{
 		APIServer: required("CCP_KIND_API_SERVER"),
-		CAFile: required("CCP_KIND_CA_FILE"), TokenFile: rotatingPath,
+		CAFile:    required("CCP_KIND_CA_FILE"), TokenFile: rotatingPath,
 		ClusterID: "kind-inventory", TenantID: "tenant-kind", ProjectID: "project-kind",
 		ResourceNames: []string{"nvidia.com/gpu"}, ObservationTTL: time.Minute,
 		Timeout: 10 * time.Second,
