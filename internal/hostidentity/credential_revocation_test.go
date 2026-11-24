@@ -31,7 +31,7 @@ func newHostCredentialRevocationFixture(t *testing.T) hostCredentialRevocationFi
 		Subject:      pkix.Name{CommonName: "host revocation fixture CA"},
 		NotBefore:    now.Add(-time.Hour), NotAfter: now.Add(24 * time.Hour),
 		IsCA: true, BasicConstraintsValid: true,
-		KeyUsage:    x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
+		KeyUsage:     x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
 		SubjectKeyId: []byte{1, 2, 3, 4},
 	}
 	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, publicKey, privateKey)
@@ -56,7 +56,7 @@ func newHostCredentialRevocationFixture(t *testing.T) hostCredentialRevocationFi
 	leafTemplate := &x509.Certificate{
 		SerialNumber: big.NewInt(42),
 		NotBefore:    now.Add(-time.Minute), NotAfter: now.Add(time.Hour),
-		KeyUsage:     x509.KeyUsageDigitalSignature,
+		KeyUsage:    x509.KeyUsageDigitalSignature,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 		URIs:        []*url.URL{uri},
 	}
@@ -106,7 +106,7 @@ func TestVerifyHostCredentialRequiresCurrentIssuerCRL(t *testing.T) {
 		Subject:      f.issuer.Subject,
 		NotBefore:    f.now.Add(-time.Hour), NotAfter: f.now.Add(24 * time.Hour),
 		IsCA: true, BasicConstraintsValid: true,
-		KeyUsage:    x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		KeyUsage:     x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
 		SubjectKeyId: []byte{9, 8, 7, 6},
 	}
 	otherDER, err := x509.CreateCertificate(rand.Reader, otherTemplate, otherTemplate, otherPublic, otherKey)
