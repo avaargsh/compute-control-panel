@@ -33,13 +33,13 @@ type HostSessionIngressRepository interface {
 }
 
 type HostSessionIngressDependencies struct {
-	HostTrustRoots                 *x509.CertPool
-	HostTrustDomain                string
-	HostRevocationCRLs             [][]byte
+	HostTrustRoots                   *x509.CertPool
+	HostTrustDomain                  string
+	HostRevocationCRLs               [][]byte
 	HostRevocationIssuerCertificates []*x509.Certificate
-	HostRevocationListStore        *hostidentity.HostCredentialRevocationListStore
-	Now                            func() time.Time
-	Repository                     HostSessionIngressRepository
+	HostRevocationListStore          *hostidentity.HostCredentialRevocationListStore
+	Now                              func() time.Time
+	Repository                       HostSessionIngressRepository
 }
 
 type hostSessionIngressHandler struct {
