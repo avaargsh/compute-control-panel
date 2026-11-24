@@ -92,8 +92,10 @@ GRANT SELECT (host_id, provider_id, cluster_scope, node_uid, subject),
     ON public.compute_host_identity_bindings TO ccp_host_session_guard_owner;
 
 CREATE TABLE public.compute_host_sessions (
-    host_id TEXT NOT NULL
-        REFERENCES public.compute_host_identity_bindings(host_id),
+    -- Intentionally no FK to HostIdentity: its BEFORE TRUNCATE trigger
+    -- remains the authoritative immutable-history rejection path. Session
+    -- start validates and row-locks the exact binding before inserting here.
+    host_id TEXT NOT NULL,
     epoch BIGINT NOT NULL CHECK (epoch > 0),
     session_id TEXT NOT NULL UNIQUE
         CHECK (pg_catalog.octet_length(session_id) BETWEEN 1 AND 256
