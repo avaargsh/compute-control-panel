@@ -528,6 +528,20 @@ func TestAuthenticatedHostHeartbeatGrantExpiresWhileWaitingForProvider(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Create a legacy/internal session before this subject is granted. This
+	// intentionally makes the session window longer than the new short grant,
+	// so the test isolates the authenticated wrapper's post-lock grant check.
+	rawRepo, err := NewRepository(admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := rawRepo.StartHostSession(ctx, HostSessionStartRequest{
+		Binding: binding, ExpectedEpoch: 0,
+		RequestID: "heartbeat-expiry-start-" + randomSuffix(t), TTL: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	tenant := "tenant-heartbeat-lock-expiry-" + randomSuffix(t)
 	var expiresAt time.Time
 	err = admin.QueryRowContext(ctx, `
@@ -536,13 +550,6 @@ func TestAuthenticatedHostHeartbeatGrantExpiresWhileWaitingForProvider(t *testin
 		VALUES ($1,$2,'compute-host-agent',$3,$4,$5,$6,pg_catalog.clock_timestamp()+interval '5 seconds')
 		RETURNING expires_at
 	`, binding.Subject, tenant, binding.HostID, binding.ProviderID, binding.ClusterScope, binding.NodeUID).Scan(&expiresAt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	first, err := repo.StartAuthenticatedHostSession(ctx, AuthenticatedHostSessionStartRequest{
-		Subject: binding.Subject, ExpectedEpoch: 0,
-		RequestID: "heartbeat-expiry-start-" + randomSuffix(t), TTL: 30 * time.Second,
-	})
 	if err != nil {
 		t.Fatal(err)
 	}
