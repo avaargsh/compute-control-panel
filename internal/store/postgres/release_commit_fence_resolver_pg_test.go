@@ -124,8 +124,15 @@ func TestResolveReleaseCommitFenceRejectsMissingTransactionAndMalformedScope(t *
 		"tenant-a", "workload-a", "allocation-a", "create-a", "delete-a"); !errors.Is(err, ErrReleaseCommitFence) {
 		t.Fatalf("missing transaction was accepted: %v", err)
 	}
-	if _, err := ResolveReleaseCommitFence(context.Background(), nil,
-		"", "workload-a", "allocation-a", "create-a", "delete-a"); !errors.Is(err, ErrReleaseCommitFence) {
-		t.Fatalf("missing tenant was accepted: %v", err)
+
+	db := openIntegrationDB(t)
+	tx, err := db.BeginTx(context.Background(), &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err := ResolveReleaseCommitFence(context.Background(), tx,
+		" tenant-a", "workload-a", "allocation-a", "create-a", "delete-a"); !errors.Is(err, ErrReleaseCommitFence) {
+		t.Fatalf("malformed tenant scope was accepted: %v", err)
 	}
 }
