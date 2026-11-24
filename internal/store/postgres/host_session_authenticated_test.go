@@ -623,4 +623,3 @@ func TestAuthenticatedHostHeartbeatGrantExpiresWhileWaitingForProvider(t *testin
 		t.Fatalf("post-expiry heartbeat left %d durable receipts", count)
 	}
 }
-
