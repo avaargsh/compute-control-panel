@@ -133,7 +133,7 @@ func TestKindInventoryLeastPrivilege(t *testing.T) {
 // authenticated L2 source-identity test, NOT physical GPU readiness evidence.
 func TestKindNodeLeaseUIDPinnedRead(t *testing.T) {
 	if os.Getenv("CCP_KIND_INVENTORY_SMOKE") != "1" {
-		t.Skip("requires opt-in disposable kind Node+Lease API and RBAC")
+		t.Skip("requires opt-in disposable kind Node list and pinned Lease GET RBAC")
 	}
 	required := func(name string) string {
 		t.Helper()
@@ -166,21 +166,21 @@ func TestKindNodeLeaseUIDPinnedRead(t *testing.T) {
 	reader := makeReader(allowed)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	observed, err := reader.ObserveNodeLease(ctx, "tenant-kind", []string{"project-kind"}, nodeName, nodeUID, time.Minute)
-	if err != nil || observed.State != nodeLeaseFresh || !observed.ExpiresAt.After(time.Now().UTC()) {
-		t.Fatalf("real Node/Lease API identity not current: state=%s reason=%s err=%v", observed.State, observed.ReasonCode, err)
+	observed, err := reader.observeNodeLease(ctx, "tenant-kind", []string{"project-kind"}, nodeName, nodeUID, time.Minute)
+	if err != nil || observed.Assessment.State != nodeLeaseFresh || !observed.Assessment.ExpiresAt.After(time.Now().UTC()) {
+		t.Fatalf("real Node/Lease API identity not current: state=%s reason=%s err=%v", observed.Assessment.State, observed.Assessment.ReasonCode, err)
 	}
-	stale, err := reader.ObserveNodeLease(ctx, "tenant-kind", []string{"project-kind"}, nodeName, "different-node-uid", time.Minute)
-	if err != nil || stale.State != nodeLeaseUnknown {
+	stale, err := reader.observeNodeLease(ctx, "tenant-kind", []string{"project-kind"}, nodeName, "different-node-uid", time.Minute)
+	if err != nil || stale.Assessment.State != nodeLeaseUnknown {
 		t.Fatalf("same-name successor Node UID was adopted: %+v err=%v", stale, err)
 	}
-	scoped, err := reader.ObserveNodeLease(ctx, "tenant-kind", []string{"outside-project"}, nodeName, nodeUID, time.Minute)
-	if !errors.Is(err, ErrScope) || scoped.State == nodeLeaseFresh {
+	scoped, err := reader.observeNodeLease(ctx, "tenant-kind", []string{"outside-project"}, nodeName, nodeUID, time.Minute)
+	if !errors.Is(err, ErrScope) || scoped.Assessment.State == nodeLeaseFresh {
 		t.Fatalf("ungranted project was not denied: %+v err=%v", scoped, err)
 	}
 	blocked := makeReader(denied)
-	rejected, err := blocked.ObserveNodeLease(ctx, "tenant-kind", []string{"project-kind"}, nodeName, nodeUID, time.Minute)
-	if !errors.Is(err, ErrForbidden) || rejected.State == nodeLeaseFresh {
+	rejected, err := blocked.observeNodeLease(ctx, "tenant-kind", []string{"project-kind"}, nodeName, nodeUID, time.Minute)
+	if !errors.Is(err, ErrForbidden) || rejected.Assessment.State == nodeLeaseFresh {
 		t.Fatalf("unprivileged account read Node/Lease: %+v err=%v", rejected, err)
 	}
 }

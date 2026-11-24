@@ -93,21 +93,20 @@ kubectl apply -f - <<YAML
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: ccp-inventory-smoke-pinned-node-get
+  name: ccp-inventory-smoke-lease-node-list
 rules:
 - apiGroups: [""]
   resources: ["nodes"]
-  resourceNames: ["$node_name"]
-  verbs: ["get"]
+  verbs: ["list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: ccp-inventory-smoke-pinned-node-get
+  name: ccp-inventory-smoke-lease-node-list
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: ccp-inventory-smoke-pinned-node-get
+  name: ccp-inventory-smoke-lease-node-list
 subjects:
 - kind: ServiceAccount
   name: inventory-lease-allowed
@@ -140,9 +139,9 @@ subjects:
 YAML
 
 lease_sa="system:serviceaccount:$namespace:inventory-lease-allowed"
-[[ "$(kubectl auth can-i get nodes/"$node_name" --as="$lease_sa")" == "yes" ]] || { echo "Node GET grant missing" >&2; exit 1; }
+[[ "$(kubectl auth can-i list nodes --as="$lease_sa")" == "yes" ]] || { echo "Node list grant missing" >&2; exit 1; }
 [[ "$(kubectl auth can-i get leases/"$node_name" --as="$lease_sa" -n kube-node-lease)" == "yes" ]] || { echo "Lease GET grant missing" >&2; exit 1; }
-[[ "$(kubectl auth can-i list nodes --as="$lease_sa")" == "no" ]] || { echo "Lease SA unexpectedly allowed to list nodes" >&2; exit 1; }
+[[ "$(kubectl auth can-i get nodes/"$node_name" --as="$lease_sa")" == "no" ]] || { echo "Lease SA unexpectedly allowed to GET nodes" >&2; exit 1; }
 [[ "$(kubectl auth can-i list leases --as="$lease_sa" -n kube-node-lease)" == "no" ]] || { echo "Lease SA unexpectedly allowed to list leases" >&2; exit 1; }
 for verb in create update patch delete; do
   [[ "$(kubectl auth can-i "$verb" nodes --as="$lease_sa")" == "no" ]] || { echo "Lease SA may mutate Node" >&2; exit 1; }
@@ -192,5 +191,5 @@ CCP_KIND_LEASE_NODE_UID="$node_uid" \
 GOTOOLCHAIN=local \
   go test -count=1 -timeout=3m -run '^TestKind(InventoryLeastPrivilege|NodeLeaseUIDPinnedRead)$' -v ./internal/kubeinventory
 
-echo "L2 Kubernetes node inventory and pinned Lease read/denial accepted for $source_commit"
+echo "L2 Kubernetes Node list and UID-bound Lease GET, scoped RBAC accepted for $source_commit"
 echo "No GPU device plugin, device allocation or L3 hardware evidence was tested"
