@@ -222,7 +222,7 @@ func TestDRAUnprepareCorrelationRequiresExactDurablePreDeleteSnapshot(t *testing
 
 	t.Run("different DELETE operation", func(t *testing.T) {
 		candidate := releaseCandidateFixture()
-		snapshot := releaseCandidatePreDeleteSnapshot(candidate)
+		snapshot := *releaseCandidatePreDeleteSnapshot(candidate)
 		snapshot.DeleteOperationID = "other-delete-op"
 		snapshot.Digest = kueuePreDeleteSnapshotDigest(snapshot)
 		candidate.PreDeleteSnapshot = &snapshot
@@ -233,7 +233,7 @@ func TestDRAUnprepareCorrelationRequiresExactDurablePreDeleteSnapshot(t *testing
 
 	t.Run("tampered digest", func(t *testing.T) {
 		candidate := releaseCandidateFixture()
-		snapshot := releaseCandidatePreDeleteSnapshot(candidate)
+		snapshot := *releaseCandidatePreDeleteSnapshot(candidate)
 		snapshot.Digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		candidate.PreDeleteSnapshot = &snapshot
 		if got, err := verifier.Correlate(candidate, signed, asOf); !errors.Is(err, ErrUncorrelatedDRAUnprepare) || got != (DRAUnprepareCorrelation{}) {
