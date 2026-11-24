@@ -448,15 +448,10 @@ COMMENT ON FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TE
     'Unmounted internal heartbeat entrypoint; enforces active latest epoch, DB clock, monotonic sequence and exact replay without expiry extension.';
 
 REVOKE ALL ON TABLE public.compute_host_sessions FROM PUBLIC;
-REVOKE ALL ON TABLE public.compute_host_sessions FROM CURRENT_USER;
 REVOKE ALL ON TABLE public.compute_host_session_heartbeats FROM PUBLIC;
-REVOKE ALL ON TABLE public.compute_host_session_heartbeats FROM CURRENT_USER;
 REVOKE ALL ON FUNCTION public.compute_host_session_immutable_guard() FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.compute_host_session_immutable_guard() FROM CURRENT_USER;
 REVOKE ALL ON FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,INTEGER) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,INTEGER) FROM CURRENT_USER;
 REVOKE ALL ON FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT) FROM CURRENT_USER;
 ALTER TABLE public.compute_host_sessions
     ENABLE ALWAYS TRIGGER compute_host_sessions_no_update_delete;
 ALTER TABLE public.compute_host_sessions
