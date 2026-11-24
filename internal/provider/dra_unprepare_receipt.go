@@ -68,12 +68,12 @@ type DRAUnprepareVerifier struct {
 // independently authorized verification. It has no RELEASED, physical-device,
 // READY, or cost-finality status.
 type DRAUnprepareCorrelation struct {
-	Release       ReleaseEvidenceCorrelation
-	Event         DRAUnprepareEvent
+	Release                 ReleaseEvidenceCorrelation
+	Event                   DRAUnprepareEvent
 	PayloadSHA256           string
 	KeySHA256               string
 	PreDeleteSnapshotDigest string
-	Signature     [ed25519.SignatureSize]byte
+	Signature               [ed25519.SignatureSize]byte
 }
 
 // Fixed-field struct JSON with a domain separator. No maps or arbitrary input
@@ -187,11 +187,11 @@ func (v *DRAUnprepareVerifier) Correlate(
 	var signature [ed25519.SignatureSize]byte
 	copy(signature[:], signed.Signature)
 	return DRAUnprepareCorrelation{
-		Release:       release,
-		Event:         event,
+		Release:                 release,
+		Event:                   event,
 		PayloadSHA256:           "sha256:" + hex.EncodeToString(digest[:]),
 		KeySHA256:               "sha256:" + hex.EncodeToString(keyDigest[:]),
 		PreDeleteSnapshotDigest: candidate.PreDeleteSnapshot.Digest,
-		Signature:     signature,
+		Signature:               signature,
 	}, nil
 }
