@@ -38,19 +38,6 @@ type hostSessionIngressRepositoryStub struct {
 	heartbeatCalls   int
 }
 
-func (s *hostSessionIngressRepositoryStub) ResolveHostBinding(
-	_ context.Context, subject string,
-) (hostidentity.Binding, error) {
-	s.resolveCalls++
-	if s.resolveErr != nil {
-		return hostidentity.Binding{}, s.resolveErr
-	}
-	if s.binding.Subject != subject {
-		return hostidentity.Binding{}, errors.New("unknown host subject")
-	}
-	return s.binding, nil
-}
-
 func (s *hostSessionIngressRepositoryStub) StartAuthenticatedHostSession(
 	_ context.Context, request postgres.AuthenticatedHostSessionStartRequest,
 ) (hostidentity.SessionFence, error) {
@@ -189,17 +176,11 @@ func startHostSessionIngressTLSServer(
 }
 
 func newHostSessionIngressHandler(
-	t *testing.T, repo *hostSessionIngressRepositoryStub,
+	t *testing.T, roots *x509.CertPool, repo *hostSessionIngressRepositoryStub,
 ) http.Handler {
 	t.Helper()
-	if repo.binding.Subject == "" {
-		repo.binding = hostidentity.Binding{
-			HostID: "machine-001", ProviderID: "provider-001", ClusterScope: "cluster-001",
-			NodeUID: "node-uid-001", Subject: hostSessionIngressSubject,
-		}
-	}
 	handler, err := NewHostSessionIngressHandler(HostSessionIngressDependencies{
-		HostTrustDomain: "ccp.example", Now: time.Now, Repository: repo,
+		HostTrustRoots: roots, HostTrustDomain: "ccp.example", Repository: repo,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -207,15 +188,16 @@ func newHostSessionIngressHandler(
 	return handler
 }
 
-func TestNewHostSessionIngressHandlerRequiresHostTrustDomainAndRepository(t *testing.T) {
+func TestNewHostSessionIngressHandlerRequiresDedicatedTrustAndRepository(t *testing.T) {
+	authority := newHostCredentialAuthority(t)
 	repo := &hostSessionIngressRepositoryStub{}
 	if _, err := NewHostSessionIngressHandler(HostSessionIngressDependencies{
-		Repository: repo,
+		HostTrustDomain: "ccp.example", Repository: repo,
 	}); err == nil {
-		t.Fatal("missing host trust domain allowed ingress construction")
+		t.Fatal("missing host trust roots allowed ingress construction")
 	}
 	if _, err := NewHostSessionIngressHandler(HostSessionIngressDependencies{
-		HostTrustDomain: "ccp.example",
+		HostTrustRoots: authority.roots, HostTrustDomain: "ccp.example",
 	}); err == nil {
 		t.Fatal("missing HostSession repository allowed ingress construction")
 	}
@@ -230,14 +212,13 @@ func TestHostSessionIngressStartsAndRecordsOnlyDedicatedHostCredential(t *testin
 		NodeUID: "node-uid-001", Subject: hostSessionIngressSubject,
 	}
 	repo := &hostSessionIngressRepositoryStub{
-		binding: binding,
 		fence: hostidentity.SessionFence{
 			Binding: binding, Epoch: 1, SessionID: "hs_session_001",
 			IssuedAt: recordedAt, ExpiresAt: recordedAt.Add(time.Minute),
 		},
 		disposition: hostidentity.Accept, recordedAt: recordedAt,
 	}
-	handler := newHostSessionIngressHandler(t, repo)
+	handler := newHostSessionIngressHandler(t, authority.roots, repo)
 	server, client := startHostSessionIngressTLSServer(t, handler, authority.roots, &clientCert)
 
 	start, err := http.NewRequest(http.MethodPost, server.URL+hostSessionStartPath,
