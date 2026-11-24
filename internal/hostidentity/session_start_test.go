@@ -61,7 +61,6 @@ func TestPrepareSessionStart(t *testing.T) {
 	}
 }
 
-
 func TestPrepareSessionStartRejectsUnexpiredPredecessor(t *testing.T) {
 	now := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
 	binding := Binding{HostID: "host-active", ProviderID: "provider-active", ClusterScope: "cluster-active", NodeUID: "uid-active", Subject: "spiffe://ccp.example/host/active"}
