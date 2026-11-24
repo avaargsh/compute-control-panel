@@ -242,7 +242,6 @@ func TestRestrictedDRAJournalResolvesRegisteredVerifierBeforeHistoricalCandidate
 	}
 }
 
-
 func TestUncheckedDRAJournalCannotResolveRegisteredVerifier(t *testing.T) {
 	admin := openProviderPostgresDB(t)
 	journal, err := NewDRAUnprepareReceiptJournal(admin)
