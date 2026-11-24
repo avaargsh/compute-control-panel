@@ -230,7 +230,7 @@ func TestVerifyHostCredentialRequiresCRLForEveryNonRootCertificate(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	leafPublic, intermediateLeafKey, err := ed25519.GenerateKey(rand.Reader)
+	leafPublic, _, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +246,7 @@ func TestVerifyHostCredentialRequiresCRLForEveryNonRootCertificate(t *testing.T)
 		URIs:           []*url.URL{uri},
 		AuthorityKeyId: intermediate.SubjectKeyId,
 	}
-	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, intermediate, leafPublic, intermediateLeafKey)
+	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, intermediate, leafPublic, intermediateKey)
 	if err != nil {
 		t.Fatal(err)
 	}
