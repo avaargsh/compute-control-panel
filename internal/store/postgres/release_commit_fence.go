@@ -112,7 +112,16 @@ func ResolveReleaseCommitFence(
 		&s.DeleteGeneration, &s.DeleteVersion, &s.DeleteKind, &s.DeleteStatus,
 		&s.DeleteTargetID, &s.DeleteTargetUID,
 	)
-	if err != nil || !s.matches(p) {
+	if err != nil {
+		return reject()
+	}
+	// The caller-facing fence carries these same row versions; copy them into
+	// the shared snapshot shape before applying the single invariant matcher.
+	s.WorkloadVersion = p.WorkloadVersion
+	s.AllocationVersion = p.AllocationVersion
+	s.CreateVersion = p.CreateOperationVersion
+	s.DeleteVersion = p.DeleteOperationVersion
+	if !s.matches(p) {
 		return reject()
 	}
 	return p, nil
