@@ -170,11 +170,14 @@ func (j *DRAUnprepareReceiptJournal) ResolveRegisteredDRAUnprepareVerifier(
 		  AND k.tenant_id=$4 AND k.driver=$5
 	`, event.ClusterID, event.SourceID, event.KeyID, tenantID, event.Driver,
 	).Scan(&databaseNow, &currentlyValid, &revoked)
-	if errors.Is(err, sql.ErrNoRows) || !currentlyValid || revoked || databaseNow.IsZero() {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, time.Time{}, ErrDRAReceiptSourceUntrusted
 	}
 	if err != nil {
 		return nil, time.Time{}, fmt.Errorf("%w: recheck DBA DRA signer validity and revocation: %v", ErrDRAReceiptJournalUnavailable, err)
+	}
+	if !currentlyValid || revoked || databaseNow.IsZero() {
+		return nil, time.Time{}, ErrDRAReceiptSourceUntrusted
 	}
 	verifier, err := NewDRAUnprepareVerifier(DRAUnprepareAuthority{
 		ClusterID: event.ClusterID, SourceID: event.SourceID, KeyID: event.KeyID,
