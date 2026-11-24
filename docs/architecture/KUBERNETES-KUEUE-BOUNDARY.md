@@ -112,6 +112,14 @@ Do not assume every cluster supports the same:
 
 A provider capability is usable only after discovery and compatibility validation. Unsupported or unknown capabilities fail closed.
 
+### Internal DRA NodeUnprepare receipt ingress
+
+The standalone receipt handler is an **unmounted evidence-only boundary**, not part of the normal Compute CP API mux. When deployed as a dedicated listener, the listener must require and verify client certificates against a narrowly provisioned CA set; the handler independently rejects TLS versions below 1.3 and requires exactly one `Content-Type: application/json` header. Repeated Content-Type values are rejected before evidence resolution.
+
+The SPIFFE workload authenticator binds the verified leaf URI SAN to the identity directory. Exact source grants constrain the principal to one cluster/source/driver/node. The restricted PostgreSQL journal separately checks the DBA-provisioned source public key, tenant/Provider/driver scope, live validity window and revocation state under a transaction-held row lock.
+
+The signed `NodeUnprepareResources` envelope is a custom driver-adapter assertion, **not** a Kubernetes API object or gRPC response. The evidence resolver is still an injected interface; a production historical-evidence resolver and authenticated collector pipeline are not yet wired. Receipt acceptance is only immutable evidence/replay fencing. It does not prove that the driver RPC ran, that a physical device was released, that Provider liability ended, or that Allocation may become RELEASED / cost FINAL. Do not mount the listener or promote release state based on this receipt alone.
+
 ## 7. POC acceptance
 
 The real-cluster POC must demonstrate:
