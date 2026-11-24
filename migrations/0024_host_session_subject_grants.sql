@@ -1,5 +1,5 @@
 -- Authenticated HostSession ingress boundary (#182).
--- A verified SPIFFE workload principal must match one DBA-provisioned,
+-- A verified dedicated host-certificate subject must match one DBA-provisioned,
 -- immutable subject -> HostIdentity binding grant. Revocation is serialized
 -- with session start/heartbeat by a transaction-scoped advisory lock.
 -- The host-session writer receives EXECUTE only on the authenticated wrappers;
@@ -73,6 +73,9 @@ CREATE TABLE public.compute_host_identity_subject_grants (
     FOREIGN KEY (host_id, provider_id, cluster_scope, node_uid, subject)
         REFERENCES public.compute_host_identity_bindings
             (host_id, provider_id, cluster_scope, node_uid, subject),
+    CHECK (pg_catalog.split_part(subject,'/host/',2)=host_id
+       AND pg_catalog.strpos(pg_catalog.split_part(subject,'/host/',2),'/')=0
+       AND pg_catalog.split_part(subject,'/host/',3)=''),
     CHECK (expires_at IS NULL OR not_before < expires_at),
     CHECK ((revoked_at IS NULL) = (revocation_reason IS NULL))
 );
