@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 const hostSessionIngressSubject = "spiffe://ccp.example/host/machine-001"
 
 type hostSessionIngressRepositoryStub struct {
+	mu               sync.Mutex
 	startRequest     postgres.AuthenticatedHostSessionStartRequest
 	heartbeatRequest postgres.AuthenticatedHostHeartbeatRequest
 	fence            hostidentity.SessionFence
@@ -39,6 +41,8 @@ type hostSessionIngressRepositoryStub struct {
 func (s *hostSessionIngressRepositoryStub) StartAuthenticatedHostSession(
 	_ context.Context, request postgres.AuthenticatedHostSessionStartRequest,
 ) (hostidentity.SessionFence, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.startCalls++
 	s.startRequest = request
 	return s.fence, s.startErr
@@ -47,9 +51,35 @@ func (s *hostSessionIngressRepositoryStub) StartAuthenticatedHostSession(
 func (s *hostSessionIngressRepositoryStub) RecordAuthenticatedHostHeartbeat(
 	_ context.Context, request postgres.AuthenticatedHostHeartbeatRequest,
 ) (hostidentity.Disposition, time.Time, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.heartbeatCalls++
 	s.heartbeatRequest = request
 	return s.disposition, s.recordedAt, s.heartbeatErr
+}
+
+func (s *hostSessionIngressRepositoryStub) observedStart() (int, postgres.AuthenticatedHostSessionStartRequest) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.startCalls, s.startRequest
+}
+
+func (s *hostSessionIngressRepositoryStub) observedHeartbeat() (int, postgres.AuthenticatedHostHeartbeatRequest) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.heartbeatCalls, s.heartbeatRequest
+}
+
+func (s *hostSessionIngressRepositoryStub) setDisposition(disposition hostidentity.Disposition) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.disposition = disposition
+}
+
+func (s *hostSessionIngressRepositoryStub) setStartError(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.startErr = err
 }
 
 type hostCredentialAuthority struct {
@@ -203,14 +233,15 @@ func TestHostSessionIngressStartsAndRecordsOnlyDedicatedHostCredential(t *testin
 		t.Fatal(err)
 	}
 	defer startResponse.Body.Close()
-	if startResponse.StatusCode != http.StatusCreated || repo.startCalls != 1 {
+	startCalls, startRequest := repo.observedStart()
+	if startResponse.StatusCode != http.StatusCreated || startCalls != 1 {
 		body, _ := io.ReadAll(startResponse.Body)
-		t.Fatalf("HostSession start: HTTP %d calls=%d body=%s", startResponse.StatusCode, repo.startCalls, body)
+		t.Fatalf("HostSession start: HTTP %d calls=%d body=%s", startResponse.StatusCode, startCalls, body)
 	}
-	if repo.startRequest.Subject != hostSessionIngressSubject ||
-		repo.startRequest.ExpectedEpoch != 0 || repo.startRequest.RequestID != "host-start-request-001" ||
-		repo.startRequest.TTL != time.Minute {
-		t.Fatalf("start did not use verified host certificate subject and normalized request: %+v", repo.startRequest)
+	if startRequest.Subject != hostSessionIngressSubject ||
+		startRequest.ExpectedEpoch != 0 || startRequest.RequestID != "host-start-request-001" ||
+		startRequest.TTL != time.Minute {
+		t.Fatalf("start did not use verified host certificate subject and normalized request: %+v", startRequest)
 	}
 	var startResponseBody map[string]any
 	if err := json.NewDecoder(startResponse.Body).Decode(&startResponseBody); err != nil {
@@ -231,22 +262,23 @@ func TestHostSessionIngressStartsAndRecordsOnlyDedicatedHostCredential(t *testin
 		t.Fatal(err)
 	}
 	defer heartbeatResponse.Body.Close()
-	if heartbeatResponse.StatusCode != http.StatusAccepted || repo.heartbeatCalls != 1 {
+	heartbeatCalls, heartbeatRequest := repo.observedHeartbeat()
+	if heartbeatResponse.StatusCode != http.StatusAccepted || heartbeatCalls != 1 {
 		body, _ := io.ReadAll(heartbeatResponse.Body)
-		t.Fatalf("heartbeat: HTTP %d calls=%d body=%s", heartbeatResponse.StatusCode, repo.heartbeatCalls, body)
+		t.Fatalf("heartbeat: HTTP %d calls=%d body=%s", heartbeatResponse.StatusCode, heartbeatCalls, body)
 	}
-	if repo.heartbeatRequest.Subject != hostSessionIngressSubject ||
-		repo.heartbeatRequest.Epoch != 1 || repo.heartbeatRequest.SessionID != "hs_session_001" ||
-		repo.heartbeatRequest.Sequence != 1 ||
-		!strings.HasPrefix(repo.heartbeatRequest.Digest, "sha256:") ||
-		len(repo.heartbeatRequest.Digest) != 71 {
-		t.Fatalf("heartbeat did not use verified host identity and server digest: %+v", repo.heartbeatRequest)
+	if heartbeatRequest.Subject != hostSessionIngressSubject ||
+		heartbeatRequest.Epoch != 1 || heartbeatRequest.SessionID != "hs_session_001" ||
+		heartbeatRequest.Sequence != 1 ||
+		!strings.HasPrefix(heartbeatRequest.Digest, "sha256:") ||
+		len(heartbeatRequest.Digest) != 71 {
+		t.Fatalf("heartbeat did not use verified host identity and server digest: %+v", heartbeatRequest)
 	}
-	if strings.Contains(heartbeatBody, repo.heartbeatRequest.Digest) {
+	if strings.Contains(heartbeatBody, heartbeatRequest.Digest) {
 		t.Fatal("server accepted a digest from the HTTP body instead of computing it")
 	}
 
-	repo.disposition = hostidentity.Replay
+	repo.setDisposition(hostidentity.Replay)
 	replay, err := http.NewRequest(http.MethodPost, server.URL+hostHeartbeatPath, strings.NewReader(heartbeatBody))
 	if err != nil {
 		t.Fatal(err)
@@ -257,8 +289,9 @@ func TestHostSessionIngressStartsAndRecordsOnlyDedicatedHostCredential(t *testin
 		t.Fatal(err)
 	}
 	defer replayResponse.Body.Close()
-	if replayResponse.StatusCode != http.StatusOK || repo.heartbeatCalls != 2 {
-		t.Fatalf("exact heartbeat replay: HTTP %d calls=%d", replayResponse.StatusCode, repo.heartbeatCalls)
+	heartbeatCalls, replayRequest := repo.observedHeartbeat()
+	if replayResponse.StatusCode != http.StatusOK || heartbeatCalls != 2 || replayRequest != heartbeatRequest {
+		t.Fatalf("exact heartbeat replay: HTTP %d calls=%d", replayResponse.StatusCode, heartbeatCalls)
 	}
 }
 
@@ -278,8 +311,8 @@ func TestHostSessionIngressRejectsMissingOrNonHostCredentials(t *testing.T) {
 	if _, err := noCredentialClient.Do(request); err == nil {
 		t.Fatal("mTLS listener accepted a client without a host credential")
 	}
-	if repo.startCalls != 0 {
-		t.Fatalf("unauthenticated client reached repository: %d calls", repo.startCalls)
+	if startCalls, _ := repo.observedStart(); startCalls != 0 {
+		t.Fatalf("unauthenticated client reached repository: %d calls", startCalls)
 	}
 
 	workloadCert := authority.issue(t, "spiffe://ccp.example/workload/machine-001", 3)
@@ -296,8 +329,8 @@ func TestHostSessionIngressRejectsMissingOrNonHostCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusUnauthorized || repo.startCalls != 0 {
-		t.Fatalf("workload namespace credential was accepted as a host: HTTP %d calls=%d", response.StatusCode, repo.startCalls)
+	if startCalls, _ := repo.observedStart(); response.StatusCode != http.StatusUnauthorized || startCalls != 0 {
+		t.Fatalf("workload namespace credential was accepted as a host: HTTP %d calls=%d", response.StatusCode, startCalls)
 	}
 }
 
@@ -326,8 +359,8 @@ func TestHostSessionIngressRejectsAmbiguousJSONAndInvalidSessionFields(t *testin
 			t.Fatal(err)
 		}
 		response.Body.Close()
-		if response.StatusCode != http.StatusBadRequest || repo.heartbeatCalls != 0 {
-			t.Fatalf("invalid heartbeat body %q: HTTP %d calls=%d", body, response.StatusCode, repo.heartbeatCalls)
+		if heartbeatCalls, _ := repo.observedHeartbeat(); response.StatusCode != http.StatusBadRequest || heartbeatCalls != 0 {
+			t.Fatalf("invalid heartbeat body %q: HTTP %d calls=%d", body, response.StatusCode, heartbeatCalls)
 		}
 	}
 }
@@ -356,7 +389,7 @@ func TestHostSessionIngressMapsRepositoryFencesWithoutLeakingErrors(t *testing.T
 		t.Fatalf("authorization failure leaked storage detail: HTTP %d %s", response.StatusCode, body)
 	}
 
-	repo.startErr = errors.New("database unavailable")
+	repo.setStartError(errors.New("database unavailable"))
 	request, err = http.NewRequest(http.MethodPost, server.URL+hostSessionStartPath,
 		strings.NewReader(`{"expected_epoch":0,"ttl_seconds":30}`))
 	if err != nil {
