@@ -74,8 +74,11 @@ func TestHostSessionStartAndHeartbeatDatabaseContract(t *testing.T) {
 	`).Scan(&functionOwner, &tableOwner, &securityDefiner, &canSelect, &canInsert, &schemaUsage, &rowSecurity); err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("HostSession definer catalog: function_owner=%s table_owner=%s security_definer=%t select=%t insert=%t schema_usage=%t row_security=%t",
-		functionOwner, tableOwner, securityDefiner, canSelect, canInsert, schemaUsage, rowSecurity)
+	if functionOwner != "ccp_host_session_guard_owner" || tableOwner != functionOwner ||
+		!securityDefiner || !canSelect || !canInsert || !schemaUsage || rowSecurity {
+		t.Fatalf("unsafe HostSession definer catalog: function_owner=%s table_owner=%s security_definer=%t select=%t insert=%t schema_usage=%t row_security=%t",
+			functionOwner, tableOwner, securityDefiner, canSelect, canInsert, schemaUsage, rowSecurity)
+	}
 
 	var before, after time.Time
 	if err := db.QueryRowContext(ctx, `SELECT pg_catalog.clock_timestamp()`).Scan(&before); err != nil {
@@ -309,9 +312,9 @@ func TestHostSessionRestrictedWriterAndCatalogBoundary(t *testing.T) {
 		`SELECT public.compute_host_session_immutable_guard()`,
 		`SET ROLE ccp_host_session_guard_owner`,
 	} {
-		args := []any{binding.HostID}
-		if strings.Contains(statement, "VALUES(") || strings.HasPrefix(statement, "SET ROLE") || strings.HasPrefix(statement, "TRUNCATE") {
-			args = nil
+		var args []any
+		if strings.Contains(statement, "$1") {
+			args = []any{binding.HostID}
 		}
 		_, err := writer.ExecContext(ctx, statement, args...)
 		if hostSessionSQLState(err) != "42501" {
