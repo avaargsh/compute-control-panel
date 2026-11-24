@@ -76,12 +76,12 @@ func run(ctx context.Context) error {
 		return err
 	}
 	if _, err := restarted.Apply(ctx, req); err != nil {
-		return fmt.Errorf("same-store restart replay: %w", err)
+		return fmt.Errorf("same-store adapter reconstruction replay: %w", err)
 	}
 	bound, err := restarted.Inspect(ctx, req)
 	if err != nil || bound.Result != operation.ResourcePresent ||
 		bound.ResourceUID != original.ResourceUID {
-		return fmt.Errorf("reinitialized writer lost UID: %+v %v", bound, err)
+		return fmt.Errorf("reconstructed adapter lost UID: %+v %v", bound, err)
 	}
 	// A real Kubernetes JobSet with the right metadata is NOT proof of a
 	// CREATE acknowledgement if the durable UID receipt was lost.
@@ -98,19 +98,20 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("unbound CREATE replay was not UNKNOWN: %v", err)
 	}
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{
-		"mode":                      "DISPOSABLE_REAL_JOBSET_API",
-		"uid":                       original.ResourceUID,
-		"resource_id":               original.ResourceID,
-		"provider_create_pinned":    true,
-		"same_uid_on_restart":       true,
-		"unbound_state":             string(unknown.Result),
-		"lost_ack_requires_inspect": true,
-		"one_gpu_per_replica":       true,
-		"physical_gpu_verified":     false,
-		"driver_prepared":           false,
-		"allocation_ready":          false,
-		"released":                  false,
-		"cost_final":                false,
+		"mode":                               "DISPOSABLE_REAL_JOBSET_API",
+		"uid":                                original.ResourceUID,
+		"resource_id":                        original.ResourceID,
+		"provider_create_pinned":             true,
+		"same_uid_on_adapter_reconstruction": true,
+		"durable_uid_pin_verified":           false,
+		"unbound_state":                      string(unknown.Result),
+		"lost_ack_requires_inspect":          true,
+		"one_gpu_per_replica":                true,
+		"physical_gpu_verified":              false,
+		"driver_prepared":                    false,
+		"allocation_ready":                   false,
+		"released":                           false,
+		"cost_final":                         false,
 	})
 }
 

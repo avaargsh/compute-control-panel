@@ -10,7 +10,9 @@ name=ccp-pd-provider-writer-smoke
 intent="$(printf 'c%.0s' {1..64})"
 [[ "$(kubectl -n "$ns" get sa ccp-pd-staging -o jsonpath='{.metadata.name}')" == ccp-pd-staging ]] || exit 2
 [[ "$(kubectl auth can-i create jobsets.jobset.x-k8s.io -n "$ns" --as="system:serviceaccount:$ns:ccp-pd-staging")" == yes ]] || exit 2
-[[ "$(kubectl auth can-i patch jobsets.jobset.x-k8s.io -n "$ns" --as="system:serviceaccount:$ns:ccp-pd-staging")" == no ]] || exit 2
+for verb in patch update delete; do
+  [[ "$(kubectl auth can-i "$verb" jobsets.jobset.x-k8s.io -n "$ns" --as="system:serviceaccount:$ns:ccp-pd-staging")" == no ]] || exit 2
+done
 
 # A real in-cluster ServiceAccount TLS/token is exercised by Go. No kubectl
 # impersonation substitutes for the actual POST. The image was built from
@@ -61,7 +63,7 @@ result="$(kubectl -n "$ns" logs "$name")"
 jq -e '
   .mode=="DISPOSABLE_REAL_JOBSET_API" and
   (.uid|type=="string" and length>0) and
-  .provider_create_pinned==true and .same_uid_on_restart==true and
+  .provider_create_pinned==true and .same_uid_on_adapter_reconstruction==true and .durable_uid_pin_verified==false and
   .unbound_state=="OPERATION_IN_PROGRESS" and
   .lost_ack_requires_inspect==true and .one_gpu_per_replica==true and
   .physical_gpu_verified==false and .driver_prepared==false and
@@ -100,4 +102,4 @@ fi
 
 # A missing durable UID pin cannot be fabricated from JobSet annotations.
 echo "real_pd_jobset_writer=$result"
-echo "PASS: actual staged PDJobSetAdapter POST+GET and exact-UID replay with unbound lost ACK UNKNOWN; physical GPU readiness remains unproven"
+echo "PASS: actual staged PDJobSetAdapter POST+GET and exact-UID replay with unbound lost ACK UNKNOWN; in-memory pins only; process recovery and physical GPU readiness remain unproven"
