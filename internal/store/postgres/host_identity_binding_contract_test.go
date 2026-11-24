@@ -262,3 +262,43 @@ func TestHostIdentityEnrollmentWaitsForProviderDrain(t *testing.T) {
 		t.Fatalf("rejected enrollment persisted: count=%d err=%v", count, err)
 	}
 }
+
+// TestHostIdentityBindingRestrictedRoleCannotEnroll verifies that the
+// existing DRA receipt writer has no enrollment or mutation authority.
+// Do not add grants to make an unmounted enrollment path work.
+func TestHostIdentityBindingRestrictedRoleCannotEnroll(t *testing.T) {
+	db := openIntegrationDB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, "SET LOCAL ROLE ccp_dra_receipt_ingest"); err != nil {
+		t.Fatal(err)
+	}
+	var canRead, canInsert, canUpdate, canDelete, canTruncate, canExecute bool
+	if err := tx.QueryRowContext(ctx, `SELECT
+		pg_catalog.has_table_privilege(current_user, 'public.compute_host_identity_bindings', 'SELECT'),
+		pg_catalog.has_table_privilege(current_user, 'public.compute_host_identity_bindings', 'INSERT'),
+		pg_catalog.has_table_privilege(current_user, 'public.compute_host_identity_bindings', 'UPDATE'),
+		pg_catalog.has_table_privilege(current_user, 'public.compute_host_identity_bindings', 'DELETE'),
+		pg_catalog.has_table_privilege(current_user, 'public.compute_host_identity_bindings', 'TRUNCATE'),
+		pg_catalog.has_function_privilege(current_user, 'public.compute_host_identity_enrollment_guard()', 'EXECUTE')`).Scan(
+		&canRead, &canInsert, &canUpdate, &canDelete, &canTruncate, &canExecute); err != nil {
+		t.Fatal(err)
+	}
+	if canRead || canInsert || canUpdate || canDelete || canTruncate || canExecute {
+		t.Fatal("DRA receipt writer has unexpected HostIdentity authority")
+	}
+
+	_, err = tx.ExecContext(ctx, `INSERT INTO public.compute_host_identity_bindings
+		(host_id, provider_id, cluster_scope, node_uid, subject)
+		VALUES ('denied-host', 'denied-provider', 'denied-scope', 'denied-node', 'denied-subject')`)
+	var state interface{ SQLState() string }
+	if !errors.As(err, &state) || state.SQLState() != "42501" {
+		t.Fatalf("restricted enrollment must fail with SQLSTATE 42501, got %v", err)
+	}
+}
