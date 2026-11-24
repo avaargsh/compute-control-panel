@@ -143,12 +143,19 @@ func (r *Reader) ListObservations(ctx context.Context, tenantID string, projects
 	if !allowed {
 		return snapshot, nil
 	}
+	// Timestamp the complete paginated collection from its first read.
+	// Finishing later must not renew the lifetime of earlier Node facts.
+	startedAt := r.now().UTC()
+	if startedAt.IsZero() {
+		return observation.Snapshot{}, ErrInvalidResponse
+	}
 	nodes, err := r.listNodes(ctx)
 	if err != nil {
 		return observation.Snapshot{}, err
 	}
-	now := r.now().UTC()
-	if now.IsZero() {
+	expiresAt := startedAt.Add(r.ttl)
+	completedAt := r.now().UTC()
+	if completedAt.Before(startedAt) || !completedAt.Before(expiresAt) {
 		return observation.Snapshot{}, ErrInvalidResponse
 	}
 	for _, n := range nodes {
@@ -157,7 +164,7 @@ func (r *Reader) ListObservations(ctx context.Context, tenantID string, projects
 			TenantID: r.tenantID, ProjectID: r.projectID,
 			Source:         "kubernetes/core/v1/node.status",
 			SourceRevision: n.Metadata.ResourceVersion,
-			ObservedAt:     now, ExpiresAt: now.Add(r.ttl),
+			ObservedAt:     startedAt, ExpiresAt: expiresAt,
 		}
 		nr := base
 		nr.Resource = observation.ResourceRef{
@@ -217,9 +224,10 @@ type nodeList struct {
 
 type node struct {
 	Metadata struct {
-		Name            string `json:"name"`
-		UID             string `json:"uid"`
-		ResourceVersion string `json:"resourceVersion"`
+		Name              string  `json:"name"`
+		UID               string  `json:"uid"`
+		ResourceVersion   string  `json:"resourceVersion"`
+		DeletionTimestamp *string `json:"deletionTimestamp"`
 	} `json:"metadata"`
 	Spec struct {
 		Unschedulable bool `json:"unschedulable"`
@@ -235,6 +243,11 @@ type node struct {
 }
 
 func nodeCondition(n node) (observation.Condition, string) {
+	// A terminating Node cannot be available, even while its last reported
+	// Ready condition remains True. Raw GPU quantities remain non-authoritative.
+	if n.Metadata.DeletionTimestamp != nil {
+		return observation.ConditionUnavailable, "NODE_TERMINATING"
+	}
 	ready := ""
 	for _, item := range n.Status.Conditions {
 		if item.Type != "Ready" {
