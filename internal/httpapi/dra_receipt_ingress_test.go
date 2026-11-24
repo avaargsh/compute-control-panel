@@ -30,14 +30,21 @@ func (a draReceiptTestAuthenticator) Authenticate(_ context.Context, _ *http.Req
 }
 
 type draReceiptTestResolver struct {
-	calls    int
-	err      error
-	verifier *provider.DRAUnprepareVerifier
+	verifierCalls int
+	calls         int
+	err           error
+	verifier      *provider.DRAUnprepareVerifier
+	serverNow     time.Time
 }
 
-func (r *draReceiptTestResolver) ResolveDRAReceiptEvidence(_ context.Context, _ WorkloadPrincipal, _ provider.DRAUnprepareEvent) (provider.ReleaseEvidenceCandidate, *provider.DRAUnprepareVerifier, error) {
+func (r *draReceiptTestResolver) ResolveDRAReceiptVerifier(_ context.Context, _ WorkloadPrincipal, _ provider.DRAUnprepareEvent) (DRAReceiptVerifierResolution, error) {
+	r.verifierCalls++
+	return DRAReceiptVerifierResolution{Verifier: r.verifier, DatabaseNow: r.serverNow}, nil
+}
+
+func (r *draReceiptTestResolver) ResolveDRAReceiptEvidence(_ context.Context, _ WorkloadPrincipal, _ provider.DRAUnprepareEvent) (provider.ReleaseEvidenceCandidate, error) {
 	r.calls++
-	return provider.ReleaseEvidenceCandidate{}, r.verifier, r.err
+	return provider.ReleaseEvidenceCandidate{}, r.err
 }
 
 type draReceiptTestJournal struct {
@@ -73,22 +80,33 @@ func draReceiptSPIFFEAuthenticator(t *testing.T) WorkloadAuthenticator {
 	return auth
 }
 
-func draReceiptTestSigned() provider.SignedDRAUnprepare {
-	return provider.SignedDRAUnprepare{
-		Event: provider.DRAUnprepareEvent{
-			Version: "ccp.dra.node-unprepare.v1", ClusterID: "cluster-a",
-			SourceID: "source-a", KeyID: "key-a", EventID: "event-a",
-			RPC: "NodeUnprepareResources", Result: "SUCCESS",
-			Driver: "gpu.example.com", NodeName: "node-a",
-			ClaimNamespace: "tenant-a", ClaimName: "claim-a", ClaimUID: "claim-uid-a",
-			PodUID: "pod-uid-a", AllocatedClaimResourceVersion: "11",
-			AllocatedDevice: provider.DRAAllocatedDevice{
-				Request: "gpu", Driver: "gpu.example.com", Pool: "pool-a", Device: "gpu-a",
-			},
-			CompletedAt: time.Now().UTC(),
-		},
-		Signature: bytes.Repeat([]byte{7}, ed25519.SignatureSize),
+func draReceiptTestPrivateKey() ed25519.PrivateKey {
+	return ed25519.NewKeyFromSeed(bytes.Repeat([]byte{1}, ed25519.SeedSize))
+}
+
+func draReceiptTestSign(event provider.DRAUnprepareEvent) []byte {
+	payload, err := json.Marshal(event)
+	if err != nil {
+		panic(err)
 	}
+	payload = append([]byte("CCP:DRA:NodeUnprepareResources:v1\n"), payload...)
+	return ed25519.Sign(draReceiptTestPrivateKey(), payload)
+}
+
+func draReceiptTestSigned() provider.SignedDRAUnprepare {
+	event := provider.DRAUnprepareEvent{
+		Version: "ccp.dra.node-unprepare.v1", ClusterID: "cluster-a",
+		SourceID: "source-a", KeyID: "key-a", EventID: "event-a",
+		RPC: "NodeUnprepareResources", Result: "SUCCESS",
+		Driver: "gpu.example.com", NodeName: "node-a",
+		ClaimNamespace: "tenant-a", ClaimName: "claim-a", ClaimUID: "claim-uid-a",
+		PodUID: "pod-uid-a", AllocatedClaimResourceVersion: "11",
+		AllocatedDevice: provider.DRAAllocatedDevice{
+			Request: "gpu", Driver: "gpu.example.com", Pool: "pool-a", Device: "gpu-a",
+		},
+		CompletedAt: time.Now().UTC(),
+	}
+	return provider.SignedDRAUnprepare{Event: event, Signature: draReceiptTestSign(event)}
 }
 
 func draReceiptTestBody(t *testing.T, signed provider.SignedDRAUnprepare) []byte {
@@ -111,15 +129,15 @@ func draReceiptTestHandler(t *testing.T, authenticator WorkloadAuthenticator) (h
 	}
 	verifier, err := provider.NewDRAUnprepareVerifier(provider.DRAUnprepareAuthority{
 		ClusterID: "cluster-a", SourceID: "source-a", KeyID: "key-a",
-		Driver: "gpu.example.com", PublicKey: bytes.Repeat([]byte{1}, ed25519.PublicKeySize),
+		Driver: "gpu.example.com", PublicKey: draReceiptTestPrivateKey().Public().(ed25519.PublicKey),
 	}, time.Minute, 10*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolver := &draReceiptTestResolver{verifier: verifier}
+	resolver := &draReceiptTestResolver{verifier: verifier, serverNow: time.Now().UTC()}
 	journal := &draReceiptTestJournal{created: true}
 	h, err := NewDRAReceiptIngestHandler(DRAReceiptIngestDependencies{
-		Authenticator: authenticator, Authorizer: policy, Resolver: resolver, Journal: journal,
+		Authenticator: authenticator, Authorizer: policy, VerifierResolver: resolver, Resolver: resolver, Journal: journal,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -155,7 +173,7 @@ func TestDRAReceiptIngestConstructorRefusesArbitraryAuthenticator(t *testing.T) 
 	}
 	h, err := NewDRAReceiptIngestHandler(DRAReceiptIngestDependencies{
 		Authenticator: draReceiptTestAuthenticator{principal: draReceiptTestPrincipal()},
-		Authorizer:    policy, Resolver: &draReceiptTestResolver{},
+		Authorizer:    policy, VerifierResolver: &draReceiptTestResolver{}, Resolver: &draReceiptTestResolver{},
 		Journal: &draReceiptTestJournal{},
 	})
 	if err == nil || h != nil {
@@ -203,6 +221,52 @@ func TestDRAReceiptIngestRequiresVerifiedSPIFFEIdentityAndExactSource(t *testing
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden || resolver.calls != 1 || journal.calls != 1 {
 		t.Fatalf("cross-source principal bypassed policy: HTTP %d calls %d/%d", rec.Code, resolver.calls, journal.calls)
+	}
+}
+
+func TestDRAReceiptIngestRejectsInvalidSignatureBeforeHistoricalEvidenceResolution(t *testing.T) {
+	h, resolver, journal := draReceiptTestHandler(t, draReceiptSPIFFEAuthenticator(t))
+	signed := draReceiptTestSigned()
+	signed.Signature[0] ^= 0xff
+	req := httptest.NewRequest(http.MethodPost, draReceiptIngestPath, bytes.NewReader(draReceiptTestBody(t, signed)))
+	req.Header.Set("Content-Type", "application/json")
+	req.TLS = draReceiptTestTLS()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden || resolver.verifierCalls != 1 || resolver.calls != 0 || journal.calls != 0 {
+		t.Fatalf("invalid signature reached historical evidence resolver/journal: HTTP %d verifier=%d evidence=%d journal=%d",
+			rec.Code, resolver.verifierCalls, resolver.calls, journal.calls)
+	}
+}
+
+func TestDRAReceiptIngestUsesRegistryDatabaseClockBeforeHistoricalEvidenceResolution(t *testing.T) {
+	h, resolver, journal := draReceiptTestHandler(t, draReceiptSPIFFEAuthenticator(t))
+	signed := draReceiptTestSigned()
+	// The receipt is fresh relative to the process clock but stale relative
+	// to the authoritative PostgreSQL clock returned by the source resolver.
+	resolver.serverNow = signed.Event.CompletedAt.Add(2 * time.Minute)
+	req := httptest.NewRequest(http.MethodPost, draReceiptIngestPath, bytes.NewReader(draReceiptTestBody(t, signed)))
+	req.Header.Set("Content-Type", "application/json")
+	req.TLS = draReceiptTestTLS()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden || resolver.verifierCalls != 1 || resolver.calls != 0 || journal.calls != 0 {
+		t.Fatalf("stale receipt reached historical evidence resolver/journal: HTTP %d verifier=%d evidence=%d journal=%d",
+			rec.Code, resolver.verifierCalls, resolver.calls, journal.calls)
+	}
+}
+
+func TestDRAReceiptIngestRejectsMissingRegistryDatabaseClock(t *testing.T) {
+	h, resolver, journal := draReceiptTestHandler(t, draReceiptSPIFFEAuthenticator(t))
+	resolver.serverNow = time.Time{}
+	req := httptest.NewRequest(http.MethodPost, draReceiptIngestPath, bytes.NewReader(draReceiptTestBody(t, draReceiptTestSigned())))
+	req.Header.Set("Content-Type", "application/json")
+	req.TLS = draReceiptTestTLS()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable || resolver.verifierCalls != 1 || resolver.calls != 0 || journal.calls != 0 {
+		t.Fatalf("missing registry clock did not fail closed: HTTP %d verifier=%d evidence=%d journal=%d",
+			rec.Code, resolver.verifierCalls, resolver.calls, journal.calls)
 	}
 }
 

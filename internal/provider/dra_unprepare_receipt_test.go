@@ -221,3 +221,37 @@ func TestDRAUnprepareVerifierRejectsCallerKeyMutationAndBadAuthority(t *testing.
 		})
 	}
 }
+
+func TestDRAUnprepareVerifierVerifiesSignedEnvelopeWithoutHistoricalCandidate(t *testing.T) {
+	authority, private := unprepareTestAuthority()
+	signed := unprepareTestReceipt(private)
+	verifier, err := NewDRAUnprepareVerifier(authority, 10*time.Minute, 30*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	asOf := signed.Event.CompletedAt.Add(time.Minute)
+	if err := verifier.VerifySignedEnvelope(signed, asOf); err != nil {
+		t.Fatalf("valid signed envelope rejected without a historical candidate: %v", err)
+	}
+
+	tampered := signed
+	tampered.Signature = append([]byte(nil), signed.Signature...)
+	tampered.Signature[0] ^= 0xff
+	if err := verifier.VerifySignedEnvelope(tampered, asOf); err == nil {
+		t.Fatal("tampered signature accepted")
+	}
+
+	stale := signed
+	stale.Event.CompletedAt = asOf.Add(-time.Hour)
+	stale.Signature = ed25519.Sign(private, draUnprepareSigningBytes(stale.Event))
+	if err := verifier.VerifySignedEnvelope(stale, asOf); err == nil {
+		t.Fatal("stale but correctly signed envelope accepted")
+	}
+
+	foreign := signed
+	foreign.Event.SourceID = "foreign-source"
+	foreign.Signature = ed25519.Sign(private, draUnprepareSigningBytes(foreign.Event))
+	if err := verifier.VerifySignedEnvelope(foreign, asOf); err == nil {
+		t.Fatal("correctly signed envelope for another source accepted")
+	}
+}
