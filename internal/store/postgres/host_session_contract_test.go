@@ -473,7 +473,7 @@ func TestHostSessionRestrictedWriterAndCatalogBoundary(t *testing.T) {
 		t.Fatalf("restricted writer raw start should be denied: %v", err)
 	}
 	writerFirst, err := writerRepo.StartAuthenticatedHostSession(ctx, AuthenticatedHostSessionStartRequest{
-		TenantID: tenant, Service: "compute-host-agent", Subject: binding.Subject,
+		Subject: binding.Subject,
 		ExpectedEpoch: 0, RequestID: "start-restricted-" + binding.HostID, TTL: 30 * time.Second,
 	})
 	if err != nil || writerFirst.Binding != binding || writerFirst.Epoch != 1 {
@@ -486,7 +486,7 @@ func TestHostSessionRestrictedWriterAndCatalogBoundary(t *testing.T) {
 		t.Fatalf("restricted writer raw heartbeat should be denied: %v", err)
 	}
 	heartbeat := AuthenticatedHostHeartbeatRequest{
-		TenantID: tenant, Service: "compute-host-agent", Subject: binding.Subject,
+		Subject: binding.Subject,
 		Epoch: writerFirst.Epoch, SessionID: writerFirst.SessionID,
 		Sequence: 1, Digest: "sha256:" + strings.Repeat("e", 64),
 	}
