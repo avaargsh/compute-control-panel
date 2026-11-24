@@ -28,12 +28,12 @@ const maxLeaseResponseSize = 64 << 10
 var nodeDNSLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
 type nodeLeaseSourceObservation struct {
-	NodeUID             string
-	NodeResourceVersion string
-	LeaseUID            string
+	NodeUID              string
+	NodeResourceVersion  string
+	LeaseUID             string
 	LeaseResourceVersion string
-	ObservedAt          time.Time
-	Assessment          nodeLeaseAssessment
+	ObservedAt           time.Time
+	Assessment           nodeLeaseAssessment
 }
 
 // validNodeDNSName enforces the core Node DNS subdomain contract before a
