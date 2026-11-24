@@ -225,7 +225,7 @@ jobs:
           DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
         run: |
           set -euo pipefail
-          go test -count=1 -v -run '^(TestHostSessionStartAndHeartbeatDatabaseContract|TestHostSessionExpiredEpochReplacementAndProviderDrain|TestHostSessionConcurrentStartHasOneWinner|TestHostSessionRestrictedWriterAndCatalogBoundary|TestHostSessionInvalidInputsFailBeforeDatabase)$' ./internal/store/postgres | tee host-session-pg.log
+          go test -count=1 -v -run '^(TestHostSessionStartAndHeartbeatDatabaseContract|TestHostSessionExpiredEpochReplacementAndProviderDrain|TestHostSessionConcurrentStartHasOneWinner|TestHostSessionConcurrentSameRequestIsIdempotent|TestHostSessionRestrictedWriterAndCatalogBoundary|TestHostSessionInvalidInputsFailBeforeDatabase)$' ./internal/store/postgres | tee host-session-pg.log
           grep -F -- '--- PASS: TestHostSessionStartAndHeartbeatDatabaseContract' host-session-pg.log
           grep -F -- '--- PASS: TestHostSessionExpiredEpochReplacementAndProviderDrain' host-session-pg.log
           grep -F -- '--- PASS: TestHostSessionConcurrentStartHasOneWinner' host-session-pg.log
