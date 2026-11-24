@@ -324,8 +324,12 @@ func (s *PostgresKueueJobBindingStore) PutPreDeleteDRASnapshot(
 		}
 		return previous, nil
 	}
-	_, hasTombstone, err := queryKueueDeleteTombstone(ctx, tx,
-		selectKueueDeleteTombstoneSQL+" FOR UPDATE", namespace, req.TenantID, req.OperationID)
+	var hasTombstone bool
+	err = tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM public.kueue_job_delete_tombstones
+			WHERE namespace=$1 AND ((tenant_id=$2 AND operation_id=$3) OR (job_name=$4 AND job_uid=$5))
+		)`, namespace, req.TenantID, req.OperationID, pin.Name, pin.UID).Scan(&hasTombstone)
 	if err != nil {
 		return KueuePreDeleteDRASnapshot{}, err
 	}

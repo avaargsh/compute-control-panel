@@ -174,8 +174,8 @@ BEGIN
     IF EXISTS (
         SELECT 1 FROM public.kueue_job_delete_tombstones
          WHERE namespace = NEW.namespace
-           AND tenant_id = NEW.tenant_id
-           AND operation_id = NEW.delete_operation_id
+           AND ((tenant_id = NEW.tenant_id AND operation_id = NEW.delete_operation_id)
+                OR (job_name = NEW.job_name AND job_uid = NEW.job_uid))
     ) THEN
         RAISE EXCEPTION 'pre-delete DRA snapshot must precede DELETE intent'
             USING ERRCODE = '55000';

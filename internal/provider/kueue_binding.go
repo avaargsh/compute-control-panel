@@ -253,6 +253,11 @@ func (s *MemoryKueueJobBindingStore) PutPreDeleteDRASnapshot(
 	if _, exists := s.deletes[key]; exists {
 		return KueuePreDeleteDRASnapshot{}, ErrOperationConflict
 	}
+	for _, intent := range s.deletes {
+		if intent.Namespace == namespace && intent.Name == pin.Name && intent.UID == pin.UID {
+			return KueuePreDeleteDRASnapshot{}, ErrOperationConflict
+		}
+	}
 	for _, previous := range s.snapshots {
 		if previous.Namespace == namespace && previous.TenantID == req.TenantID &&
 			previous.CreateOperationID == canonical.CreateOperationID {

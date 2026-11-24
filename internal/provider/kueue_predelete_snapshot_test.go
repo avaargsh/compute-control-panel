@@ -161,6 +161,16 @@ func TestKueuePreDeleteDRASnapshotRejectsSnapshotAfterDeleteIntent(t *testing.T)
 			if _, ok, err := store.GetPreDeleteDRASnapshot(namespace, remove); err != nil || ok {
 				t.Fatalf("late snapshot persisted: ok=%t err=%v", ok, err)
 			}
+			another := remove
+			another.OperationID += "-retry"
+			another.IdempotencyKey += "-retry"
+			late := preDeleteSnapshotFixture(create, another, namespace, jobName, jobUID)
+			if _, err := store.PutPreDeleteDRASnapshot(namespace, another, late); !errors.Is(err, ErrOperationConflict) {
+				t.Fatalf("new DELETE operation minted late history for the same Job UID: %v", err)
+			}
+			if _, ok, err := store.GetPreDeleteDRASnapshot(namespace, another); err != nil || ok {
+				t.Fatalf("late retry snapshot persisted: ok=%t err=%v", ok, err)
+			}
 		})
 	}
 }
@@ -397,8 +407,11 @@ func TestPostgresKueuePreDeleteSnapshotInsertGuardsRejectTenantAndLateWrites(t *
 	if err != nil || !ok {
 		t.Fatalf("read CREATE pin for direct snapshot insert: ok=%t err=%v", ok, err)
 	}
-	snapshot := preDeleteSnapshotFixture(create, remove, namespace, jobName, jobUID)
-	canonical, err := validateKueuePreDeleteDRASnapshot(namespace, remove, pin, snapshot)
+	another := remove
+	another.OperationID += "-retry"
+	another.IdempotencyKey += "-retry"
+	snapshot := preDeleteSnapshotFixture(create, another, namespace, jobName, jobUID)
+	canonical, err := validateKueuePreDeleteDRASnapshot(namespace, another, pin, snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
