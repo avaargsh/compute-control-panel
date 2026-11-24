@@ -80,7 +80,6 @@ func verifyRegisteredDRAUnprepareSource(
 	return nil
 }
 
-
 // ResolveRegisteredDRAUnprepareVerifier resolves a signer exclusively from
 // the independently DBA-provisioned source registry. It is deliberately
 // candidate-free: no Provider Operation, Kueue, Pod or ResourceClaim history
