@@ -147,8 +147,11 @@ func (a *KueueJobAdapter) RecordPreDeleteDRASnapshot(
 		bound.Evidence.Pod == (KubernetesResourceRef{}) {
 		return reject(err)
 	}
+	if len(deviceSet.Devices) == 0 {
+		return reject(nil)
+	}
 	devices, valid := canonicalDRADeviceSet(deviceSet.Devices, deviceSet.Devices[0].Request)
-	if len(deviceSet.Devices) == 0 || !valid || deviceSet.Pod != bound.Evidence.Pod ||
+	if !valid || deviceSet.Pod != bound.Evidence.Pod ||
 		deviceSet.NodeName != bound.Evidence.PodNodeName ||
 		deviceSet.Claim.Namespace != a.namespace ||
 		deviceSet.ClaimTemplateName != a.resourceClaimTemplateName ||
@@ -173,6 +176,9 @@ func (a *KueueJobAdapter) RecordPreDeleteDRASnapshot(
 }
 
 func preDeleteSnapshotMatchesDelete(snapshot KueuePreDeleteDRASnapshot, namespace string, req Request, templateName string) bool {
+	if len(snapshot.Devices) == 0 {
+		return false
+	}
 	return snapshot.Namespace == namespace && snapshot.TenantID == req.TenantID &&
 		snapshot.WorkloadID == req.WorkloadID && snapshot.ProviderID == req.ProviderID &&
 		snapshot.DeleteOperationID == req.OperationID &&
