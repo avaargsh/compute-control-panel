@@ -274,9 +274,9 @@ func TestHostSessionIngressRejectsLegacyTLSBeforeRepository(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Idempotency-Key", "legacy-tls-host-start")
 	request.TLS = &tls.ConnectionState{
-		Version: tls.VersionTLS12,
+		Version:          tls.VersionTLS12,
 		PeerCertificates: []*x509.Certificate{leaf},
-		VerifiedChains: [][]*x509.Certificate{{leaf, issuer}},
+		VerifiedChains:   [][]*x509.Certificate{{leaf, issuer}},
 	}
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
