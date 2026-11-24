@@ -49,6 +49,75 @@ func validReleaseCommitFence(p ReleaseCommitFence) bool {
 		p.CreateOperationID != p.DeleteOperationID
 }
 
+// ResolveReleaseCommitFence derives the release fence from the current
+// PostgreSQL Workload, Allocation, historical CREATE and newer DELETE rows.
+// The authenticated caller supplies only tenant-scoped lookup identities; all
+// target UIDs, generations and versions are read from the authoritative rows.
+// Every row is locked in the caller's transaction and remains locked until that
+// transaction ends. This is a necessary identity fence, not release authority.
+func ResolveReleaseCommitFence(
+	ctx context.Context, tx *sql.Tx,
+	tenantID, workloadID, allocationID, createOperationID, deleteOperationID string,
+) (ReleaseCommitFence, error) {
+	reject := func() (ReleaseCommitFence, error) {
+		return ReleaseCommitFence{}, ErrReleaseCommitFence
+	}
+	if ctx == nil || tx == nil {
+		return reject()
+	}
+	for _, value := range []string{tenantID, workloadID, allocationID, createOperationID, deleteOperationID} {
+		if value == "" || strings.TrimSpace(value) != value || strings.ContainsRune(value, 0) {
+			return reject()
+		}
+	}
+	var p ReleaseCommitFence
+	var s releaseCommitFenceSnapshot
+	err := tx.QueryRowContext(ctx, `
+		SELECT w.tenant_id, w.workload_id, a.allocation_id, a.provider_id,
+		       c.compute_operation_id, d.compute_operation_id,
+		       COALESCE(c.provider_resource_id, ''), COALESCE(c.provider_resource_uid, ''),
+		       a.desired_generation, d.desired_generation,
+		       w.version, a.version, c.version, d.version,
+		       w.desired_generation, w.desired_state, w.observed_phase,
+		       COALESCE(w.latest_allocation_id, ''),
+		       a.desired_generation, a.version, a.phase,
+		       c.desired_generation, c.version, c.operation_kind, c.status,
+		       COALESCE(c.provider_resource_id, ''), COALESCE(c.provider_resource_uid, ''),
+		       d.desired_generation, d.version, d.operation_kind, d.status,
+		       COALESCE(d.target_resource_id, ''), COALESCE(d.target_resource_uid, '')
+		FROM public.compute_workloads w
+		JOIN public.compute_allocations a
+		  ON a.tenant_id=w.tenant_id AND a.workload_id=w.workload_id
+		 AND a.allocation_id=$3
+		JOIN public.compute_operations c
+		  ON c.tenant_id=w.tenant_id AND c.workload_id=w.workload_id
+		 AND c.allocation_id=a.allocation_id AND c.provider_id=a.provider_id
+		 AND c.compute_operation_id=$4
+		JOIN public.compute_operations d
+		  ON d.tenant_id=w.tenant_id AND d.workload_id=w.workload_id
+		 AND d.allocation_id IS NULL AND d.provider_id=a.provider_id
+		 AND d.compute_operation_id=$5
+		WHERE w.tenant_id=$1 AND w.workload_id=$2
+		FOR UPDATE OF w, a, c, d
+	`, tenantID, workloadID, allocationID, createOperationID, deleteOperationID).Scan(
+		&p.TenantID, &p.WorkloadID, &p.AllocationID, &p.ProviderID,
+		&p.CreateOperationID, &p.DeleteOperationID,
+		&p.TargetResourceID, &p.TargetResourceUID,
+		&p.AllocationGeneration, &p.DeleteGeneration,
+		&p.WorkloadVersion, &p.AllocationVersion, &p.CreateOperationVersion, &p.DeleteOperationVersion,
+		&s.WorkloadGeneration, &s.DesiredState, &s.WorkloadPhase, &s.LatestAllocationID,
+		&s.AllocationGeneration, &s.AllocationVersion, &s.AllocationPhase,
+		&s.CreateGeneration, &s.CreateVersion, &s.CreateKind, &s.CreateStatus,
+		&s.CreateResourceID, &s.CreateResourceUID,
+		&s.DeleteGeneration, &s.DeleteVersion, &s.DeleteKind, &s.DeleteStatus,
+		&s.DeleteTargetID, &s.DeleteTargetUID,
+	)
+	if err != nil || !s.matches(p) {
+		return reject()
+	}
+	return p, nil
+}
+
 // releaseCommitFenceSnapshot is only a locked database state comparison. A
 // matching snapshot cannot prove signed source provenance or physical release.
 type releaseCommitFenceSnapshot struct {
