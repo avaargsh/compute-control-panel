@@ -514,7 +514,7 @@ func TestHostSessionSubjectGrantRevocationFencesConcurrentStart(t *testing.T) {
 // Authorization expiry is checked after the raw heartbeat has waited on the
 // Provider lock; a preflight check alone must never authorize a late receipt.
 
-func TestAuthenticatedHostHeartbeatGrantExpiresWhileWaitingForProvider(t *testing.T) {
+func TestAuthenticatedHostHeartbeatFailsClosedAfterGrantExpiryWhileWaitingForProvider(t *testing.T) {
 	admin := openIntegrationDB(t)
 	_, binding := hostSessionFixture(t, admin)
 	writer, err := hostSessionWriterDB(t)
@@ -606,8 +606,12 @@ func TestAuthenticatedHostHeartbeatGrantExpiresWhileWaitingForProvider(t *testin
 	}
 	select {
 	case err := <-done:
-		if !errors.Is(err, ErrHostSessionUnauthorized) || hostSessionSQLState(err) != "28000" {
-			t.Fatalf("heartbeat after grant expiry must reject, got %v", err)
+		// Session TTL is bounded by the grant window. At grant expiry the
+		// session may already be expired, so either authorization (28000) or
+		// session-window (23514) rejection is valid; neither may persist a receipt.
+		state := hostSessionSQLState(err)
+		if state != "28000" && state != "23514" {
+			t.Fatalf("heartbeat after grant expiry must fail closed, got SQLSTATE %s: %v", state, err)
 		}
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
