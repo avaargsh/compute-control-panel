@@ -98,20 +98,20 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("unbound CREATE replay was not UNKNOWN: %v", err)
 	}
 	return json.NewEncoder(os.Stdout).Encode(map[string]any{
-		"mode":                              "DISPOSABLE_REAL_JOBSET_API",
-		"uid":                               original.ResourceUID,
-		"resource_id":                       original.ResourceID,
-		"provider_create_pinned":            true,
-		"same_uid_on_adapter_reconstruction":true,
-		"durable_uid_pin_verified":          false,
-		"unbound_state":                     string(unknown.Result),
-		"lost_ack_requires_inspect":         true,
-		"one_gpu_per_replica":               true,
-		"physical_gpu_verified":             false,
-		"driver_prepared":                   false,
-		"allocation_ready":                  false,
-		"released":                          false,
-		"cost_final":                        false,
+		"mode":                               "DISPOSABLE_REAL_JOBSET_API",
+		"uid":                                original.ResourceUID,
+		"resource_id":                        original.ResourceID,
+		"provider_create_pinned":             true,
+		"same_uid_on_adapter_reconstruction": true,
+		"durable_uid_pin_verified":           false,
+		"unbound_state":                      string(unknown.Result),
+		"lost_ack_requires_inspect":          true,
+		"one_gpu_per_replica":                true,
+		"physical_gpu_verified":              false,
+		"driver_prepared":                    false,
+		"allocation_ready":                   false,
+		"released":                           false,
+		"cost_final":                         false,
 	})
 }
 
