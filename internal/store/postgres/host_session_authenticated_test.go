@@ -207,14 +207,13 @@ func TestHostSessionSubjectGrantCannotBeSharedAcrossHostBindings(t *testing.T) {
 		t.Fatal("one host certificate subject was allowed to bind a second HostID/Node UID")
 	}
 
-	wrongMachineSubject := "spiffe://ccp.example/host/not-" + first.HostID
 	_, err = admin.ExecContext(ctx, `
 		INSERT INTO public.compute_host_identity_subject_grants
 			(subject, tenant_id, service_name, host_id, provider_id, cluster_scope, node_uid)
 		VALUES ($1,$2,'compute-host-agent',$3,$4,$5,$6)
-	`, wrongMachineSubject, tenant, first.HostID, first.ProviderID, first.ClusterScope, first.NodeUID)
+	`, second.Subject, tenant, first.HostID, first.ProviderID, first.ClusterScope, first.NodeUID)
 	if err == nil {
-		t.Fatal("certificate URI machine ID was allowed to differ from the immutable HostID")
+		t.Fatal("a second certificate subject was allowed to take an already granted HostID")
 	}
 
 	var count int
