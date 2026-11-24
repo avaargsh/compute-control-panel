@@ -93,10 +93,10 @@ func TestObserveNodeLeaseDeniesScopeAndInvalidNameBeforeNetwork(t *testing.T) {
 		http.Error(w, "should not be called", http.StatusInternalServerError)
 	})
 	for _, tc := range []struct {
-		tenant string
+		tenant  string
 		project []string
-		name string
-		uid string
+		name    string
+		uid     string
 	}{
 		{tenant: "outside-tenant", project: []string{"project-a"}, name: "worker-a", uid: "node-uid-a"},
 		{tenant: "tenant-a", project: []string{"outside-project"}, name: "worker-a", uid: "node-uid-a"},
