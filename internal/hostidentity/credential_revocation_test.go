@@ -8,8 +8,8 @@ import (
 	"encoding/asn1"
 	"math/big"
 	"net/url"
-	"testing"
 	"sync"
+	"testing"
 	"time"
 )
 
