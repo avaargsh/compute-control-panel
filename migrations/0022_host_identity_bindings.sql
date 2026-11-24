@@ -1,6 +1,88 @@
 -- Host enrollment slice A (#182): immutable Provider-scoped identity.
 -- Internal persistence only. No enrollment API, authenticated attestation,
 -- session issuance, GPU health, allocation or production grants are added.
+--
+-- Provision this dedicated NOLOGIN role independently before migration:
+-- ccp_host_identity_guard_owner. The role is not a runtime identity and must
+-- not be granted to enrollment clients. It receives only the Provider columns
+-- needed by this fixed SECURITY DEFINER trigger: SELECT on provider identity,
+-- cluster and lifecycle, plus UPDATE(provider_id) required by PostgreSQL 16
+-- SELECT ... FOR SHARE. The function never updates Provider state.
+DO $host_identity_guard_owner_preflight$
+DECLARE
+    guard_owner_oid pg_catalog.oid;
+    provider_table_owner pg_catalog.oid;
+    current_user_oid pg_catalog.oid;
+BEGIN
+    SELECT oid INTO guard_owner_oid FROM pg_catalog.pg_roles
+    WHERE rolname='ccp_host_identity_guard_owner'
+      AND NOT rolcanlogin AND NOT rolsuper AND NOT rolinherit
+      AND NOT rolcreatedb AND NOT rolcreaterole
+      AND NOT rolreplication AND NOT rolbypassrls;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION
+            'HostIdentity guard owner must be independently provisioned as a restricted NOLOGIN NOINHERIT role';
+    END IF;
+
+    SELECT relowner INTO provider_table_owner
+    FROM pg_catalog.pg_class
+    WHERE oid='public.compute_providers'::pg_catalog.regclass;
+    SELECT oid INTO current_user_oid
+    FROM pg_catalog.pg_roles WHERE rolname=current_user;
+
+    IF EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members WHERE member=guard_owner_oid)
+       OR EXISTS (SELECT 1 FROM pg_catalog.pg_database WHERE datdba=guard_owner_oid)
+       OR EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspowner=guard_owner_oid)
+       OR EXISTS (SELECT 1 FROM pg_catalog.pg_class WHERE relowner=guard_owner_oid)
+       OR EXISTS (SELECT 1 FROM pg_catalog.pg_proc WHERE proowner=guard_owner_oid)
+       OR EXISTS (SELECT 1 FROM pg_catalog.pg_default_acl WHERE defaclrole=guard_owner_oid)
+       OR pg_catalog.has_database_privilege(guard_owner_oid, pg_catalog.current_database(), 'CREATE')
+       OR pg_catalog.has_schema_privilege(guard_owner_oid, 'public', 'CREATE') THEN
+        RAISE EXCEPTION
+            'HostIdentity guard owner has unrelated ownership, default privileges or CREATE authority';
+    END IF;
+
+    -- Only the trusted Provider table owner, current migrator and superusers
+    -- may be able to SET/MEMBER this role. Runtime enrollment identities must
+    -- never inherit or assume the guard owner.
+    IF EXISTS (
+        SELECT 1 FROM pg_catalog.pg_roles r
+        WHERE r.oid NOT IN (guard_owner_oid, provider_table_owner, current_user_oid)
+          AND NOT r.rolsuper
+          AND pg_catalog.pg_has_role(r.oid, guard_owner_oid, 'MEMBER')
+    ) THEN
+        RAISE EXCEPTION 'HostIdentity guard owner is reachable by an untrusted role';
+    END IF;
+
+    -- The role must start with no grants. The migration below provisions the
+    -- exact four column privileges and one schema USAGE grant.
+    IF EXISTS (
+        SELECT 1 FROM pg_catalog.pg_class c
+        CROSS JOIN LATERAL pg_catalog.aclexplode(c.relacl) a
+        WHERE a.grantee=guard_owner_oid
+    ) OR EXISTS (
+        SELECT 1 FROM pg_catalog.pg_attribute col
+        CROSS JOIN LATERAL pg_catalog.aclexplode(col.attacl) a
+        WHERE a.grantee=guard_owner_oid
+    ) OR EXISTS (
+        SELECT 1 FROM pg_catalog.pg_namespace n
+        CROSS JOIN LATERAL pg_catalog.aclexplode(n.nspacl) a
+        WHERE a.grantee=guard_owner_oid
+    ) OR EXISTS (
+        SELECT 1 FROM pg_catalog.pg_proc p
+        CROSS JOIN LATERAL pg_catalog.aclexplode(p.proacl) a
+        WHERE a.grantee=guard_owner_oid
+    ) THEN
+        RAISE EXCEPTION 'HostIdentity guard owner has unexpected direct grants';
+    END IF;
+END;
+$host_identity_guard_owner_preflight$;
+
+GRANT USAGE ON SCHEMA public TO ccp_host_identity_guard_owner;
+GRANT SELECT (provider_id, cluster_scope, state),
+      UPDATE (provider_id)
+    ON public.compute_providers TO ccp_host_identity_guard_owner;
+
 CREATE TABLE public.compute_host_identity_bindings (
     host_id TEXT PRIMARY KEY
         CHECK (pg_catalog.octet_length(host_id) BETWEEN 1 AND 256
@@ -20,18 +102,33 @@ CREATE TABLE public.compute_host_identity_bindings (
 );
 
 -- A foreign key's key-share lock alone does not conflict with a non-key
--- Provider lifecycle update. Take a SHARE row lock and inspect the current
--- lifecycle and cluster in the same transaction. A Drain that wins the lock
--- cannot be followed by new enrollment; a committed prior binding is retained.
--- Invoker rights deliberately grant no Provider or enrollment privileges.
+-- Provider lifecycle update. The SECURITY DEFINER owner holds only the exact
+-- column privileges required to take this SHARE row lock and read lifecycle.
+-- It cannot change Provider state, and callers receive no Provider privilege.
 CREATE FUNCTION public.compute_host_identity_enrollment_guard() RETURNS trigger
 LANGUAGE plpgsql
+SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $guard$
 DECLARE
     current_scope TEXT;
     current_state TEXT;
 BEGIN
+    -- Reject a trigger attached to any other relation or at another timing.
+    IF TG_RELID <> 'public.compute_host_identity_bindings'::pg_catalog.regclass
+       OR TG_WHEN <> 'BEFORE' THEN
+        RAISE EXCEPTION 'HostIdentity guard requires the authoritative binding table'
+            USING ERRCODE='42501';
+    END IF;
+
+    IF TG_OP = 'TRUNCATE' THEN
+        RAISE EXCEPTION 'HostIdentity binding is immutable'
+            USING ERRCODE='23514';
+    END IF;
+    IF TG_LEVEL <> 'ROW' THEN
+        RAISE EXCEPTION 'HostIdentity guard requires row-level execution'
+            USING ERRCODE='42501';
+    END IF;
     IF TG_OP <> 'INSERT' THEN
         RAISE EXCEPTION 'HostIdentity binding is immutable'
             USING ERRCODE='23514';
@@ -56,6 +153,9 @@ BEGIN
 END;
 $guard$;
 
+-- Create triggers while the migration owner still owns the function. Then
+-- revoke PUBLIC execution and transfer it to the independently provisioned
+-- NOLOGIN role; trigger invocation does not grant callers direct execution.
 CREATE TRIGGER compute_host_identity_enrollment_insert
     BEFORE INSERT ON public.compute_host_identity_bindings
     FOR EACH ROW EXECUTE FUNCTION public.compute_host_identity_enrollment_guard();
@@ -66,6 +166,13 @@ CREATE TRIGGER compute_host_identity_binding_no_truncate
     BEFORE TRUNCATE ON public.compute_host_identity_bindings
     FOR EACH STATEMENT EXECUTE FUNCTION public.compute_host_identity_enrollment_guard();
 
+REVOKE ALL ON FUNCTION public.compute_host_identity_enrollment_guard() FROM PUBLIC;
+-- PostgreSQL requires schema CREATE on the new owner for ownership transfer.
+-- Keep that capability inside this transaction, never on the runtime role.
+GRANT CREATE ON SCHEMA public TO ccp_host_identity_guard_owner;
+ALTER FUNCTION public.compute_host_identity_enrollment_guard() OWNER TO ccp_host_identity_guard_owner;
+REVOKE CREATE ON SCHEMA public FROM ccp_host_identity_guard_owner;
+
 ALTER TABLE public.compute_host_identity_bindings
     ENABLE ALWAYS TRIGGER compute_host_identity_enrollment_insert;
 ALTER TABLE public.compute_host_identity_bindings
@@ -74,7 +181,8 @@ ALTER TABLE public.compute_host_identity_bindings
     ENABLE ALWAYS TRIGGER compute_host_identity_binding_no_truncate;
 
 REVOKE ALL ON TABLE public.compute_host_identity_bindings FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.compute_host_identity_enrollment_guard() FROM PUBLIC;
 
 COMMENT ON TABLE public.compute_host_identity_bindings IS
     'Immutable CCP host enrollment binding; not independently attested physical host identity or GPU availability.';
+COMMENT ON FUNCTION public.compute_host_identity_enrollment_guard() IS
+    'Fixed-search-path SECURITY DEFINER guard owned by ccp_host_identity_guard_owner; only reads/locks Provider columns and never mutates Provider state.';
