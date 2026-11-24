@@ -2,6 +2,7 @@ package hostidentity
 
 import (
 	"crypto/ed25519"
+	"encoding/asn1"
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -165,6 +166,42 @@ func TestParseHostCredentialRevocationListsRejectsAmbiguousOrMalformedInput(t *t
 		t.Run(tc.name, func(t *testing.T) {
 			if lists, err := ParseHostCredentialRevocationLists(tc.raw); err == nil || lists != nil {
 				t.Fatalf("invalid CRL input accepted: lists=%v err=%v", lists, err)
+			}
+		})
+	}
+}
+
+func TestParseHostCredentialRevocationListsRejectsUnsupportedCRLScopes(t *testing.T) {
+	f := newHostCredentialRevocationFixture(t)
+	for _, tc := range []struct {
+		name      string
+		oid       asn1.ObjectIdentifier
+		value     []byte
+		critical  bool
+	}{
+		{
+			name: "delta CRL indicator", oid: asn1.ObjectIdentifier{2, 5, 29, 27},
+			value: []byte{0x02, 0x01, 0x01}, critical: true,
+		},
+		{
+			name: "indirect CRL distribution point", oid: asn1.ObjectIdentifier{2, 5, 29, 28},
+			value: []byte{0x30, 0x00}, critical: true,
+		},
+		{
+			name: "unknown critical extension", oid: asn1.ObjectIdentifier{1, 2, 3, 4},
+			value: []byte{0x05, 0x00}, critical: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			der, err := x509.CreateRevocationList(rand.Reader, &x509.RevocationList{
+				Number: big.NewInt(2), ThisUpdate: f.now.Add(-time.Minute), NextUpdate: f.now.Add(time.Hour),
+				ExtraExtensions: []pkix.Extension{{Id: tc.oid, Critical: tc.critical, Value: tc.value}},
+			}, f.issuer, f.key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if lists, err := ParseHostCredentialRevocationLists([][]byte{der}); err == nil || lists != nil {
+				t.Fatalf("unsupported CRL scope accepted: lists=%v err=%v", lists, err)
 			}
 		})
 	}
