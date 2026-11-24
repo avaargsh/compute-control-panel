@@ -271,3 +271,102 @@ func TestAuthenticatedHostSessionCannotOutliveGrant(t *testing.T) {
 		t.Fatalf("authorization rejection left %d durable sessions", count)
 	}
 }
+
+func TestAuthenticatedHostSessionGrantExpiresWhileWaitingForProvider(t *testing.T) {
+	admin := openIntegrationDB(t)
+	_, binding := hostSessionFixture(t, admin)
+	writer, err := hostSessionWriterDB(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer.SetMaxOpenConns(1)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	repo, err := NewRepository(writer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenant := "tenant-lock-expiry-" + randomSuffix(t)
+	var expiresAt time.Time
+	err = admin.QueryRowContext(ctx, `
+		INSERT INTO public.compute_host_identity_subject_grants
+			(subject, tenant_id, service_name, host_id, provider_id, cluster_scope, node_uid, expires_at)
+		VALUES ($1,$2,'compute-host-agent',$3,$4,$5,$6,pg_catalog.clock_timestamp()+interval '5 seconds')
+		RETURNING expires_at
+	`, binding.Subject, tenant, binding.HostID, binding.ProviderID, binding.ClusterScope, binding.NodeUID).Scan(&expiresAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := admin.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	var blockerPID, writerPID int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT pg_catalog.pg_backend_pid()
+		FROM public.compute_providers WHERE provider_id=$1 FOR UPDATE
+	`, binding.ProviderID).Scan(&blockerPID); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.QueryRowContext(ctx, "SELECT pg_catalog.pg_backend_pid()").Scan(&writerPID); err != nil {
+		t.Fatal(err)
+	}
+	req := AuthenticatedHostSessionStartRequest{
+		TenantID: tenant, Service: "compute-host-agent", Subject: binding.Subject,
+		ExpectedEpoch: 0, RequestID: "expiry-lock-" + randomSuffix(t), TTL: time.Second,
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := repo.StartAuthenticatedHostSession(ctx, req)
+		done <- err
+	}()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	waiting := false
+	for !waiting {
+		select {
+		case err := <-done:
+			t.Fatalf("start returned before reaching Provider lock: %v", err)
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-ticker.C:
+			var active bool
+			if err := admin.QueryRowContext(ctx, `
+				SELECT $1 = ANY(pg_catalog.pg_blocking_pids($2)),
+				       pg_catalog.clock_timestamp() < $3
+			`, blockerPID, writerPID, expiresAt).Scan(&waiting, &active); err != nil {
+				t.Fatal(err)
+			}
+			if !active {
+				t.Fatal("fixture did not establish lock wait before grant expiry")
+			}
+		}
+	}
+	// The unchanged Provider remains REGISTERED. Wait using database time.
+	if _, err := admin.ExecContext(ctx, `
+		SELECT pg_catalog.pg_sleep(GREATEST(0, EXTRACT(EPOCH FROM ($1::timestamptz - pg_catalog.clock_timestamp())))::double precision + 0.05)
+	`, expiresAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrHostSessionUnauthorized) || hostSessionSQLState(err) != "28000" {
+			t.Fatalf("expired authorization after lock wait must reject, got %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	var count int
+	if err := admin.QueryRowContext(ctx, `
+		SELECT count(*) FROM public.compute_host_sessions WHERE host_id=$1
+	`, binding.HostID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("post-lock authorization rejection left %d durable sessions", count)
+	}
+}
