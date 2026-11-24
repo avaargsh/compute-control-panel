@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -10,9 +11,7 @@ import (
 	"github.com/avaargsh/compute-control-panel/internal/hostidentity"
 )
 
-func provisionHostSessionSubjectGrant(t *testing.T, db interface {
-	ExecContext(context.Context, string, ...any) (interface{ RowsAffected() (int64, error) }, error)
-}, binding hostidentity.Binding, tenantID string) {
+func provisionHostSessionSubjectGrant(t *testing.T, db *sql.DB, binding hostidentity.Binding, tenantID string) {
 	t.Helper()
 	_, err := db.ExecContext(context.Background(), `
 		INSERT INTO public.compute_host_identity_subject_grants
