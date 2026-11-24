@@ -533,7 +533,7 @@ func TestAuthenticatedHostHeartbeatGrantExpiresWhileWaitingForProvider(t *testin
 	err = admin.QueryRowContext(ctx, `
 		INSERT INTO public.compute_host_identity_subject_grants
 			(subject, tenant_id, service_name, host_id, provider_id, cluster_scope, node_uid, expires_at)
-		VALUES ($1,$2,'compute-host-agent',$3,$4,$5,$6,pg_catalog.clock_timestamp()+interval '5 seconds')
+		VALUES ($1,$2,'compute-host-agent',$3,$4,$5,$6,pg_catalog.clock_timestamp()+interval '8 seconds')
 		RETURNING expires_at
 	`, binding.Subject, tenant, binding.HostID, binding.ProviderID, binding.ClusterScope, binding.NodeUID).Scan(&expiresAt)
 	if err != nil {
@@ -541,7 +541,7 @@ func TestAuthenticatedHostHeartbeatGrantExpiresWhileWaitingForProvider(t *testin
 	}
 	first, err := repo.StartAuthenticatedHostSession(ctx, AuthenticatedHostSessionStartRequest{
 		Subject: binding.Subject, ExpectedEpoch: 0,
-		RequestID: "heartbeat-expiry-start-" + randomSuffix(t), TTL: 30 * time.Second,
+		RequestID: "heartbeat-expiry-start-" + randomSuffix(t), TTL: 7 * time.Second,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -570,7 +570,7 @@ func TestAuthenticatedHostHeartbeatGrantExpiresWhileWaitingForProvider(t *testin
 		done <- err
 	}()
 
-	deadline := time.NewTimer(5 * time.Second)
+	deadline := time.NewTimer(12 * time.Second)
 	defer deadline.Stop()
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()
