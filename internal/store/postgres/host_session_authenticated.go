@@ -47,18 +47,18 @@ func validateAuthenticatedHostIdentity(subject string) error {
 
 func authenticatedHostSessionError(operation string, err error) error {
 	var state interface{ SQLState() string }
-	// The proposed authorization wrapper must return SQLSTATE 28000 for
-	// rejected identity/grant authorization. Database ACL failures and
-	// outages are operational errors, not a successful authorization check.
+	// The authenticated wrapper returns SQLSTATE 28000 for rejected host
+	// certificate subject/grant authorization. Database ACL failures and
+	// outages remain operational errors, not successful authorization checks.
 	if errors.As(err, &state) && state.SQLState() == "28000" {
 		return fmt.Errorf("%w: %w", ErrHostSessionUnauthorized, err)
 	}
 	return hostSessionPersistenceError(operation, err)
 }
 
-// StartAuthenticatedHostSession is an unmounted adapter to the proposed
-// transactional authorization wrapper. It never falls back to the raw tuple
-// function. Migration and real database acceptance are required before use.
+// StartAuthenticatedHostSession calls only the transactional authenticated
+// wrapper. It never falls back to the raw tuple function. The HTTP handler
+// remains unmounted until the independent enrollment and operational gates pass.
 func (r *Repository) StartAuthenticatedHostSession(ctx context.Context, req AuthenticatedHostSessionStartRequest) (hostidentity.SessionFence, error) {
 	if err := validateAuthenticatedHostIdentity(req.Subject); err != nil {
 		return hostidentity.SessionFence{}, err
