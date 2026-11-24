@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -131,6 +132,10 @@ func TestHostIdentityEnrollmentWaitsForProviderDrain(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
+	var drainPID int
+	if err := tx.QueryRowContext(ctx, "SELECT pg_catalog.pg_backend_pid()").Scan(&drainPID); err != nil {
+		t.Fatal(err)
+	}
 	result, err := tx.ExecContext(ctx, `UPDATE public.compute_providers
 		SET state='DRAINING', version=2, last_reason_code='PLANNED_MAINTENANCE',
 		    updated_at=pg_catalog.clock_timestamp()
@@ -149,7 +154,13 @@ func TestHostIdentityEnrollmentWaitsForProviderDrain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	// On failure, release the blocking transaction before closing the waiting
+	// connection. Cancel the statement even if the test exits via Fatal.
+	defer func() {
+		cancel()
+		_ = tx.Rollback()
+		_ = conn.Close()
+	}()
 	var pid int
 	if err := conn.QueryRowContext(ctx, "SELECT pg_catalog.pg_backend_pid()").Scan(&pid); err != nil {
 		t.Fatal(err)
@@ -179,7 +190,7 @@ func TestHostIdentityEnrollmentWaitsForProviderDrain(t *testing.T) {
 			t.Fatal(ctx.Err())
 		case <-tick.C:
 			if err := tx.QueryRowContext(ctx,
-				"SELECT cardinality(pg_catalog.pg_blocking_pids($1)) > 0", pid).Scan(&waiting); err != nil {
+				"SELECT $1 = ANY(pg_catalog.pg_blocking_pids($2))", drainPID, pid).Scan(&waiting); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -189,8 +200,9 @@ func TestHostIdentityEnrollmentWaitsForProviderDrain(t *testing.T) {
 	}
 	select {
 	case err := <-done:
-		if err == nil {
-			t.Fatal("enrollment adopted a Provider after Drain committed")
+		var state interface{ SQLState() string }
+		if !errors.As(err, &state) || state.SQLState() != "23514" {
+			t.Fatalf("enrollment must reject committed Drain with check-violation SQLSTATE 23514, got %v", err)
 		}
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
