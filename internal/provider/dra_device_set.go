@@ -17,12 +17,12 @@ type DRADeviceSetQuery struct {
 }
 
 type DRADeviceSetObservation struct {
-	Pod, Claim         KubernetesResourceRef
-	NodeName           string
-	ClaimTemplateName  string
-	PodClaimAlias      string
-	ConsumerContainer  string
-	Devices            []DRAAllocatedDevice
+	Pod, Claim        KubernetesResourceRef
+	NodeName          string
+	ClaimTemplateName string
+	PodClaimAlias     string
+	ConsumerContainer string
+	Devices           []DRAAllocatedDevice
 }
 
 const maxDRADeviceSet = 128
