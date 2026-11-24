@@ -70,6 +70,11 @@ func run(ctx context.Context, addr, certFile, keyFile string, cfg liveConfig) er
 		return err
 	}
 	defer ln.Close()
+	return serveConsole(ctx, ln, cert, h)
+}
+
+// serveConsole is shared by the opt-in command and real TLS acceptance tests.
+func serveConsole(ctx context.Context, ln net.Listener, cert tls.Certificate, h http.Handler) error {
 	srv := &http.Server{
 		Handler:           h,
 		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{cert}},
