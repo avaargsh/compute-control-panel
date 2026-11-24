@@ -3,10 +3,14 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
 	"errors"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -18,15 +22,7 @@ import (
 	"github.com/avaargsh/compute-control-panel/internal/store/postgres"
 )
 
-const hostSessionIngressSubject = "spiffe://example.org/ns/compute-host/sa/host-agent"
-
-type hostSessionIngressFakeAuthenticator struct {
-	principal WorkloadPrincipal
-}
-
-func (a hostSessionIngressFakeAuthenticator) Authenticate(context.Context, *http.Request) (WorkloadPrincipal, error) {
-	return a.principal, nil
-}
+const hostSessionIngressSubject = "spiffe://example.org/host/node-a"
 
 type hostSessionIngressRepositoryStub struct {
 	startRequest     postgres.AuthenticatedHostSessionStartRequest
@@ -56,46 +52,79 @@ func (s *hostSessionIngressRepositoryStub) RecordAuthenticatedHostHeartbeat(
 	return s.disposition, s.recordedAt, s.heartbeatErr
 }
 
-func hostSessionIngressAuthenticator(t *testing.T, service string) *SPIFFEWorkloadAuthenticator {
+type hostSessionIngressFixture struct {
+	roots *x509.CertPool
+	ca    *x509.Certificate
+	key   ed25519.PrivateKey
+}
+
+func newHostSessionIngressFixture(t *testing.T) hostSessionIngressFixture {
 	t.Helper()
-	principal := WorkloadPrincipal{
-		TenantID: "tenant-host-ingress", Subject: hostSessionIngressSubject, Service: service,
-	}
-	auth, err := NewSPIFFEWorkloadAuthenticator("example.org", &testWorkloadIdentityResolver{
-		expected: hostSessionIngressSubject, principal: principal,
-	})
+	pub, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return auth
-}
-
-func hostSessionIngressTLS(subject string) *tls.ConnectionState {
-	uri, _ := url.Parse(subject)
-	leaf := &x509.Certificate{Raw: []byte("verified-host-agent-leaf"), URIs: []*url.URL{uri}}
-	return &tls.ConnectionState{
-		PeerCertificates: []*x509.Certificate{leaf},
-		VerifiedChains:   [][]*x509.Certificate{{leaf}},
+	now := time.Now()
+	ca := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "host test CA"},
+		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour),
+		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
 	}
+	raw, err := x509.CreateCertificate(rand.Reader, ca, ca, pub, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := x509.ParseCertificate(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(root)
+	return hostSessionIngressFixture{roots: roots, ca: root, key: key}
 }
 
-func TestNewHostSessionIngressHandlerRequiresSPIFFEAuthenticatorAndRepository(t *testing.T) {
+func (f hostSessionIngressFixture) tlsState(t *testing.T, subject string) *tls.ConnectionState {
+	t.Helper()
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uri, err := url.Parse(subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(2), NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Minute),
+		URIs: []*url.URL{uri}, KeyUsage: x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}
+	raw, err := x509.CreateCertificate(rand.Reader, template, f.ca, pub, f.key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := x509.ParseCertificate(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chains, err := leaf.Verify(x509.VerifyOptions{Roots: f.roots, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &tls.ConnectionState{PeerCertificates: []*x509.Certificate{leaf}, VerifiedChains: chains}
+}
+
+func TestNewHostSessionIngressHandlerRequiresHostRootsAndRepository(t *testing.T) {
+	f := newHostSessionIngressFixture(t)
 	repo := &hostSessionIngressRepositoryStub{}
-	if _, err := NewHostSessionIngressHandler(HostSessionIngressDependencies{Repository: repo}); err == nil {
-		t.Fatal("missing SPIFFE authenticator allowed HostSession ingress construction")
-	}
-	if _, err := NewHostSessionIngressHandler(HostSessionIngressDependencies{
-		Authenticator: hostSessionIngressAuthenticator(t, "compute-host-agent"),
-	}); err == nil {
-		t.Fatal("missing HostSession repository allowed ingress construction")
-	}
-	if _, err := NewHostSessionIngressHandler(HostSessionIngressDependencies{
-		Authenticator: hostSessionIngressFakeAuthenticator{principal: WorkloadPrincipal{
-			TenantID: "tenant-host-ingress", Subject: hostSessionIngressSubject, Service: "compute-host-agent",
-		}},
-		Repository: repo,
-	}); err == nil {
-		t.Fatal("arbitrary authenticator was allowed to impersonate the TLS peer")
+	for _, deps := range []HostSessionIngressDependencies{
+		{Repository: repo},
+		{HostTrustRoots: f.roots, HostTrustDomain: "example.org"},
+		{HostTrustRoots: f.roots, Repository: repo},
+	} {
+		if _, err := NewHostSessionIngressHandler(deps); err == nil {
+			t.Fatal("incomplete host ingress dependencies accepted")
+		}
 	}
 }
 
@@ -112,9 +141,9 @@ func TestHostSessionIngressStartsAndRecordsOnlyAuthenticatedHostAgent(t *testing
 		},
 		disposition: hostidentity.Accept, recordedAt: recordedAt,
 	}
+	f := newHostSessionIngressFixture(t)
 	handler, err := NewHostSessionIngressHandler(HostSessionIngressDependencies{
-		Authenticator: hostSessionIngressAuthenticator(t, "compute-host-agent"),
-		Repository:    repo,
+		HostTrustRoots: f.roots, HostTrustDomain: "example.org", Repository: repo,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -122,16 +151,15 @@ func TestHostSessionIngressStartsAndRecordsOnlyAuthenticatedHostAgent(t *testing
 
 	start := httptest.NewRequest(http.MethodPost, hostSessionStartPath,
 		strings.NewReader(`{"expected_epoch":0,"ttl_seconds":60}`))
+	start.Header.Set("Content-Type", "application/json")
 	start.Header.Set("Idempotency-Key", "host-start-request-001")
-	start.TLS = hostSessionIngressTLS(hostSessionIngressSubject)
+	start.TLS = f.tlsState(t, hostSessionIngressSubject)
 	startResponse := httptest.NewRecorder()
 	handler.ServeHTTP(startResponse, start)
 	if startResponse.Code != http.StatusCreated || repo.startCalls != 1 {
 		t.Fatalf("HostSession start: HTTP %d calls=%d body=%s", startResponse.Code, repo.startCalls, startResponse.Body.String())
 	}
-	if repo.startRequest.TenantID != "tenant-host-ingress" ||
-		repo.startRequest.Service != "compute-host-agent" ||
-		repo.startRequest.Subject != hostSessionIngressSubject ||
+	if repo.startRequest.Subject != hostSessionIngressSubject ||
 		repo.startRequest.ExpectedEpoch != 0 || repo.startRequest.RequestID != "host-start-request-001" ||
 		repo.startRequest.TTL != time.Minute {
 		t.Fatalf("start did not use verified identity and normalized request: %+v", repo.startRequest)
@@ -147,15 +175,13 @@ func TestHostSessionIngressStartsAndRecordsOnlyAuthenticatedHostAgent(t *testing
 	heartbeatBody := `{"epoch":1,"session_id":"hs_session_001","sequence":1,"agent_version":"1.2.3"}`
 	heartbeat := httptest.NewRequest(http.MethodPost, hostHeartbeatPath, strings.NewReader(heartbeatBody))
 	heartbeat.Header.Set("Content-Type", "application/json")
-	heartbeat.TLS = hostSessionIngressTLS(hostSessionIngressSubject)
+	heartbeat.TLS = f.tlsState(t, hostSessionIngressSubject)
 	heartbeatResponse := httptest.NewRecorder()
 	handler.ServeHTTP(heartbeatResponse, heartbeat)
 	if heartbeatResponse.Code != http.StatusAccepted || repo.heartbeatCalls != 1 {
 		t.Fatalf("heartbeat: HTTP %d calls=%d body=%s", heartbeatResponse.Code, repo.heartbeatCalls, heartbeatResponse.Body.String())
 	}
-	if repo.heartbeatRequest.TenantID != "tenant-host-ingress" ||
-		repo.heartbeatRequest.Service != "compute-host-agent" ||
-		repo.heartbeatRequest.Subject != hostSessionIngressSubject ||
+	if repo.heartbeatRequest.Subject != hostSessionIngressSubject ||
 		repo.heartbeatRequest.Epoch != 1 || repo.heartbeatRequest.SessionID != "hs_session_001" ||
 		repo.heartbeatRequest.Sequence != 1 ||
 		!strings.HasPrefix(repo.heartbeatRequest.Digest, "sha256:") ||
@@ -169,7 +195,7 @@ func TestHostSessionIngressStartsAndRecordsOnlyAuthenticatedHostAgent(t *testing
 	repo.disposition = hostidentity.Replay
 	replay := httptest.NewRequest(http.MethodPost, hostHeartbeatPath, strings.NewReader(heartbeatBody))
 	replay.Header.Set("Content-Type", "application/json")
-	replay.TLS = hostSessionIngressTLS(hostSessionIngressSubject)
+	replay.TLS = f.tlsState(t, hostSessionIngressSubject)
 	replayResponse := httptest.NewRecorder()
 	handler.ServeHTTP(replayResponse, replay)
 	if replayResponse.Code != http.StatusOK || repo.heartbeatCalls != 2 {
@@ -179,15 +205,16 @@ func TestHostSessionIngressStartsAndRecordsOnlyAuthenticatedHostAgent(t *testing
 
 func TestHostSessionIngressRejectsUnauthenticatedAndNonHostPrincipals(t *testing.T) {
 	repo := &hostSessionIngressRepositoryStub{}
+	f := newHostSessionIngressFixture(t)
 	handler, err := NewHostSessionIngressHandler(HostSessionIngressDependencies{
-		Authenticator: hostSessionIngressAuthenticator(t, "agent-runtime"),
-		Repository:    repo,
+		HostTrustRoots: f.roots, HostTrustDomain: "example.org", Repository: repo,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	request := httptest.NewRequest(http.MethodPost, hostSessionStartPath,
 		strings.NewReader(`{"expected_epoch":0,"ttl_seconds":30}`))
+	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Idempotency-Key", "host-start-request")
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
@@ -197,20 +224,21 @@ func TestHostSessionIngressRejectsUnauthenticatedAndNonHostPrincipals(t *testing
 
 	request = httptest.NewRequest(http.MethodPost, hostSessionStartPath,
 		strings.NewReader(`{"expected_epoch":0,"ttl_seconds":30}`))
+	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Idempotency-Key", "host-start-request")
-	request.TLS = hostSessionIngressTLS(hostSessionIngressSubject)
+	request.TLS = f.tlsState(t, "spiffe://example.org/ns/compute-host/sa/host-agent")
 	recorder = httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusForbidden || repo.startCalls != 0 {
+	if recorder.Code != http.StatusUnauthorized || repo.startCalls != 0 {
 		t.Fatalf("non-host service identity was allowed: HTTP %d calls=%d", recorder.Code, repo.startCalls)
 	}
 }
 
 func TestHostSessionIngressRejectsAmbiguousHeartbeatJSONAndInvalidSessionFields(t *testing.T) {
 	repo := &hostSessionIngressRepositoryStub{}
+	f := newHostSessionIngressFixture(t)
 	handler, err := NewHostSessionIngressHandler(HostSessionIngressDependencies{
-		Authenticator: hostSessionIngressAuthenticator(t, "compute-host-agent"),
-		Repository:    repo,
+		HostTrustRoots: f.roots, HostTrustDomain: "example.org", Repository: repo,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -225,7 +253,7 @@ func TestHostSessionIngressRejectsAmbiguousHeartbeatJSONAndInvalidSessionFields(
 	} {
 		request := httptest.NewRequest(http.MethodPost, hostHeartbeatPath, bytes.NewBufferString(body))
 		request.Header.Set("Content-Type", "application/json")
-		request.TLS = hostSessionIngressTLS(hostSessionIngressSubject)
+		request.TLS = f.tlsState(t, hostSessionIngressSubject)
 		recorder := httptest.NewRecorder()
 		handler.ServeHTTP(recorder, request)
 		if recorder.Code != http.StatusBadRequest || repo.heartbeatCalls != 0 {
@@ -236,17 +264,18 @@ func TestHostSessionIngressRejectsAmbiguousHeartbeatJSONAndInvalidSessionFields(
 
 func TestHostSessionIngressMapsRepositoryFencesWithoutLeakingErrors(t *testing.T) {
 	repo := &hostSessionIngressRepositoryStub{startErr: postgres.ErrHostSessionUnauthorized}
+	f := newHostSessionIngressFixture(t)
 	handler, err := NewHostSessionIngressHandler(HostSessionIngressDependencies{
-		Authenticator: hostSessionIngressAuthenticator(t, "compute-host-agent"),
-		Repository:    repo,
+		HostTrustRoots: f.roots, HostTrustDomain: "example.org", Repository: repo,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	request := httptest.NewRequest(http.MethodPost, hostSessionStartPath,
 		strings.NewReader(`{"expected_epoch":0,"ttl_seconds":30}`))
+	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Idempotency-Key", "host-start-request")
-	request.TLS = hostSessionIngressTLS(hostSessionIngressSubject)
+	request.TLS = f.tlsState(t, hostSessionIngressSubject)
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusForbidden || strings.Contains(recorder.Body.String(), "SQL") {
@@ -256,8 +285,9 @@ func TestHostSessionIngressMapsRepositoryFencesWithoutLeakingErrors(t *testing.T
 	repo.startErr = errors.New("database unavailable")
 	request = httptest.NewRequest(http.MethodPost, hostSessionStartPath,
 		strings.NewReader(`{"expected_epoch":0,"ttl_seconds":30}`))
+	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Idempotency-Key", "host-start-request")
-	request.TLS = hostSessionIngressTLS(hostSessionIngressSubject)
+	request.TLS = f.tlsState(t, hostSessionIngressSubject)
 	recorder = httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusServiceUnavailable {
