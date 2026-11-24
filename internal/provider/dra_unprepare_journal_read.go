@@ -54,11 +54,12 @@ func RequireRecordedDRAUnprepareReceipt(
 	}
 
 	recordJSON, err := json.Marshal(draReceiptJournalRecord{
-		Release:       correlated.Release,
-		Event:         correlated.Event,
-		PayloadSHA256: correlated.PayloadSHA256,
-		KeySHA256:     correlated.KeySHA256,
-		Signature:     correlated.Signature[:],
+		Release:                 correlated.Release,
+		Event:                   correlated.Event,
+		PayloadSHA256:           correlated.PayloadSHA256,
+		KeySHA256:               correlated.KeySHA256,
+		PreDeleteSnapshotDigest: correlated.PreDeleteSnapshotDigest,
+		Signature:               correlated.Signature[:],
 	})
 	if err != nil {
 		return fmt.Errorf("%w: encode expected receipt: %v", ErrDRAReceiptJournalUnavailable, err)
