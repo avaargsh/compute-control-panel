@@ -103,16 +103,16 @@ func TestPDPostgresKubeJobSetGolden(t *testing.T) {
 	cmd := exec.CommandContext(ctx, os.Getenv("CCP_PD_KIND_STAGE_BINARY"), "-test.run=^TestDisposablePDStageProcess$", "-test.v")
 	cmd.Env = append(os.Environ(), "CCP_PD_KIND_STAGE_CHILD=1")
 	cmd.Stdin = bytes.NewReader(input)
-	var output bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &output, &output
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+	finished := make(chan error, 1)
+	go func() { finished <- cmd.Wait() }()
 	waited := false
 	defer func() {
 		if !waited {
 			_ = cmd.Process.Kill()
-			_ = cmd.Wait()
+			<-finished
 		}
 	}()
 	for {
@@ -120,6 +120,9 @@ func TestPDPostgresKubeJobSetGolden(t *testing.T) {
 			break
 		}
 		select {
+		case err := <-finished:
+			waited = true
+			t.Fatalf("canonical stage child exited before post-pin marker: %v", err)
 		case <-ctx.Done():
 			t.Fatal("canonical stage child did not publish the post-pin marker")
 		case <-time.After(50 * time.Millisecond):
@@ -128,7 +131,7 @@ func TestPDPostgresKubeJobSetGolden(t *testing.T) {
 	if err := cmd.Process.Kill(); err != nil {
 		t.Fatal(err)
 	}
-	err = cmd.Wait()
+	err = <-finished
 	waited = true
 	var exited *exec.ExitError
 	if !errors.As(err, &exited) {
@@ -137,6 +140,18 @@ func TestPDPostgresKubeJobSetGolden(t *testing.T) {
 	status, ok := exited.Sys().(syscall.WaitStatus)
 	if !ok || !status.Signaled() || status.Signal() != syscall.SIGKILL {
 		t.Fatalf("expected SIGKILL, got %v", exited)
+	}
+
+	// Pin the original UID independently from the persistent store before
+	// any Inspect or reconciliation could affect the observed outcome.
+	var originalPins int
+	var originalUID string
+	if err := db.QueryRowContext(ctx, `SELECT count(*),COALESCE(min(job_uid),'')
+		FROM public.kueue_job_create_pins
+		WHERE namespace=$1 AND tenant_id=$2 AND operation_id=$3`,
+		os.Getenv("CCP_PD_KIND_NAMESPACE"), owner.TenantID, req.OperationID).
+		Scan(&originalPins, &originalUID); err != nil || originalPins != 1 || originalUID == "" {
+		t.Fatalf("post-SIGKILL durable original UID missing or ambiguous: pins=%d err=%v", originalPins, err)
 	}
 
 	// A process death cannot run deferred UNKNOWN writes. The authoritative
@@ -197,7 +212,7 @@ func TestPDPostgresKubeJobSetGolden(t *testing.T) {
 	}
 	observed, err := otherWriter.Inspect(ctx, req)
 	if err != nil || observed.Result != operation.ResourcePresent ||
-		observed.ResourceUID == "" || observed.ResourceVersion == "" {
+		observed.ResourceUID != originalUID || observed.ResourceVersion == "" {
 		t.Fatalf("restarted authoritative UID-pinned Inspect: %+v %v", observed, err)
 	}
 	evidence := InspectionEvidence{
