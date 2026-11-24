@@ -94,6 +94,97 @@ CREATE TABLE public.kueue_job_pre_delete_dra_snapshots (
 COMMENT ON TABLE public.kueue_job_pre_delete_dra_snapshots IS
     'Immutable structural Kueue/DRA allocation snapshot captured before DELETE intent. Not authenticated source evidence, physical GPU release, Allocation RELEASED or cost FINAL.';
 
+-- The DELETE tombstone insert guard locks the same CREATE pin row as
+-- snapshot capture. It rejects a tombstone whose namespace/Job name resolves
+-- to a different tenant or successor UID, including direct SQL callers.
+CREATE FUNCTION public.kueue_job_delete_tombstone_insert_guard()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $kueue_job_delete_tombstone_insert_guard$
+DECLARE
+    pinned_tenant_id TEXT;
+    pinned_job_uid TEXT;
+    pinned_workload_id TEXT;
+    pinned_provider_id TEXT;
+BEGIN
+    SELECT tenant_id, job_uid, workload_id, provider_id
+      INTO pinned_tenant_id, pinned_job_uid, pinned_workload_id, pinned_provider_id
+      FROM public.kueue_job_create_pins
+     WHERE namespace = NEW.namespace AND job_name = NEW.job_name
+     FOR UPDATE;
+    IF FOUND AND (
+        pinned_tenant_id <> NEW.tenant_id OR
+        pinned_job_uid <> NEW.job_uid OR
+        pinned_workload_id <> NEW.workload_id OR
+        pinned_provider_id <> NEW.provider_id
+    ) THEN
+        RAISE EXCEPTION 'DELETE tombstone does not match the namespace CREATE pin'
+            USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$kueue_job_delete_tombstone_insert_guard$;
+
+CREATE TRIGGER kueue_job_delete_tombstone_before_insert
+BEFORE INSERT ON public.kueue_job_delete_tombstones
+FOR EACH ROW EXECUTE FUNCTION public.kueue_job_delete_tombstone_insert_guard();
+
+ALTER TABLE public.kueue_job_delete_tombstones
+    ENABLE ALWAYS TRIGGER kueue_job_delete_tombstone_before_insert;
+
+-- The snapshot insert guard independently enforces CREATE-pin identity and
+-- the absence of DELETE intent. The row lock makes this race-safe even for
+-- direct SQL inserts that bypass the Go store methods.
+CREATE FUNCTION public.kueue_job_pre_delete_dra_snapshot_insert_guard()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $kueue_job_pre_delete_dra_snapshot_insert_guard$
+DECLARE
+    pinned_job_name TEXT;
+    pinned_job_uid TEXT;
+    pinned_workload_id TEXT;
+    pinned_provider_id TEXT;
+    pinned_generation BIGINT;
+BEGIN
+    SELECT job_name, job_uid, workload_id, provider_id, desired_generation
+      INTO pinned_job_name, pinned_job_uid, pinned_workload_id, pinned_provider_id, pinned_generation
+      FROM public.kueue_job_create_pins
+     WHERE namespace = NEW.namespace
+       AND tenant_id = NEW.tenant_id
+       AND operation_id = NEW.create_operation_id
+     FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'pre-delete DRA snapshot has no matching CREATE pin'
+            USING ERRCODE = '23503';
+    END IF;
+    IF pinned_job_name <> NEW.job_name OR pinned_job_uid <> NEW.job_uid OR
+       pinned_workload_id <> NEW.workload_id OR pinned_provider_id <> NEW.provider_id OR
+       pinned_generation <> NEW.create_generation THEN
+        RAISE EXCEPTION 'pre-delete DRA snapshot does not match its CREATE pin'
+            USING ERRCODE = '23514';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM public.kueue_job_delete_tombstones
+         WHERE namespace = NEW.namespace
+           AND tenant_id = NEW.tenant_id
+           AND operation_id = NEW.delete_operation_id
+    ) THEN
+        RAISE EXCEPTION 'pre-delete DRA snapshot must precede DELETE intent'
+            USING ERRCODE = '55000';
+    END IF;
+    RETURN NEW;
+END;
+$kueue_job_pre_delete_dra_snapshot_insert_guard$;
+
+CREATE TRIGGER kueue_job_pre_delete_dra_snapshot_before_insert
+BEFORE INSERT ON public.kueue_job_pre_delete_dra_snapshots
+FOR EACH ROW EXECUTE FUNCTION public.kueue_job_pre_delete_dra_snapshot_insert_guard();
+
+ALTER TABLE public.kueue_job_pre_delete_dra_snapshots
+    ENABLE ALWAYS TRIGGER kueue_job_pre_delete_dra_snapshot_before_insert;
+
 CREATE FUNCTION public.kueue_job_pre_delete_dra_snapshot_guard()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -120,7 +211,11 @@ ALTER TABLE public.kueue_job_pre_delete_dra_snapshots
 
 REVOKE ALL ON TABLE public.kueue_job_pre_delete_dra_snapshots FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.kueue_job_pre_delete_dra_snapshot_guard() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.kueue_job_delete_tombstone_insert_guard() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.kueue_job_pre_delete_dra_snapshot_insert_guard() FROM PUBLIC;
 
 GRANT USAGE ON SCHEMA public TO ccp_kueue_job_binding;
 GRANT SELECT, INSERT ON public.kueue_job_pre_delete_dra_snapshots TO ccp_kueue_job_binding;
 GRANT EXECUTE ON FUNCTION public.kueue_job_pre_delete_dra_snapshot_guard() TO ccp_kueue_job_binding;
+GRANT EXECUTE ON FUNCTION public.kueue_job_delete_tombstone_insert_guard() TO ccp_kueue_job_binding;
+GRANT EXECUTE ON FUNCTION public.kueue_job_pre_delete_dra_snapshot_insert_guard() TO ccp_kueue_job_binding;
