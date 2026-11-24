@@ -171,8 +171,9 @@ func (s *MemoryKueueJobBindingStore) PutDeleteTombstone(namespace string, req Re
 	defer s.mu.Unlock()
 	// Snapshot capture and DELETE intent share this mutex. A pin mismatch
 	// cannot create a tombstone that could later be associated with a successor.
-	if pin, ok := memoryCreatePinByJobLocked(s, namespace, req.TenantID, name); ok &&
-		(pin.UID != uid || pin.Request.WorkloadID != req.WorkloadID || pin.Request.ProviderID != req.ProviderID) {
+	if pin, ok := memoryCreatePinByNameLocked(s, namespace, name); ok &&
+		(pin.Request.TenantID != req.TenantID || pin.UID != uid ||
+			pin.Request.WorkloadID != req.WorkloadID || pin.Request.ProviderID != req.ProviderID) {
 		return ErrOperationConflict
 	}
 	key := kueueBindingKey(namespace, req)
@@ -204,6 +205,15 @@ func (s *MemoryKueueJobBindingStore) CreatePinUID(namespace, jobName string) (st
 		}
 	}
 	return "", false, nil
+}
+
+func memoryCreatePinByNameLocked(s *MemoryKueueJobBindingStore, namespace, jobName string) (KueueCreatePin, bool) {
+	for _, pin := range s.pins {
+		if pin.Namespace == namespace && pin.Name == jobName {
+			return pin, true
+		}
+	}
+	return KueueCreatePin{}, false
 }
 
 func memoryCreatePinByJobLocked(s *MemoryKueueJobBindingStore, namespace, tenantID, jobName string) (KueueCreatePin, bool) {
