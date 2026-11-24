@@ -1,6 +1,6 @@
 # HostIdentity PostgreSQL enrollment boundary
 
-Status: **unmounted persistence foundation**. This slice does not authenticate a host, issue a session, ingest heartbeats, establish hardware trust, or declare GPU capacity available.
+Status: **unmounted persistence foundation**. Immutable HostIdentity bindings and durable session-epoch/heartbeat receipt persistence exist behind internal PostgreSQL entrypoints. No HTTP listener, host attestation, machine-certificate authentication, heartbeat ingress, hardware trust, or GPU capacity authority is mounted.
 
 ## Authority and lifecycle
 
@@ -31,6 +31,40 @@ PostgreSQL 16 requires UPDATE privilege on at least one column to execute `SELEC
 The migration temporarily grants schema CREATE only to transfer function ownership, then revokes it before commit. A non-superuser migrator must have the normal, separately approved ownership-transfer authority for this dedicated role. Never grant this role to an application or host-enrollment login.
 
 A HostIdentity enrollment writer needs only `USAGE` on `public` and `INSERT` on `compute_host_identity_bindings`; it receives no Provider SELECT/UPDATE, no direct trigger-function execution, and no binding UPDATE/DELETE/TRUNCATE. The guard itself reads and locks the Provider row under its restricted owner.
+
+## Durable session epoch and heartbeat receipt boundary
+
+Migration `0023_host_session_fencing.sql` requires two independently provisioned roles before migration:
+
+```sql
+CREATE ROLE ccp_host_session_guard_owner
+    NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE
+    NOREPLICATION NOBYPASSRLS;
+
+CREATE ROLE ccp_host_session_writer
+    LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE
+    NOREPLICATION NOBYPASSRLS;
+```
+
+The migration fails closed if either role has unrelated ownership, memberships, default privileges, direct grants or CREATE authority. The non-login guard owner receives only Provider identity/scope/state SELECT plus UPDATE(provider_id) for the PostgreSQL `FOR SHARE` lock, and HostIdentity binding SELECT plus UPDATE(host_id) for `FOR UPDATE`. It owns the two append-only session tables and fixed-search-path SECURITY DEFINER functions. Any temporary migration-role membership used for ownership transfer is revoked before commit.
+
+The dedicated session writer receives schema USAGE and EXECUTE on `compute_host_session_start` and `compute_host_session_heartbeat` only. It receives no direct Provider, binding, session-table or heartbeat-table privileges. Do not grant this role to a host or tenant principal; it is an internal service identity.
+
+Session start is one database statement:
+1. Lock the Provider row `FOR SHARE` and require exact `REGISTERED` state/scope.
+2. Lock the immutable HostIdentity binding row `FOR UPDATE` and require exact Host/Provider/cluster/Node UID/subject.
+3. Lock the latest durable session epoch, require the caller's expected epoch, and reject replacement while its predecessor remains unexpired.
+4. Generate the opaque session ID in PostgreSQL and record issued/expiry timestamps from `clock_timestamp()` after lock acquisition.
+
+TTL is bounded to 1 second through 24 hours. Epoch 0 is valid only when no session history exists; a new session after expiry advances exactly one epoch. Provider Drain and session start serialize on the Provider row.
+
+Heartbeat receipts use the same Provider → binding → latest-session lock order. The latest epoch, session ID, immutable binding, Provider REGISTERED state, DB-clock expiry, strictly increasing sequence and SHA-256 digest are checked in the same function. An exact sequence/digest replay returns the original receipt timestamp without inserting another row or extending expiry. A stale sequence, conflicting digest, foreign binding, old epoch, expired session or DRAINING Provider is rejected. Session and heartbeat history is append-only; all mutation and TRUNCATE triggers are ENABLE ALWAYS.
+
+These database entrypoints are not host authentication. Before calling them, a future transport must independently validate the machine certificate/SPIFFE identity, revocation and subject-to-binding resolution. No enrollment/heartbeat HTTP route, hardware attestation, physical GPU identity, GPU health or capacity readiness is enabled by this migration.
+
+## Verification
+
+The exact-source PostgreSQL 16 acceptance suite proves first epoch issuance, database-generated ID/time, active predecessor rejection after repository restart, expiry-gated epoch increment, concurrent first-start single-winner CAS, Provider Drain rejection, heartbeat monotonicity, exact replay idempotency, conflict rejection, unchanged session expiry, function-only restricted LOGIN access, immutable history and SECURITY DEFINER/ACL catalog boundaries. CI requires these tests to run without SKIP.
 
 ## Verification
 
