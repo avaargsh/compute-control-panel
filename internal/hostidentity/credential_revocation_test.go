@@ -206,3 +206,78 @@ func TestParseHostCredentialRevocationListsRejectsUnsupportedCRLScopes(t *testin
 		})
 	}
 }
+
+func TestVerifyHostCredentialRequiresCRLForEveryNonRootCertificate(t *testing.T) {
+	f := newHostCredentialRevocationFixture(t)
+	intermediatePublic, intermediateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intermediateTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(10),
+		Subject: pkix.Name{CommonName: "host intermediate CA"},
+		NotBefore: f.now.Add(-time.Hour), NotAfter: f.now.Add(24 * time.Hour),
+		IsCA: true, BasicConstraintsValid: true,
+		KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		SubjectKeyId: []byte{5, 6, 7, 8},
+		AuthorityKeyId: f.issuer.SubjectKeyId,
+	}
+	intermediateDER, err := x509.CreateCertificate(rand.Reader, intermediateTemplate, f.issuer, intermediatePublic, f.key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intermediate, err := x509.ParseCertificate(intermediateDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafPublic, intermediateLeafKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uri, err := url.Parse("spiffe://ccp.example/host/intermediate-machine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(77),
+		NotBefore: f.now.Add(-time.Minute), NotAfter: f.now.Add(time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		URIs: []*url.URL{uri},
+		AuthorityKeyId: intermediate.SubjectKeyId,
+	}
+	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, intermediate, leafPublic, intermediateLeafKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rootCRL := f.crl(t, f.issuer, f.key, f.now.Add(-time.Minute), f.now.Add(time.Hour))
+	intermediateCRL := f.crl(t, intermediate, intermediateKey, f.now.Add(-time.Minute), f.now.Add(time.Hour))
+	revokedLeafCRL := f.crl(t, intermediate, intermediateKey, f.now.Add(-time.Minute), f.now.Add(time.Hour), 77)
+	revokedIntermediateCRL := f.crl(t, f.issuer, f.key, f.now.Add(-time.Minute), f.now.Add(time.Hour), 10)
+
+	for _, tc := range []struct {
+		name string
+		crls [][]byte
+		want bool
+	}{
+		{name: "missing intermediate issuer CRL", crls: [][]byte{rootCRL}, want: false},
+		{name: "complete issuer CRL coverage", crls: [][]byte{rootCRL, intermediateCRL}, want: true},
+		{name: "revoked leaf serial", crls: [][]byte{rootCRL, revokedLeafCRL}, want: false},
+		{name: "revoked intermediate serial", crls: [][]byte{revokedIntermediateCRL, intermediateCRL}, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lists, err := ParseHostCredentialRevocationLists(tc.crls)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = VerifyHostCredential([][]byte{leafDER, intermediateDER}, f.roots, "ccp.example", lists, f.now)
+			if tc.want && err != nil {
+				t.Fatalf("complete verified path CRL coverage rejected: %v", err)
+			}
+			if !tc.want && err == nil {
+				t.Fatal("credential accepted without complete, non-revoking issuer CRL coverage")
+			}
+		})
+	}
+}
