@@ -249,13 +249,16 @@ func nodeCondition(n node) (observation.Condition, string) {
 		return observation.ConditionUnavailable, "NODE_TERMINATING"
 	}
 	ready := ""
+	seenReady := false
 	for _, item := range n.Status.Conditions {
 		if item.Type != "Ready" {
 			continue
 		}
-		if ready != "" && ready != item.Status {
+		// A condition type must be unique, including an earlier empty status.
+		if seenReady {
 			return observation.ConditionUnknown, "READY_CONDITION_CONFLICT"
 		}
+		seenReady = true
 		ready = item.Status
 	}
 	if n.Spec.Unschedulable {
