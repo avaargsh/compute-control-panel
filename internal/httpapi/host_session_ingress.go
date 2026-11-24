@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -10,7 +11,6 @@ import (
 	"math"
 	"mime"
 	"net/http"
-	"reflect"
 	"strings"
 	"time"
 	"unicode"
@@ -32,26 +32,28 @@ type HostSessionIngressRepository interface {
 }
 
 type HostSessionIngressDependencies struct {
-	Authenticator WorkloadAuthenticator
-	Repository    HostSessionIngressRepository
+	HostTrustRoots  *x509.CertPool
+	HostTrustDomain string
+	Repository      HostSessionIngressRepository
 }
 
 type hostSessionIngressHandler struct {
-	auth *SPIFFEWorkloadAuthenticator
-	repo HostSessionIngressRepository
+	roots       *x509.CertPool
+	trustDomain string
+	repo        HostSessionIngressRepository
 }
 
-// NewHostSessionIngressHandler constructs an unmounted candidate only.
-// Deployment requires a dedicated host trust bundle, direct mutual TLS,
-// independently attested machine enrollment and transactional authorization.
+// NewHostSessionIngressHandler constructs a standalone, unmounted host-only
+// handler. The serving listener must separately require and verify mTLS using
+// the same narrowly scoped host CA bundle.
 func NewHostSessionIngressHandler(deps HostSessionIngressDependencies) (http.Handler, error) {
-	auth, ok := deps.Authenticator.(*SPIFFEWorkloadAuthenticator)
-	if !ok || auth == nil || auth.trustDomain == "" ||
-		missingProviderManagementDependency(auth.resolver) ||
-		missingProviderManagementDependency(deps.Repository) {
-		return nil, errors.New("host session ingress requires verified SPIFFE authentication and restricted repository")
+	if deps.HostTrustRoots == nil || strings.TrimSpace(deps.HostTrustDomain) == "" ||
+		len(deps.HostTrustDomain) > 253 || missingProviderManagementDependency(deps.Repository) {
+		return nil, errors.New("host session ingress requires a dedicated host trust bundle, trust domain and repository")
 	}
-	h := &hostSessionIngressHandler{auth: auth, repo: deps.Repository}
+	h := &hostSessionIngressHandler{
+		roots: deps.HostTrustRoots, trustDomain: deps.HostTrustDomain, repo: deps.Repository,
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST "+hostSessionStartPath, h.start)
 	mux.HandleFunc("POST "+hostHeartbeatPath, h.heartbeat)
@@ -78,23 +80,35 @@ func validHostIngressText(value string, limit int) bool {
 		strings.TrimSpace(value) == value && strings.IndexFunc(value, unicode.IsControl) < 0
 }
 
-func readHostIngressBody(w http.ResponseWriter, r *http.Request, dst any) bool {
-	values := r.Header.Values("Content-Type")
-	if len(values) > 1 {
-		writeWorkloadAPIError(w, http.StatusUnsupportedMediaType, "INVALID_CONTENT_TYPE", "Expected application/json")
+func exactHostIngressJSONFields(raw []byte, expected ...string) bool {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil || len(fields) != len(expected) {
 		return false
 	}
-	if len(values) == 1 {
-		media, _, err := mime.ParseMediaType(values[0])
-		if err != nil || media != "application/json" {
-			writeWorkloadAPIError(w, http.StatusUnsupportedMediaType, "INVALID_CONTENT_TYPE", "Expected application/json")
+	for _, key := range expected {
+		if _, ok := fields[key]; !ok {
 			return false
 		}
 	}
+	return true
+}
+
+func readHostIngressBody(w http.ResponseWriter, r *http.Request, dst any, fields ...string) bool {
+	values := r.Header.Values("Content-Type")
+	if len(values) != 1 {
+		writeWorkloadAPIError(w, http.StatusUnsupportedMediaType, "INVALID_CONTENT_TYPE", "Exactly one application/json Content-Type is required")
+		return false
+	}
+	media, _, err := mime.ParseMediaType(values[0])
+	if err != nil || media != "application/json" {
+		writeWorkloadAPIError(w, http.StatusUnsupportedMediaType, "INVALID_CONTENT_TYPE", "Expected application/json")
+		return false
+	}
 	if r.Body != nil {
 		raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxHostSessionBody))
-		if err == nil && utf8.Valid(raw) && validateWorkloadJSONTokens(raw) == nil &&
-			exactDRAJSONFields(raw, reflect.TypeOf(dst).Elem()) &&
+		if err == nil && len(raw) > 0 && utf8.Valid(raw) &&
+			validateWorkloadJSONTokens(raw) == nil &&
+			exactHostIngressJSONFields(raw, fields...) &&
 			json.Unmarshal(raw, dst) == nil {
 			return true
 		}
@@ -103,21 +117,41 @@ func readHostIngressBody(w http.ResponseWriter, r *http.Request, dst any) bool {
 	return false
 }
 
-func (h *hostSessionIngressHandler) principal(w http.ResponseWriter, r *http.Request) (WorkloadPrincipal, bool) {
-	if !verifiedDRAClientTLS(r) {
-		writeWorkloadAPIError(w, http.StatusUnauthorized, "HOST_UNAUTHENTICATED", "Verified client TLS required")
-		return WorkloadPrincipal{}, false
+func verifiedHostClientTLS(r *http.Request) bool {
+	if r == nil || r.TLS == nil || len(r.TLS.PeerCertificates) == 0 || len(r.TLS.VerifiedChains) == 0 {
+		return false
 	}
-	p, err := h.auth.Authenticate(r.Context(), r)
-	if err != nil || !validWorkloadPrincipal(p) {
-		writeWorkloadAPIError(w, http.StatusUnauthorized, "HOST_UNAUTHENTICATED", "Verified service identity required")
-		return WorkloadPrincipal{}, false
+	leaf := r.TLS.PeerCertificates[0]
+	if leaf == nil || len(leaf.Raw) == 0 {
+		return false
 	}
-	if p.Service != "compute-host-agent" {
-		writeWorkloadAPIError(w, http.StatusForbidden, "HOST_DENIED", "Host agent service required")
-		return WorkloadPrincipal{}, false
+	for _, chain := range r.TLS.VerifiedChains {
+		if len(chain) > 0 && chain[0] != nil && bytes.Equal(chain[0].Raw, leaf.Raw) {
+			return true
+		}
 	}
-	return p, true
+	return false
+}
+
+func (h *hostSessionIngressHandler) subject(w http.ResponseWriter, r *http.Request) (string, bool) {
+	if !verifiedHostClientTLS(r) {
+		writeWorkloadAPIError(w, http.StatusUnauthorized, "HOST_UNAUTHENTICATED", "Verified host client TLS required")
+		return "", false
+	}
+	chain := make([][]byte, 0, len(r.TLS.PeerCertificates))
+	for _, cert := range r.TLS.PeerCertificates {
+		if cert == nil || len(cert.Raw) == 0 {
+			writeWorkloadAPIError(w, http.StatusUnauthorized, "HOST_UNAUTHENTICATED", "Invalid host certificate chain")
+			return "", false
+		}
+		chain = append(chain, cert.Raw)
+	}
+	subject, err := hostidentity.VerifyHostCredential(chain, h.roots, h.trustDomain, time.Now())
+	if err != nil {
+		writeWorkloadAPIError(w, http.StatusUnauthorized, "HOST_UNAUTHENTICATED", "Dedicated host credential required")
+		return "", false
+	}
+	return subject, true
 }
 
 func hostIngressError(w http.ResponseWriter, err error) {
@@ -134,34 +168,33 @@ func hostIngressError(w http.ResponseWriter, err error) {
 }
 
 func (h *hostSessionIngressHandler) start(w http.ResponseWriter, r *http.Request) {
-	p, ok := h.principal(w, r)
+	subject, ok := h.subject(w, r)
 	if !ok {
 		return
 	}
 	var body hostSessionStartBody
-	if !readHostIngressBody(w, r, &body) {
+	if !readHostIngressBody(w, r, &body, "expected_epoch", "ttl_seconds") {
 		return
 	}
-	keys := r.Header.Values("Idempotency-Key")
-	if len(keys) != 1 || !validHostIngressText(keys[0], 256) ||
-		body.ExpectedEpoch < 0 || body.ExpectedEpoch == math.MaxInt64 ||
+	requestID, err := readIdempotencyKey(r)
+	if err != nil || body.ExpectedEpoch < 0 || body.ExpectedEpoch == math.MaxInt64 ||
 		body.TTLSeconds < 1 || body.TTLSeconds > 86400 {
 		hostIngressError(w, postgres.ErrHostSessionInvalid)
 		return
 	}
 	fence, err := h.repo.StartAuthenticatedHostSession(r.Context(), postgres.AuthenticatedHostSessionStartRequest{
-		TenantID: p.TenantID, Service: p.Service, Subject: p.Subject,
-		ExpectedEpoch: body.ExpectedEpoch, RequestID: keys[0], TTL: time.Duration(body.TTLSeconds) * time.Second,
+		Subject: subject, ExpectedEpoch: body.ExpectedEpoch,
+		RequestID: requestID, TTL: time.Duration(body.TTLSeconds) * time.Second,
 	})
 	if err != nil {
 		hostIngressError(w, err)
 		return
 	}
-	if fence.Binding.Subject != p.Subject || fence.Epoch != body.ExpectedEpoch+1 ||
+	if fence.Binding.Subject != subject || fence.Epoch != body.ExpectedEpoch+1 ||
 		!strings.HasPrefix(fence.SessionID, "hs_") || !validHostIngressText(fence.SessionID, 256) ||
 		fence.IssuedAt.IsZero() || !fence.IssuedAt.Before(fence.ExpiresAt) ||
 		fence.ExpiresAt.Sub(fence.IssuedAt) > time.Duration(body.TTLSeconds)*time.Second {
-		hostIngressError(w, errors.New("invalid session receipt"))
+		hostIngressError(w, postgres.ErrHostSessionRejected)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -175,12 +208,12 @@ func (h *hostSessionIngressHandler) start(w http.ResponseWriter, r *http.Request
 }
 
 func (h *hostSessionIngressHandler) heartbeat(w http.ResponseWriter, r *http.Request) {
-	p, ok := h.principal(w, r)
+	subject, ok := h.subject(w, r)
 	if !ok {
 		return
 	}
 	var body hostHeartbeatBody
-	if !readHostIngressBody(w, r, &body) {
+	if !readHostIngressBody(w, r, &body, "epoch", "session_id", "sequence", "agent_version") {
 		return
 	}
 	if body.Epoch <= 0 || body.Sequence <= 0 ||
@@ -196,9 +229,8 @@ func (h *hostSessionIngressHandler) heartbeat(w http.ResponseWriter, r *http.Req
 	}
 	sum := sha256.Sum256(append([]byte("ccp:host-heartbeat:v1\x00"), canonical...))
 	disposition, recordedAt, err := h.repo.RecordAuthenticatedHostHeartbeat(r.Context(), postgres.AuthenticatedHostHeartbeatRequest{
-		TenantID: p.TenantID, Service: p.Service, Subject: p.Subject,
-		Epoch: body.Epoch, SessionID: body.SessionID, Sequence: body.Sequence,
-		Digest: "sha256:" + hex.EncodeToString(sum[:]),
+		Subject: subject, Epoch: body.Epoch, SessionID: body.SessionID,
+		Sequence: body.Sequence, Digest: "sha256:" + hex.EncodeToString(sum[:]),
 	})
 	if err != nil {
 		hostIngressError(w, err)
@@ -208,11 +240,11 @@ func (h *hostSessionIngressHandler) heartbeat(w http.ResponseWriter, r *http.Req
 	if disposition == hostidentity.Replay {
 		status = http.StatusOK
 	} else if disposition != hostidentity.Accept {
-		hostIngressError(w, errors.New("invalid heartbeat receipt"))
+		hostIngressError(w, postgres.ErrHostSessionRejected)
 		return
 	}
 	if recordedAt.IsZero() {
-		hostIngressError(w, errors.New("missing heartbeat receipt time"))
+		hostIngressError(w, postgres.ErrHostSessionRejected)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
