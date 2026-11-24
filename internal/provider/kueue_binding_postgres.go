@@ -135,7 +135,9 @@ func (s *PostgresKueueJobBindingStore) GetCreatePinByJob(namespace, tenantID, jo
 // PutCreatePin stores a pin. An identical pin is idempotent. A different UID,
 // name, or request fingerprint for the same namespace and operation conflicts.
 func (s *PostgresKueueJobBindingStore) PutCreatePin(namespace string, req Request, name, uid string) error {
-	if err := s.usable(); err != nil || !validKubeName(namespace) || !validKubeName(name) || !acceptableJobUID(uid) {
+	if err := s.usable(); err != nil || !validKubeName(namespace) || !validKubeName(name) || !acceptableJobUID(uid) ||
+		req.Validate() != nil || req.Kind != operation.Delete ||
+		req.TargetResourceID != namespace+"/"+name || req.TargetResourceUID != uid {
 		return ErrInvalidKueueObservation
 	}
 	generation, err := kueueBindingGeneration(req.DesiredGeneration)
@@ -326,13 +328,21 @@ func (s *PostgresKueueJobBindingStore) PutPreDeleteDRASnapshot(
 	if hasTombstone {
 		return KueuePreDeleteDRASnapshot{}, ErrOperationConflict
 	}
+	createGeneration, err := kueueBindingGeneration(canonical.CreateGeneration)
+	if err != nil {
+		return KueuePreDeleteDRASnapshot{}, err
+	}
+	deleteGeneration, err := kueueBindingGeneration(canonical.DeleteGeneration)
+	if err != nil {
+		return KueuePreDeleteDRASnapshot{}, err
+	}
 	devices, err := json.Marshal(canonical.Devices)
 	if err != nil {
 		return KueuePreDeleteDRASnapshot{}, ErrInvalidPreDeleteDRASnapshot
 	}
 	_, err = tx.ExecContext(ctx, insertKueuePreDeleteSnapshotSQL,
 		canonical.Namespace, canonical.TenantID, canonical.DeleteOperationID, canonical.CreateOperationID,
-		canonical.WorkloadID, canonical.ProviderID, int64(canonical.CreateGeneration), int64(canonical.DeleteGeneration),
+		canonical.WorkloadID, canonical.ProviderID, createGeneration, deleteGeneration,
 		canonical.Job.Name, canonical.Job.UID, canonical.Job.ResourceVersion,
 		canonical.KueueWorkload.Name, canonical.KueueWorkload.UID, canonical.KueueWorkload.ResourceVersion,
 		canonical.Pod.Name, canonical.Pod.UID, canonical.Pod.ResourceVersion, canonical.NodeName,
@@ -341,6 +351,9 @@ func (s *PostgresKueueJobBindingStore) PutPreDeleteDRASnapshot(
 		canonical.ObservedAt, canonical.Digest,
 	)
 	if err != nil {
+		if postgresUniqueViolation(err) {
+			return KueuePreDeleteDRASnapshot{}, ErrOperationConflict
+		}
 		return KueuePreDeleteDRASnapshot{}, err
 	}
 	if err := tx.Commit(); err != nil {
