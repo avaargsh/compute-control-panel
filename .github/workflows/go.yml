@@ -92,6 +92,7 @@ jobs:
           psql --host=127.0.0.1 --username=postgres --dbname=postgres
           --set=ON_ERROR_STOP=1
           --command="CREATE ROLE ccp_provider_audit_owner NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
+          --command="CREATE ROLE ccp_host_identity_guard_owner NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
           --command="CREATE ROLE ccp_kueue_job_binding LOGIN PASSWORD 'kueue-binding-ci-only' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
           --command="CREATE ROLE ccp_dra_receipt_ingest LOGIN PASSWORD 'dra-ingest-ci-only' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
       - name: Apply PostgreSQL migrations (checksummed runner, run twice for idempotency)
@@ -186,6 +187,7 @@ jobs:
           psql --host=127.0.0.1 --username=postgres --dbname=postgres
           --set=ON_ERROR_STOP=1
           --command="CREATE ROLE ccp_provider_audit_owner NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
+          --command="CREATE ROLE ccp_host_identity_guard_owner NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
           --command="CREATE ROLE ccp_kueue_job_binding LOGIN PASSWORD 'kueue-binding-ci-only' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
           --command="CREATE ROLE ccp_dra_receipt_ingest LOGIN PASSWORD 'dra-ingest-ci-only' NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
       - name: Apply PostgreSQL migrations (checksummed runner, run twice for idempotency)
@@ -198,6 +200,21 @@ jobs:
         env:
           PGPASSWORD: compute-ci
         run: psql --host=127.0.0.1 --username=postgres --dbname=postgres --set=ON_ERROR_STOP=1 --file=migrations/tests/0001_compute_core_constraints.sql
+      - name: Require restricted HostIdentity enrollment PostgreSQL contract (no skip)
+        shell: bash
+        env:
+          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
+        run: |
+          set -euo pipefail
+          go test -count=1 -v -run '^(TestHostIdentityBindingRestrictedLoginDoesNotNeedProviderPrivileges|TestHostIdentityEnrollmentWaitsForProviderDrain|TestHostIdentityGuardOwnerCatalogBoundary)$' ./internal/store/postgres | tee host-identity-pg.log
+          grep -F -- '--- PASS: TestHostIdentityBindingRestrictedLoginDoesNotNeedProviderPrivileges' host-identity-pg.log
+          grep -F -- '--- PASS: TestHostIdentityEnrollmentWaitsForProviderDrain' host-identity-pg.log
+          grep -F -- '--- PASS: TestHostIdentityGuardOwnerCatalogBoundary' host-identity-pg.log
+          if grep -F -- '--- SKIP: TestHostIdentity' host-identity-pg.log; then
+            echo 'restricted HostIdentity PostgreSQL acceptance was skipped' >&2
+            exit 1
+          fi
+          printf 'verified_host_identity_source_sha=%s\n' "$(git rev-parse --verify HEAD)"
       - name: Require real PostgreSQL release Generation/UID fence test (no skip)
         shell: bash
         env:
