@@ -460,10 +460,56 @@ BEGIN
         RAISE EXCEPTION 'HostSession writer must execute authenticated wrappers only';
     END IF;
 
-    IF pg_catalog.has_table_privilege(guard_owner_oid,grants_oid,'UPDATE')
+    IF pg_catalog.has_table_privilege(guard_owner_oid,grants_oid,'INSERT')
+       OR pg_catalog.has_table_privilege(guard_owner_oid,grants_oid,'UPDATE')
        OR pg_catalog.has_table_privilege(guard_owner_oid,grants_oid,'DELETE')
-       OR pg_catalog.has_table_privilege(guard_owner_oid,grants_oid,'TRUNCATE') THEN
-        RAISE EXCEPTION 'HostSession guard owner received grant mutation authority';
+       OR pg_catalog.has_table_privilege(guard_owner_oid,grants_oid,'TRUNCATE')
+       OR NOT pg_catalog.has_column_privilege(guard_owner_oid,grants_oid,'subject','SELECT')
+       OR NOT pg_catalog.has_column_privilege(guard_owner_oid,grants_oid,'tenant_id','SELECT')
+       OR NOT pg_catalog.has_column_privilege(guard_owner_oid,grants_oid,'service_name','SELECT')
+       OR NOT pg_catalog.has_column_privilege(guard_owner_oid,grants_oid,'host_id','SELECT')
+       OR NOT pg_catalog.has_column_privilege(guard_owner_oid,grants_oid,'provider_id','SELECT')
+       OR NOT pg_catalog.has_column_privilege(guard_owner_oid,grants_oid,'cluster_scope','SELECT')
+       OR NOT pg_catalog.has_column_privilege(guard_owner_oid,grants_oid,'node_uid','SELECT')
+       OR NOT pg_catalog.has_column_privilege(guard_owner_oid,grants_oid,'not_before','SELECT')
+       OR NOT pg_catalog.has_column_privilege(guard_owner_oid,grants_oid,'expires_at','SELECT')
+       OR NOT pg_catalog.has_column_privilege(guard_owner_oid,grants_oid,'revoked_at','SELECT')
+       OR NOT pg_catalog.has_table_privilege(guard_owner_oid,audit_oid,'INSERT')
+       OR NOT pg_catalog.has_sequence_privilege(guard_owner_oid,
+          'public.compute_host_identity_subject_grant_audit_event_id_seq'::pg_catalog.regclass,'USAGE')
+       OR pg_catalog.has_sequence_privilege(writer_oid,
+          'public.compute_host_identity_subject_grant_audit_event_id_seq'::pg_catalog.regclass,'USAGE') THEN
+        RAISE EXCEPTION 'HostSession guard owner or writer has unexpected grant/audit privileges';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_proc p
+        CROSS JOIN LATERAL pg_catalog.aclexplode(
+            COALESCE(p.proacl,pg_catalog.acldefault('f',p.proowner))
+        ) a
+        WHERE p.oid IN (
+            'public.compute_host_identity_subject_grant_guard()'::pg_catalog.regprocedure,
+            'public.compute_host_identity_subject_grant_audit_append()'::pg_catalog.regprocedure,
+            'public.compute_host_identity_subject_grant_audit_immutable()'::pg_catalog.regprocedure,
+            'public.compute_host_session_start(text,text,text,text,text,bigint,text,integer)'::pg_catalog.regprocedure,
+            'public.compute_host_session_heartbeat(text,text,text,text,text,bigint,text,bigint,text)'::pg_catalog.regprocedure,
+            'public.compute_host_session_start_authenticated(text,bigint,text,integer)'::pg_catalog.regprocedure,
+            'public.compute_host_session_heartbeat_authenticated(text,bigint,text,bigint,text)'::pg_catalog.regprocedure
+        )
+        AND (
+            a.grantee=0
+            OR (p.oid IN (
+                'public.compute_host_session_start_authenticated(text,bigint,text,integer)'::pg_catalog.regprocedure,
+                'public.compute_host_session_heartbeat_authenticated(text,bigint,text,bigint,text)'::pg_catalog.regprocedure
+            ) AND a.grantee NOT IN (p.proowner,writer_oid))
+            OR (p.oid NOT IN (
+                'public.compute_host_session_start_authenticated(text,bigint,text,integer)'::pg_catalog.regprocedure,
+                'public.compute_host_session_heartbeat_authenticated(text,bigint,text,bigint,text)'::pg_catalog.regprocedure
+            ) AND a.grantee<>p.proowner)
+        )
+    ) THEN
+        RAISE EXCEPTION 'HostSession functions have unexpected direct/PUBLIC EXECUTE grants';
     END IF;
 END;
 $host_session_subject_grant_acl_attestation$;
