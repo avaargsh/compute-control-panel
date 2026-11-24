@@ -27,12 +27,13 @@ func hostSessionFixture(t *testing.T, db *sql.DB) (*Repository, hostidentity.Bin
 	if _, created, err := repo.RegisterProvider(ctx, provider); err != nil || !created {
 		t.Fatalf("register Provider: created=%t err=%v", created, err)
 	}
+	hostID := "host-" + randomSuffix(t)
 	binding := hostidentity.Binding{
-		HostID:       "host-" + randomSuffix(t),
+		HostID:       hostID,
 		ProviderID:   provider.ProviderID,
 		ClusterScope: provider.ClusterScope,
 		NodeUID:      "node-uid-" + randomSuffix(t),
-		Subject:      "spiffe://ccp.example/host/" + randomSuffix(t),
+		Subject:      "spiffe://ccp.example/host/" + hostID,
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO public.compute_host_identity_bindings
 		(host_id, provider_id, cluster_scope, node_uid, subject)
@@ -473,21 +474,21 @@ func TestHostSessionRestrictedWriterAndCatalogBoundary(t *testing.T) {
 		t.Fatalf("restricted writer raw start should be denied: %v", err)
 	}
 	writerFirst, err := writerRepo.StartAuthenticatedHostSession(ctx, AuthenticatedHostSessionStartRequest{
-		Subject: binding.Subject,
+		Subject:       binding.Subject,
 		ExpectedEpoch: 0, RequestID: "start-restricted-" + binding.HostID, TTL: 30 * time.Second,
 	})
 	if err != nil || writerFirst.Binding != binding || writerFirst.Epoch != 1 {
 		t.Fatalf("restricted authenticated start: fence=%+v err=%v", writerFirst, err)
 	}
 	if _, _, err := writerRepo.RecordHostHeartbeat(ctx, hostidentity.Heartbeat{
-		Binding: binding, Epoch: writerFirst.Epoch, SessionID: writerFirst.SessionID,
+		Binding: binding, Epoch:   writerFirst.Epoch, SessionID: writerFirst.SessionID,
 		Sequence: 1, Digest: "sha256:" + strings.Repeat("e", 64),
 	}); hostSessionSQLState(err) != "42501" {
 		t.Fatalf("restricted writer raw heartbeat should be denied: %v", err)
 	}
 	heartbeat := AuthenticatedHostHeartbeatRequest{
-		Subject: binding.Subject,
-		Epoch: writerFirst.Epoch, SessionID: writerFirst.SessionID,
+		Subject:       binding.Subject,
+		Epoch:         writerFirst.Epoch, SessionID: writerFirst.SessionID,
 		Sequence: 1, Digest: "sha256:" + strings.Repeat("e", 64),
 	}
 	disposition, recordedAt, err := writerRepo.RecordAuthenticatedHostHeartbeat(ctx, heartbeat)
