@@ -48,10 +48,11 @@ func TestNodeLeaseSourceRejectsClockRollbackAndExpiredCollection(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		end   time.Time
-		lease string
+		lease  string
+		maxAge time.Duration
 	}{
-		{"clock rollback", start.Add(-time.Second), nodeLeaseSourceFixture},
-		{"collection exceeds TTL", start.Add(time.Minute), strings.Replace(nodeLeaseSourceFixture, "2026-11-21T07:59:55Z", "2026-11-21T08:00:59Z", 1)},
+		{"clock rollback", start.Add(-time.Second), nodeLeaseSourceFixture, 20 * time.Second},
+		{"collection exceeds TTL", start.Add(time.Minute), strings.Replace(nodeLeaseSourceFixture, `"leaseDurationSeconds":40`, `"leaseDurationSeconds":180`, 1), 2 * time.Minute},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reader, _ := fixtureReader(t, func(w http.ResponseWriter, r *http.Request) {
@@ -69,7 +70,7 @@ func TestNodeLeaseSourceRejectsClockRollbackAndExpiredCollection(t *testing.T) {
 				}
 				return tc.end
 			}
-			got, _ := reader.observeNodeLease(context.Background(), "tenant-a", []string{"project-a"}, "worker-a", "node-uid-a", 20*time.Second)
+			got, _ := reader.observeNodeLease(context.Background(), "tenant-a", []string{"project-a"}, "worker-a", "node-uid-a", tc.maxAge)
 			if calls < 2 || got.Assessment.State != nodeLeaseUnknown || !got.Assessment.ExpiresAt.IsZero() {
 				t.Fatalf("invalid collection clock accepted: calls=%d got=%+v", calls, got)
 			}
