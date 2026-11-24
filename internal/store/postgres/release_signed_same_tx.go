@@ -8,34 +8,38 @@ import (
 	"github.com/avaargsh/compute-control-panel/internal/provider"
 )
 
-// ValidateRecordedReleaseSameTx is a read-only NECESSARY evidence preflight.
-// It verifies three independently scoped claims within the *same caller-owned
-// PostgreSQL transaction*:
-//  1. structural source observations and the signed NodeUnprepare assertion
-//     correlate to one historical Allocation, Job/Pod/Claim and device;
-//  2. the current Workload, Allocation and both CREATE/DELETE Operation rows
-//     still match the exact Generation, version, Provider and target UID;
-//  3. the signed custom receipt is in the immutable journal, and its DBA
-//     registered source key is live, correctly scoped and not revoked.
+// ValidateRecordedReleaseSameTx derives the current release fence from
+// authoritative PostgreSQL rows inside the caller-owned transaction. The
+// caller supplies only tenant-scoped lookup identities; resource UID,
+// Provider ID, generations and row versions are never caller assertions.
 //
 // The caller retains ALL database row locks (Workload, Allocation, CREATE,
-// DELETE, source key) until that same transaction ends. Do not perform a
-// protected state transition in another transaction after this check.
+// DELETE, and the registered DRA source key) until that same transaction ends.
+// Do not perform a protected state transition in another transaction after
+// this preflight.
 //
-// This function does NOT authenticate snapshot/driver transport; a registered
-// signer can still assert something untrue about real NodeUnprepareResources.
-// It creates no permit, no RELEASED or cost FINAL writes, and is not a
-// production release decision or physical GPU deallocation proof.
+// A successful return is still evidence-only. This function does NOT
+// authenticate the Kubernetes/Provider collector transport, prove that a
+// driver executed NodeUnprepareResources, prove physical GPU deallocation, or
+// authorize RELEASED/Cost FINAL. No durable state is mutated.
 func ValidateRecordedReleaseSameTx(
-	ctx context.Context, tx *sql.Tx, fence ReleaseCommitFence,
+	ctx context.Context, tx *sql.Tx,
+	tenantID, workloadID, allocationID, createOperationID, deleteOperationID string,
 	verifier *provider.DRAUnprepareVerifier,
 	candidate provider.ReleaseEvidenceCandidate,
-	signed provider.SignedDRAUnprepare, asOf time.Time,
+	signed provider.SignedDRAUnprepare,
+	asOf time.Time,
 ) error {
 	if ctx == nil || tx == nil {
 		return ErrReleaseCommitFence
 	}
 	verified, err := verifier.Correlate(candidate, signed, asOf)
+	if err != nil {
+		return err
+	}
+	fence, err := ResolveReleaseCommitFence(
+		ctx, tx, tenantID, workloadID, allocationID, createOperationID, deleteOperationID,
+	)
 	if err != nil {
 		return err
 	}
