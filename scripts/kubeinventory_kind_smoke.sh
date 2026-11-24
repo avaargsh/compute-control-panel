@@ -82,6 +82,85 @@ subjects:
   namespace: $namespace
 YAML
 
+# Lease GET uses a DIFFERENT minimally privileged SA. The existing Node list
+# identity remains list-only so its acceptance and RBAC contract do not change.
+node_name="$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')"
+[[ -n "$node_name" ]] || { echo "kind Node name missing" >&2; exit 1; }
+node_uid="$(kubectl get node "$node_name" -o jsonpath='{.metadata.uid}')"
+[[ -n "$node_uid" ]] || { echo "kind Node UID missing" >&2; exit 1; }
+kubectl -n "$namespace" create serviceaccount inventory-lease-allowed
+lease_sa="system:serviceaccount:$namespace:inventory-lease-allowed"
+# Check the actual authorizer before adding the named Lease GET grant.
+[[ "$(kubectl auth can-i get leases.coordination.k8s.io/"$node_name" --as="$lease_sa" -n kube-node-lease)" == "no" ]] || { echo "Lease GET was granted before fixture Role" >&2; exit 1; }
+kubectl apply -f - <<YAML
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ccp-inventory-smoke-lease-node-list
+rules:
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ccp-inventory-smoke-lease-node-list
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ccp-inventory-smoke-lease-node-list
+subjects:
+- kind: ServiceAccount
+  name: inventory-lease-allowed
+  namespace: $namespace
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ccp-inventory-smoke-pinned-lease-get
+  namespace: kube-node-lease
+rules:
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  resourceNames: ["$node_name"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ccp-inventory-smoke-pinned-lease-get
+  namespace: kube-node-lease
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ccp-inventory-smoke-pinned-lease-get
+subjects:
+- kind: ServiceAccount
+  name: inventory-lease-allowed
+  namespace: $namespace
+YAML
+
+# The only positive resource grants are Node LIST and one exact Lease GET.
+[[ "$(kubectl auth can-i list nodes --as="$lease_sa")" == "yes" ]] || { echo "Node list grant missing" >&2; exit 1; }
+[[ "$(kubectl auth can-i get leases/"$node_name" --as="$lease_sa" -n kube-node-lease)" == "yes" ]] || { echo "Lease GET grant missing" >&2; exit 1; }
+[[ "$(kubectl auth can-i get nodes/"$node_name" --as="$lease_sa")" == "no" ]] || { echo "Lease SA unexpectedly allowed to GET nodes" >&2; exit 1; }
+[[ "$(kubectl auth can-i list leases --as="$lease_sa" -n kube-node-lease)" == "no" ]] || { echo "Lease SA unexpectedly allowed to list leases" >&2; exit 1; }
+[[ "$(kubectl auth can-i get leases.coordination.k8s.io/"$node_name" --as="$lease_sa" -n default)" == "no" ]] || { echo "Lease GET escaped namespace fence" >&2; exit 1; }
+[[ "$(kubectl auth can-i get leases.coordination.k8s.io/"$node_name-not-granted" --as="$lease_sa" -n kube-node-lease)" == "no" ]] || { echo "Lease GET escaped resourceName fence" >&2; exit 1; }
+[[ "$(kubectl auth can-i get leases.coordination.k8s.io/"$node_name" --as="system:serviceaccount:$namespace:inventory-allowed" -n kube-node-lease)" == "no" ]] || { echo "list-only identity gained Lease GET" >&2; exit 1; }
+[[ "$(kubectl auth can-i get leases.coordination.k8s.io/"$node_name" --as="system:serviceaccount:$namespace:inventory-denied" -n kube-node-lease)" == "no" ]] || { echo "denied identity gained Lease GET" >&2; exit 1; }
+for verb in watch create update patch delete; do
+  [[ "$(kubectl auth can-i "$verb" nodes --as="$lease_sa")" == "no" ]] || { echo "Lease SA has unexpected Node privilege: $verb" >&2; exit 1; }
+  [[ "$(kubectl auth can-i "$verb" leases.coordination.k8s.io --as="$lease_sa" -n kube-node-lease)" == "no" ]] || { echo "Lease SA has unexpected broad Lease privilege: $verb" >&2; exit 1; }
+done
+# Broad permission denial alone does not exclude a resourceName-restricted
+# mutation grant. Explicitly test the exact observed object as well.
+for verb in watch update patch delete; do
+  [[ "$(kubectl auth can-i "$verb" nodes/"$node_name" --as="$lease_sa")" == "no" ]] || { echo "Lease SA has named Node privilege: $verb" >&2; exit 1; }
+  [[ "$(kubectl auth can-i "$verb" leases.coordination.k8s.io/"$node_name" --as="$lease_sa" -n kube-node-lease)" == "no" ]] || { echo "Lease SA has named Lease privilege: $verb" >&2; exit 1; }
+done
+
 allow="system:serviceaccount:$namespace:inventory-allowed"
 deny="system:serviceaccount:$namespace:inventory-denied"
 
@@ -107,6 +186,7 @@ done
 umask 077
 kubectl -n "$namespace" create token inventory-allowed --duration=10m > "$dir/allow.token"
 kubectl -n "$namespace" create token inventory-denied --duration=10m > "$dir/deny.token"
+kubectl -n "$namespace" create token inventory-lease-allowed --duration=10m > "$dir/lease-allow.token"
 kubectl config view --raw --minify -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 --decode > "$dir/ca.pem"
 server="$(kubectl config view --raw --minify -o jsonpath='{.clusters[0].cluster.server}')"
 [[ "$server" == https://* && -s "$dir/ca.pem" && -s "$dir/allow.token" && -s "$dir/deny.token" ]] || {
@@ -118,8 +198,11 @@ CCP_KIND_API_SERVER="$server" \
 CCP_KIND_CA_FILE="$dir/ca.pem" \
 CCP_KIND_ALLOWED_TOKEN_FILE="$dir/allow.token" \
 CCP_KIND_DENIED_TOKEN_FILE="$dir/deny.token" \
+CCP_KIND_LEASE_TOKEN_FILE="$dir/lease-allow.token" \
+CCP_KIND_LEASE_NODE="$node_name" \
+CCP_KIND_LEASE_NODE_UID="$node_uid" \
 GOTOOLCHAIN=local \
-  go test -count=1 -timeout=3m -run '^TestKindInventoryLeastPrivilege$' -v ./internal/kubeinventory
+  go test -count=1 -timeout=3m -run '^TestKind(InventoryLeastPrivilege|NodeLeaseUIDPinnedRead)$' -v ./internal/kubeinventory
 
-echo "L2 Kubernetes node inventory read and denial accepted for $source_commit"
+echo "L2 Kubernetes Node list and UID-bound Lease GET, scoped RBAC accepted for $source_commit"
 echo "No GPU device plugin, device allocation or L3 hardware evidence was tested"

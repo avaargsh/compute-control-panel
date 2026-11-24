@@ -49,7 +49,7 @@ func TestObserveNodeLeaseReadsExactKubernetesSourceAndFencesNode(t *testing.T) {
 		got.NodeUID != "node-uid-a" || got.NodeResourceVersion != "700" ||
 		got.LeaseUID != "lease-uid-a" || got.LeaseResourceVersion != "900" ||
 		!got.Assessment.ExpiresAt.Equal(time.Date(2026, 11, 21, 8, 0, 15, 0, time.UTC)) ||
-		nodeReads != 2 || leaseReads != 1 || writes != 0 {
+		nodeReads != 2 || leaseReads != 2 || writes != 0 {
 		t.Fatalf("no exact-source heartbeat: %+v err=%v node/lease/write=%d/%d/%d", got, err, nodeReads, leaseReads, writes)
 	}
 }
