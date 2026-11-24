@@ -124,35 +124,57 @@ func (j *DRAUnprepareReceiptJournal) ResolveRegisteredDRAUnprepareVerifier(
 	var providerID string
 	var publicKey []byte
 	var maximumAgeSeconds, futureSkewSeconds int64
-	var databaseNow time.Time
 	err = tx.QueryRowContext(ctx, `
-		WITH db_clock AS MATERIALIZED (
-			SELECT pg_catalog.clock_timestamp() AS now
-		)
 		SELECT k.provider_id, k.public_key, k.maximum_age_seconds,
-		       k.future_skew_seconds, db_clock.now
+		       k.future_skew_seconds
 		FROM public.dra_unprepare_source_keys k
-		CROSS JOIN db_clock
 		WHERE k.cluster_id=$1 AND k.source_id=$2 AND k.key_id=$3
 		  AND k.tenant_id=$4 AND k.driver=$5
 		  AND k.valid_from <= $6 AND k.valid_until > $6
-		  AND k.valid_from <= db_clock.now AND k.valid_until > db_clock.now
-		  AND NOT EXISTS (
-		    SELECT 1 FROM public.dra_unprepare_source_revocations r
-		    WHERE r.cluster_id=k.cluster_id AND r.source_id=k.source_id AND r.key_id=k.key_id
-		  )
 		FOR UPDATE OF k
 	`, event.ClusterID, event.SourceID, event.KeyID, tenantID,
 		event.Driver, event.CompletedAt,
-	).Scan(&providerID, &publicKey, &maximumAgeSeconds, &futureSkewSeconds, &databaseNow)
+	).Scan(&providerID, &publicKey, &maximumAgeSeconds, &futureSkewSeconds)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, time.Time{}, ErrDRAReceiptSourceUntrusted
 	}
 	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("%w: resolve DBA-registered DRA signer: %v", ErrDRAReceiptJournalUnavailable, err)
+		return nil, time.Time{}, fmt.Errorf("%w: lock DBA-registered DRA signer: %v", ErrDRAReceiptJournalUnavailable, err)
 	}
-	if !validDRAIdentity(providerID) || len(publicKey) != ed25519.PublicKeySize || databaseNow.IsZero() {
+	if !validDRAIdentity(providerID) || len(publicKey) != ed25519.PublicKeySize {
 		return nil, time.Time{}, ErrDRAReceiptSourceUntrusted
+	}
+
+	// Re-read revocation and validity only AFTER FOR UPDATE has acquired the
+	// immutable source row. If a concurrent DBA revocation inserted first,
+	// its FK KEY SHARE lock makes the lock query wait; a fresh statement
+	// snapshot here must observe that committed revocation. If this lookup
+	// acquired FOR UPDATE first, the revocation INSERT remains blocked until
+	// this transaction commits. This closes the READ COMMITTED stale-snapshot
+	// gap that a single SELECT ... FOR UPDATE ... NOT EXISTS cannot close.
+	var databaseNow time.Time
+	var currentlyValid, revoked bool
+	err = tx.QueryRowContext(ctx, `
+		WITH db_clock AS MATERIALIZED (
+			SELECT pg_catalog.clock_timestamp() AS now
+		)
+		SELECT db_clock.now,
+		       k.valid_from <= db_clock.now AND k.valid_until > db_clock.now,
+		       EXISTS (
+		         SELECT 1 FROM public.dra_unprepare_source_revocations r
+		         WHERE r.cluster_id=k.cluster_id AND r.source_id=k.source_id AND r.key_id=k.key_id
+		       )
+		FROM public.dra_unprepare_source_keys k
+		CROSS JOIN db_clock
+		WHERE k.cluster_id=$1 AND k.source_id=$2 AND k.key_id=$3
+		  AND k.tenant_id=$4 AND k.driver=$5
+	`, event.ClusterID, event.SourceID, event.KeyID, tenantID, event.Driver,
+	).Scan(&databaseNow, &currentlyValid, &revoked)
+	if errors.Is(err, sql.ErrNoRows) || !currentlyValid || revoked || databaseNow.IsZero() {
+		return nil, time.Time{}, ErrDRAReceiptSourceUntrusted
+	}
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("%w: recheck DBA DRA signer validity and revocation: %v", ErrDRAReceiptJournalUnavailable, err)
 	}
 	verifier, err := NewDRAUnprepareVerifier(DRAUnprepareAuthority{
 		ClusterID: event.ClusterID, SourceID: event.SourceID, KeyID: event.KeyID,
