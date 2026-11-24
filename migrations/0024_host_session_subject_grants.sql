@@ -586,6 +586,7 @@ BEGIN
                 'public.compute_host_session_heartbeat_authenticated(text,bigint,text,bigint,text)'::pg_catalog.regprocedure
             ) AND a.grantee NOT IN (p.proowner,writer_oid))
             OR (p.oid NOT IN (
+                'public.compute_host_identity_subject_resolve(text)'::pg_catalog.regprocedure,
                 'public.compute_host_session_start_authenticated(text,bigint,text,integer)'::pg_catalog.regprocedure,
                 'public.compute_host_session_heartbeat_authenticated(text,bigint,text,bigint,text)'::pg_catalog.regprocedure
             ) AND a.grantee<>p.proowner)
