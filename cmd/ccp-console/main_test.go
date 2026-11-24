@@ -87,13 +87,13 @@ func TestLiveConsoleRequiresSessionAndRealSource(t *testing.T) {
 	}
 	cookie := login.Result().Cookies()[0]
 	if w := request(http.MethodGet, "/api/v1/observations", "", cookie); w.Code != http.StatusOK ||
-		!strings.Contains(w.Body.String(), "node-live") || !strings.Contains(w.Body.String(), "LIVE") ||
+		!strings.Contains(w.Body.String(), "node-live") || !strings.Contains(w.Body.String(), `"data_mode":"live"`) ||
 		w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("live read failed: status=%d body=%s", w.Code, w.Body.String())
 	}
 	denied.Store(true)
 	if w := request(http.MethodGet, "/api/v1/observations", "", cookie); w.Code != http.StatusBadGateway ||
-		strings.Contains(w.Body.String(), "node-live") || strings.Contains(w.Body.String(), "DEMO") {
+		strings.Contains(w.Body.String(), "node-live") || strings.Contains(w.Body.String(), `"data_mode":"demo"`) {
 		t.Fatalf("source denial leaked data or fell back to demo: status=%d body=%s", w.Code, w.Body.String())
 	}
 	cfg.Inventory.ProjectID = "other-project"
