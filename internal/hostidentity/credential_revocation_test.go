@@ -236,6 +236,7 @@ func TestHostCredentialRevocationListStoreKeepsLastGoodSnapshotOnRejectedUpdate(
 	f := newHostCredentialRevocationFixture(t)
 	initial := f.crlNumber(t, f.issuer, f.key, 2, f.now.Add(-time.Minute), f.now.Add(time.Hour))
 	older := f.crlNumber(t, f.issuer, f.key, 1, f.now.Add(-time.Minute), f.now.Add(time.Hour))
+	regressingThisUpdate := f.crlNumber(t, f.issuer, f.key, 3, f.now.Add(-2*time.Minute), f.now.Add(time.Hour))
 	sameNumberDifferent := f.crlNumber(t, f.issuer, f.key, 2, f.now.Add(-time.Minute), f.now.Add(time.Hour), 99)
 	expired := f.crlNumber(t, f.issuer, f.key, 3, f.now.Add(-time.Hour), f.now)
 	wrongPublic, wrongKey, err := ed25519.GenerateKey(rand.Reader)
@@ -269,6 +270,7 @@ func TestHostCredentialRevocationListStoreKeepsLastGoodSnapshotOnRejectedUpdate(
 	}{
 		{name: "malformed DER", crls: [][]byte{[]byte("not a CRL")}},
 		{name: "older CRL number", crls: [][]byte{older}},
+		{name: "regressing ThisUpdate with higher CRL number", crls: [][]byte{regressingThisUpdate}},
 		{name: "same CRL number with different bytes", crls: [][]byte{sameNumberDifferent}},
 		{name: "expired CRL", crls: [][]byte{expired}},
 		{name: "wrong signing key with same issuer name", crls: [][]byte{wrongSigner}},
