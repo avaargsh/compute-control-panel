@@ -240,6 +240,7 @@ kubectl -n "$ns" get localqueue ccp-smoke -o name
 
 CGO_ENABLED=0 go build -trimpath -o "$dir/kueue-observe" ./cmd/kueue-observe
 CGO_ENABLED=0 go build -trimpath -o "$dir/kueue-provider-smoke" ./cmd/kueue-provider-smoke
+CGO_ENABLED=0 go build -trimpath -o "$dir/pd-jobset-provider-smoke" ./cmd/pd-jobset-provider-smoke
 set +e
 wait "$pg_boot_pid"
 pg_boot_code=$?
@@ -260,6 +261,7 @@ cat > "$dir/Dockerfile" <<'DOCKER'
 FROM scratch
 COPY kueue-observe /kueue-observe
 COPY kueue-provider-smoke /kueue-provider-smoke
+COPY pd-jobset-provider-smoke /pd-jobset-provider-smoke
 USER 65532:65532
 ENTRYPOINT ["/kueue-observe"]
 DOCKER
@@ -1457,6 +1459,8 @@ kubectl wait -n jobset-system deploy/jobset-controller-manager \
   --for=condition=Available --timeout=300s
 bash scripts/pd_jobset_dra_kind_smoke.sh
 bash scripts/pd_jobset_activation_gate_kind_smoke.sh
+# Actual GET/CREATE-only ServiceAccount HTTPS, in-memory pin fixture only.
+bash scripts/pd_jobset_provider_kind_smoke.sh
 
 # Independent upstream Kueue CPU-quota Cohort borrowing/reclaim acceptance.
 # This is not physical GPU release or CCP provider write evidence.
