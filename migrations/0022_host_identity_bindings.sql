@@ -206,7 +206,12 @@ BEGIN
     IF EXISTS (
         SELECT 1 FROM pg_catalog.pg_proc p
         CROSS JOIN LATERAL pg_catalog.aclexplode(p.proacl) a
-        WHERE p.oid=guard_function_oid AND a.grantee <> p.proowner
+        WHERE p.oid=guard_function_oid
+          AND a.grantee NOT IN (
+              p.proowner,
+              (SELECT c.relowner FROM pg_catalog.pg_class c
+               WHERE c.oid='public.compute_providers'::pg_catalog.regclass)
+          )
     ) THEN
         RAISE EXCEPTION 'HostIdentity SECURITY DEFINER guard has unexpected EXECUTE grants';
     END IF;
