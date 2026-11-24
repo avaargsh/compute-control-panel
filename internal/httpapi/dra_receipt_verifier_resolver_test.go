@@ -56,10 +56,7 @@ func TestRegisteredDRAReceiptVerifierResolverUsesAuthenticatedTenantAndDatabaseC
 		verifier: registeredDRAReceiptTestVerifier(t),
 		database: databaseNow,
 	}
-	resolver, err := NewRegisteredDRAReceiptVerifierResolver(source)
-	if err != nil {
-		t.Fatal(err)
-	}
+	resolver := &RegisteredDRAReceiptVerifierResolver{source: source}
 	event := provider.DRAUnprepareEvent{ClusterID: "cluster-a", SourceID: "source-a", KeyID: "key-a"}
 	got, err := resolver.ResolveDRAReceiptVerifier(context.Background(), registeredDRAReceiptTestPrincipal(), event)
 	if err != nil {
@@ -75,10 +72,7 @@ func TestRegisteredDRAReceiptVerifierResolverUsesAuthenticatedTenantAndDatabaseC
 
 func TestRegisteredDRAReceiptVerifierResolverRejectsNonDriverPrincipalBeforeLookup(t *testing.T) {
 	source := &registeredDRAReceiptVerifierSourceStub{verifier: registeredDRAReceiptTestVerifier(t), database: time.Now().UTC()}
-	resolver, err := NewRegisteredDRAReceiptVerifierResolver(source)
-	if err != nil {
-		t.Fatal(err)
-	}
+	resolver := &RegisteredDRAReceiptVerifierResolver{source: source}
 	principal := registeredDRAReceiptTestPrincipal()
 	principal.Service = "agent-runtime"
 	if _, err := resolver.ResolveDRAReceiptVerifier(context.Background(), principal, provider.DRAUnprepareEvent{}); !errors.Is(err, provider.ErrDRAReceiptSourceUntrusted) {
@@ -91,10 +85,7 @@ func TestRegisteredDRAReceiptVerifierResolverRejectsNonDriverPrincipalBeforeLook
 
 func TestRegisteredDRAReceiptVerifierResolverRejectsMissingDatabaseClock(t *testing.T) {
 	source := &registeredDRAReceiptVerifierSourceStub{verifier: registeredDRAReceiptTestVerifier(t)}
-	resolver, err := NewRegisteredDRAReceiptVerifierResolver(source)
-	if err != nil {
-		t.Fatal(err)
-	}
+	resolver := &RegisteredDRAReceiptVerifierResolver{source: source}
 	if _, err := resolver.ResolveDRAReceiptVerifier(context.Background(), registeredDRAReceiptTestPrincipal(), provider.DRAUnprepareEvent{}); !errors.Is(err, provider.ErrDRAReceiptJournalUnavailable) {
 		t.Fatalf("missing registry clock did not fail closed: %v", err)
 	}
@@ -102,10 +93,7 @@ func TestRegisteredDRAReceiptVerifierResolverRejectsMissingDatabaseClock(t *test
 
 func TestRegisteredDRAReceiptVerifierResolverPropagatesRegistryTrustFailure(t *testing.T) {
 	source := &registeredDRAReceiptVerifierSourceStub{err: provider.ErrDRAReceiptSourceUntrusted}
-	resolver, err := NewRegisteredDRAReceiptVerifierResolver(source)
-	if err != nil {
-		t.Fatal(err)
-	}
+	resolver := &RegisteredDRAReceiptVerifierResolver{source: source}
 	if _, err := resolver.ResolveDRAReceiptVerifier(context.Background(), registeredDRAReceiptTestPrincipal(), provider.DRAUnprepareEvent{}); !errors.Is(err, provider.ErrDRAReceiptSourceUntrusted) {
 		t.Fatalf("registry trust failure was not preserved: %v", err)
 	}
@@ -113,6 +101,6 @@ func TestRegisteredDRAReceiptVerifierResolverPropagatesRegistryTrustFailure(t *t
 
 func TestNewRegisteredDRAReceiptVerifierResolverRejectsNilSource(t *testing.T) {
 	if resolver, err := NewRegisteredDRAReceiptVerifierResolver(nil); err == nil || resolver != nil {
-		t.Fatalf("nil source created resolver: resolver=%v err=%v", resolver, err)
+		t.Fatalf("nil journal created resolver: resolver=%v err=%v", resolver, err)
 	}
 }
