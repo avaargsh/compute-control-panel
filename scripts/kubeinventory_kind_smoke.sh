@@ -113,13 +113,31 @@ server="$(kubectl config view --raw --minify -o jsonpath='{.clusters[0].cluster.
   echo "missing HTTPS server, CA or requested SA token" >&2; exit 1;
 }
 
+# Resolve the real kind kubelet Lease name, never synthesize a Lease.
+node_name="$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')"
+[[ -n "$node_name" ]] || { echo "no kind Node name available" >&2; exit 1; }
+lease_present=false
+for attempt in {1..30}; do
+  if kubectl -n kube-node-lease get lease "$node_name" >/dev/null 2>&1; then
+    lease_present=true
+    break
+  fi
+  sleep 1
+done
+[[ "$lease_present" == true ]] || { echo "kind kubelet Lease not available" >&2; exit 1; }
+
 CCP_KIND_INVENTORY_SMOKE=1 \
+CCP_KIND_LEASE_NODE_NAME="$node_name" \
 CCP_KIND_API_SERVER="$server" \
 CCP_KIND_CA_FILE="$dir/ca.pem" \
 CCP_KIND_ALLOWED_TOKEN_FILE="$dir/allow.token" \
 CCP_KIND_DENIED_TOKEN_FILE="$dir/deny.token" \
 GOTOOLCHAIN=local \
-  go test -count=1 -timeout=3m -run '^TestKindInventoryLeastPrivilege$' -v ./internal/kubeinventory
+  go test -count=1 -timeout=3m -run '^TestKind(InventoryLeastPrivilege|LeaseGetLeastPrivilege)
+
+echo "L2 Kubernetes node inventory read and denial accepted for $source_commit"
+echo "No GPU device plugin, device allocation or L3 hardware evidence was tested"
+ -v ./internal/kubeinventory
 
 echo "L2 Kubernetes node inventory read and denial accepted for $source_commit"
 echo "No GPU device plugin, device allocation or L3 hardware evidence was tested"
