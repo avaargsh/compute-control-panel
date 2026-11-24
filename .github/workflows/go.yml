@@ -286,8 +286,8 @@ jobs:
           DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
         run: |
           set -euo pipefail
-          go test -count=1 -v -run '^(TestKueuePreDeleteDRASnapshotStoreConformance|TestKueuePreDeleteDRASnapshotRejectsSnapshotAfterDeleteIntent|TestPostgresKueuePreDeleteSnapshotSerializesWithDeleteIntent|TestKueueJobAdapterRecordsAndRequiresPreDeleteDRASnapshot|TestPostgresKueuePreDeleteDRASnapshotIsImmutable)$' ./internal/provider | tee kueue-predelete-dra-snapshot-pg.log
-          for test in TestKueuePreDeleteDRASnapshotStoreConformance TestKueuePreDeleteDRASnapshotRejectsSnapshotAfterDeleteIntent TestPostgresKueuePreDeleteSnapshotSerializesWithDeleteIntent TestKueueJobAdapterRecordsAndRequiresPreDeleteDRASnapshot TestPostgresKueuePreDeleteDRASnapshotIsImmutable; do
+          go test -count=1 -v -run '^(TestKueuePreDeleteDRASnapshotStoreConformance|TestKueuePreDeleteDRASnapshotRejectsSnapshotAfterDeleteIntent|TestPostgresKueuePreDeleteSnapshotSerializesWithDeleteIntent|TestKueueJobAdapterRecordsAndRequiresPreDeleteDRASnapshot|TestKueueJobAdapterBlocksDRADeleteBeforeExternalSideEffectWithoutSnapshot|TestPostgresKueuePreDeleteDRASnapshotIsImmutable)$' ./internal/provider | tee kueue-predelete-dra-snapshot-pg.log
+          for test in TestKueuePreDeleteDRASnapshotStoreConformance TestKueuePreDeleteDRASnapshotRejectsSnapshotAfterDeleteIntent TestPostgresKueuePreDeleteSnapshotSerializesWithDeleteIntent TestKueueJobAdapterRecordsAndRequiresPreDeleteDRASnapshot TestKueueJobAdapterBlocksDRADeleteBeforeExternalSideEffectWithoutSnapshot TestPostgresKueuePreDeleteDRASnapshotIsImmutable; do
             grep -F -- "--- PASS: $test" kueue-predelete-dra-snapshot-pg.log
           done
           if grep -F -- '--- SKIP:' kueue-predelete-dra-snapshot-pg.log; then
