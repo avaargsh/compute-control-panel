@@ -31,6 +31,12 @@ type ReleaseEvidenceCandidate struct {
 	// It is a Kubernetes API observation, never a driver release receipt.
 	ClaimAbsent *DRAClaimUIDAbsentObservation
 
+	// PreDeleteSnapshot is the durable immutable CREATE/DELETE allocation
+	// history read from the binding store. It is required before a signed
+	// NodeUnprepare receipt can be correlated; it is structural history,
+	// not an authenticated source attestation.
+	PreDeleteSnapshot *KueuePreDeleteDRASnapshot
+
 	// ExpectedAllocationID is the historical Allocation identity the trusted
 	// durable-state caller intends to correlate. It is only a structural
 	// cross-check: callers must independently authenticate it. A newer
