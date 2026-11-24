@@ -127,3 +127,60 @@ func TestKindInventoryLeastPrivilege(t *testing.T) {
 		t.Fatalf("missing rotated credential was not rejected: %v", err)
 	}
 }
+
+// TestKindNodeLeaseUIDPinnedRead exercises the real Kubernetes coordination
+// Lease GET endpoint with a distinct read-only service account. This is an
+// authenticated L2 source-identity test, NOT physical GPU readiness evidence.
+func TestKindNodeLeaseUIDPinnedRead(t *testing.T) {
+	if os.Getenv("CCP_KIND_INVENTORY_SMOKE") != "1" {
+		t.Skip("requires opt-in disposable kind Node+Lease API and RBAC")
+	}
+	required := func(name string) string {
+		t.Helper()
+		value := os.Getenv(name)
+		if value == "" {
+			t.Fatalf("missing required Lease kind environment %s", name)
+		}
+		return value
+	}
+	endpoint := required("CCP_KIND_API_SERVER")
+	caPath := required("CCP_KIND_CA_FILE")
+	allowed := required("CCP_KIND_LEASE_TOKEN_FILE")
+	denied := required("CCP_KIND_DENIED_TOKEN_FILE")
+	nodeName := required("CCP_KIND_LEASE_NODE")
+	nodeUID := required("CCP_KIND_LEASE_NODE_UID")
+
+	makeReader := func(token string) *Reader {
+		t.Helper()
+		reader, err := NewReader(Config{
+			APIServer: endpoint, CAFile: caPath, TokenFile: token,
+			ClusterID: "kind-inventory", TenantID: "tenant-kind", ProjectID: "project-kind",
+			ResourceNames: []string{"nvidia.com/gpu"}, ObservationTTL: time.Minute,
+			Timeout: 10 * time.Second,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return reader
+	}
+	reader := makeReader(allowed)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	observed, err := reader.ObserveNodeLease(ctx, "tenant-kind", []string{"project-kind"}, nodeName, nodeUID, time.Minute)
+	if err != nil || observed.State != nodeLeaseFresh || !observed.ExpiresAt.After(time.Now().UTC()) {
+		t.Fatalf("real Node/Lease API identity not current: state=%s reason=%s err=%v", observed.State, observed.ReasonCode, err)
+	}
+	stale, err := reader.ObserveNodeLease(ctx, "tenant-kind", []string{"project-kind"}, nodeName, "different-node-uid", time.Minute)
+	if err != nil || stale.State != nodeLeaseUnknown {
+		t.Fatalf("same-name successor Node UID was adopted: %+v err=%v", stale, err)
+	}
+	scoped, err := reader.ObserveNodeLease(ctx, "tenant-kind", []string{"outside-project"}, nodeName, nodeUID, time.Minute)
+	if !errors.Is(err, ErrScope) || scoped.State == nodeLeaseFresh {
+		t.Fatalf("ungranted project was not denied: %+v err=%v", scoped, err)
+	}
+	blocked := makeReader(denied)
+	rejected, err := blocked.ObserveNodeLease(ctx, "tenant-kind", []string{"project-kind"}, nodeName, nodeUID, time.Minute)
+	if !errors.Is(err, ErrForbidden) || rejected.State == nodeLeaseFresh {
+		t.Fatalf("unprivileged account read Node/Lease: %+v err=%v", rejected, err)
+	}
+}
