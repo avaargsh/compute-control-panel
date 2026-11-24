@@ -100,6 +100,7 @@ func validateKueuePreDeleteDRASnapshot(
 		return reject()
 	}
 	snapshot.Devices = devices
+	snapshot.ObservedAt = snapshot.ObservedAt.UTC().Truncate(time.Microsecond)
 	snapshot.Digest = kueuePreDeleteSnapshotDigest(snapshot)
 	if !strings.HasPrefix(snapshot.Digest, "sha256:") {
 		return reject()
