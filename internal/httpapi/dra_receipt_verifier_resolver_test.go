@@ -44,9 +44,9 @@ func registeredDRAReceiptTestVerifier(t *testing.T) *provider.DRAUnprepareVerifi
 
 func registeredDRAReceiptTestPrincipal() WorkloadPrincipal {
 	return WorkloadPrincipal{
-		Subject: "spiffe://example.org/ns/dra/sa/driver",
+		Subject:  "spiffe://example.org/ns/dra/sa/driver",
 		TenantID: "tenant-a",
-		Service: "dra-node-driver",
+		Service:  "dra-node-driver",
 	}
 }
 
