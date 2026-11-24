@@ -68,8 +68,10 @@ func validateKueuePreDeleteDRASnapshot(
 		return KueuePreDeleteDRASnapshot{}, ErrInvalidPreDeleteDRASnapshot
 	}
 	if !validKubeName(namespace) || req.Validate() != nil || req.Kind != operation.Delete ||
-		pin.Request.Validate() != nil || pin.Request.Kind != operation.Create ||
-		snapshot.Namespace != namespace || snapshot.TenantID != req.TenantID ||
+		pin.Request.Validate() != nil || pin.Request.Kind != operation.Create {
+		return reject()
+	}
+	if snapshot.Namespace != namespace || snapshot.TenantID != req.TenantID ||
 		snapshot.WorkloadID != req.WorkloadID || snapshot.ProviderID != req.ProviderID ||
 		snapshot.CreateOperationID != pin.Request.OperationID ||
 		snapshot.DeleteOperationID != req.OperationID ||
@@ -79,8 +81,10 @@ func validateKueuePreDeleteDRASnapshot(
 		pin.Request.WorkloadID != req.WorkloadID || pin.Request.ProviderID != req.ProviderID ||
 		pin.Name == "" || pin.UID == "" ||
 		req.TargetResourceID != namespace+"/"+pin.Name || req.TargetResourceUID != pin.UID ||
-		snapshot.Job.Namespace != namespace || snapshot.Job.Name != pin.Name || snapshot.Job.UID != pin.UID ||
-		!validKubernetesRef(snapshot.Job) ||
+		snapshot.Job.Namespace != namespace || snapshot.Job.Name != pin.Name || snapshot.Job.UID != pin.UID {
+		return KueuePreDeleteDRASnapshot{}, ErrOperationConflict
+	}
+	if !validKubernetesRef(snapshot.Job) ||
 		!validKubernetesRef(snapshot.KueueWorkload) || snapshot.KueueWorkload.Namespace != namespace ||
 		!validKubernetesRef(snapshot.Pod) || snapshot.Pod.Namespace != namespace ||
 		!validKubernetesRef(snapshot.Claim) || snapshot.Claim.Namespace != namespace ||
@@ -102,7 +106,6 @@ func validateKueuePreDeleteDRASnapshot(
 	}
 	return snapshot, nil
 }
-
 // RecordPreDeleteDRASnapshot binds already-collected, read-only Kueue and DRA
 // observations to the durable CREATE Job UID pin and stores them before DELETE
 // intent is written. The caller must obtain collection and deviceSet from the
@@ -188,6 +191,15 @@ func (a *KueueJobAdapter) requirePreDeleteDRASnapshot(req Request) error {
 		return err
 	}
 	if !ok || !preDeleteSnapshotMatchesDelete(snapshot, a.namespace, req, a.resourceClaimTemplateName) {
+		return ErrPreDeleteDRASnapshotRequired
+	}
+	pin, pinned, err := a.bindings.GetCreatePinByJob(a.namespace, req.TenantID, snapshot.Job.Name)
+	if err != nil {
+		return err
+	}
+	if !pinned || pin.UID != req.TargetResourceUID ||
+		pin.Request.OperationID != snapshot.CreateOperationID ||
+		pin.Request.WorkloadID != req.WorkloadID || pin.Request.ProviderID != req.ProviderID {
 		return ErrPreDeleteDRASnapshotRequired
 	}
 	return nil
