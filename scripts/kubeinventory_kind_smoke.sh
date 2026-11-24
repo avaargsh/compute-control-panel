@@ -169,7 +169,7 @@ YAML
 # while other-name and separately denied ServiceAccount GETs return 403.
 # Keep these authorizer assertions for the non-GET verbs as defense in depth.
 for verb in list watch create update patch delete; do
-  [[ "$(kubectl auth can-i "$verb" "$lease_resource" --as="$allow" -n kube-node-lease)" == "no" ]] || {
+  [[ "$(kubectl auth can-i "$verb" "leases.coordination.k8s.io" --as="$allow" -n kube-node-lease)" == "no" ]] || {
     echo "Lease $verb permission exceeds read-only named GET" >&2; exit 1
   }
 done
