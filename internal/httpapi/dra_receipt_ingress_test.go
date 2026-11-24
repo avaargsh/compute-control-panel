@@ -59,7 +59,7 @@ func draReceiptTestTLS() *tls.ConnectionState {
 	leaf := &x509.Certificate{Raw: []byte("verified-client-cert"), URIs: []*url.URL{{
 		Scheme: "spiffe", Host: "example.org", Path: "/ns/dra/sa/driver",
 	}}}
-	return &tls.ConnectionState{PeerCertificates: []*x509.Certificate{leaf}, VerifiedChains: [][]*x509.Certificate{{leaf}}}
+	return &tls.ConnectionState{Version: tls.VersionTLS13, PeerCertificates: []*x509.Certificate{leaf}, VerifiedChains: [][]*x509.Certificate{{leaf}}}
 }
 
 func draReceiptSPIFFEAuthenticator(t *testing.T) WorkloadAuthenticator {
@@ -184,7 +184,7 @@ func TestDRAReceiptIngestRequiresVerifiedSPIFFEIdentityAndExactSource(t *testing
 		t.Fatal(err)
 	}
 	leaf := &x509.Certificate{Raw: []byte("verified-client-cert"), URIs: []*url.URL{spiffeURI}}
-	peer := &tls.ConnectionState{PeerCertificates: []*x509.Certificate{leaf}, VerifiedChains: [][]*x509.Certificate{{leaf}}}
+	peer := &tls.ConnectionState{Version: tls.VersionTLS13, PeerCertificates: []*x509.Certificate{leaf}, VerifiedChains: [][]*x509.Certificate{{leaf}}}
 	req = httptest.NewRequest(http.MethodPost, "/internal/v1/dra/node-unprepare-receipts", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.TLS = peer
@@ -225,6 +225,34 @@ func TestDRAReceiptIngestRejectsClientEvidenceAndAmbiguousJSON(t *testing.T) {
 				t.Fatalf("unsafe JSON accepted: HTTP %d calls %d/%d", rec.Code, resolver.calls, journal.calls)
 			}
 		})
+	}
+}
+
+func TestDRAReceiptIngestRejectsLegacyTLSAndAmbiguousContentType(t *testing.T) {
+	h, resolver, journal := draReceiptTestHandler(t, draReceiptSPIFFEAuthenticator(t))
+	body := draReceiptTestBody(t, draReceiptTestSigned())
+
+	legacyTLS := httptest.NewRequest(http.MethodPost, draReceiptIngestPath, bytes.NewReader(body))
+	legacyTLS.Header.Set("Content-Type", "application/json")
+	legacy := draReceiptTestTLS()
+	legacy.Version = tls.VersionTLS12
+	legacyTLS.TLS = legacy
+	legacyResponse := httptest.NewRecorder()
+	h.ServeHTTP(legacyResponse, legacyTLS)
+	if legacyResponse.Code != http.StatusUnauthorized || resolver.calls != 0 || journal.calls != 0 {
+		t.Fatalf("legacy TLS reached receipt resolution: HTTP %d calls=%d/%d",
+			legacyResponse.Code, resolver.calls, journal.calls)
+	}
+
+	ambiguous := httptest.NewRequest(http.MethodPost, draReceiptIngestPath, bytes.NewReader(body))
+	ambiguous.Header.Add("Content-Type", "application/json")
+	ambiguous.Header.Add("Content-Type", "text/plain")
+	ambiguous.TLS = draReceiptTestTLS()
+	ambiguousResponse := httptest.NewRecorder()
+	h.ServeHTTP(ambiguousResponse, ambiguous)
+	if ambiguousResponse.Code != http.StatusUnsupportedMediaType || resolver.calls != 0 || journal.calls != 0 {
+		t.Fatalf("ambiguous Content-Type reached receipt resolution: HTTP %d calls=%d/%d",
+			ambiguousResponse.Code, resolver.calls, journal.calls)
 	}
 }
 

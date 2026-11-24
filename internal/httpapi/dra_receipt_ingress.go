@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"io"
@@ -151,7 +152,7 @@ func NewDRAReceiptIngestHandler(deps DRAReceiptIngestDependencies) (http.Handler
 }
 
 func verifiedDRAClientTLS(r *http.Request) bool {
-	if r == nil || r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
+	if r == nil || r.TLS == nil || r.TLS.Version < tls.VersionTLS13 || len(r.TLS.PeerCertificates) == 0 {
 		return false
 	}
 	peer := r.TLS.PeerCertificates[0]
@@ -231,7 +232,12 @@ func (h *draReceiptIngestHandler) ingest(w http.ResponseWriter, r *http.Request)
 		writeWorkloadAPIError(w, http.StatusUnauthorized, "UNAUTHENTICATED_DRA_SOURCE", "Verified driver identity required")
 		return
 	}
-	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	contentTypes := r.Header.Values("Content-Type")
+	if len(contentTypes) != 1 {
+		writeWorkloadAPIError(w, http.StatusUnsupportedMediaType, "INVALID_CONTENT_TYPE", "Expected exactly one Content-Type header")
+		return
+	}
+	mediaType, _, err := mime.ParseMediaType(contentTypes[0])
 	if err != nil || mediaType != "application/json" {
 		writeWorkloadAPIError(w, http.StatusUnsupportedMediaType, "INVALID_CONTENT_TYPE", "Expected application/json")
 		return
