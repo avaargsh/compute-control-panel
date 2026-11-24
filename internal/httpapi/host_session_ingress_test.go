@@ -217,7 +217,7 @@ func newHostSessionIngressHandlerWithPolicy(
 	t.Helper()
 	handler, err := NewHostSessionIngressHandler(HostSessionIngressDependencies{
 		HostTrustRoots: authority.roots, HostTrustDomain: "ccp.example",
-		HostRevocationCRLs: crls, Now: now, Repository: repo,
+		HostRevocationCRLs: crls, HostRevocationIssuerCertificates: []*x509.Certificate{authority.ca},\n\t\tNow: now, Repository: repo,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -349,7 +349,7 @@ func TestHostSessionIngressRejectsCredentialAfterAtomicCRLRotation(t *testing.T)
 	authority := newHostCredentialAuthority(t)
 	clientCert := authority.issue(t, hostSessionIngressSubject, 79)
 	now := time.Now().UTC()
-	revocations, err := hostidentity.NewHostCredentialRevocationListStore([][]byte{authority.crlDER}, now)
+	revocations, err := hostidentity.NewHostCredentialRevocationListStore([][]byte{authority.crlDER}, []*x509.Certificate{authority.ca}, now)
 	if err != nil {
 		t.Fatalf("create revocation store: %v", err)
 	}
