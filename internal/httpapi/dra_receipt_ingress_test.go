@@ -35,6 +35,7 @@ type draReceiptTestResolver struct {
 	err           error
 	verifier      *provider.DRAUnprepareVerifier
 	serverNow     time.Time
+	candidate     provider.ReleaseEvidenceCandidate
 }
 
 func (r *draReceiptTestResolver) ResolveRegisteredDRAUnprepareVerifier(_ context.Context, _ string, _ provider.DRAUnprepareEvent) (*provider.DRAUnprepareVerifier, time.Time, error) {
@@ -44,7 +45,7 @@ func (r *draReceiptTestResolver) ResolveRegisteredDRAUnprepareVerifier(_ context
 
 func (r *draReceiptTestResolver) ResolveDRAReceiptEvidence(_ context.Context, _ WorkloadPrincipal, _ provider.DRAUnprepareEvent) (provider.ReleaseEvidenceCandidate, error) {
 	r.calls++
-	return provider.ReleaseEvidenceCandidate{}, r.err
+	return r.candidate, r.err
 }
 
 type draReceiptTestJournal struct {
@@ -135,6 +136,8 @@ func draReceiptTestHandler(t *testing.T, authenticator WorkloadAuthenticator) (h
 		t.Fatal(err)
 	}
 	resolver := &draReceiptTestResolver{verifier: verifier, serverNow: time.Now().UTC()}
+	resolver.candidate.Create.ProviderID = "provider-a"
+	resolver.candidate.Delete.ProviderID = "provider-a"
 	journal := &draReceiptTestJournal{created: true}
 	h, err := NewDRAReceiptIngestHandler(DRAReceiptIngestDependencies{
 		Authenticator: authenticator, Authorizer: policy, VerifierResolver: &RegisteredDRAReceiptVerifierResolver{source: resolver}, Resolver: resolver, Journal: journal,
@@ -221,6 +224,31 @@ func TestDRAReceiptIngestRequiresVerifiedSPIFFEIdentityAndExactSource(t *testing
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden || resolver.calls != 1 || journal.calls != 1 {
 		t.Fatalf("cross-source principal bypassed policy: HTTP %d calls %d/%d", rec.Code, resolver.calls, journal.calls)
+	}
+}
+
+func TestDRAReceiptIngestRejectsHistoricalEvidenceFromDifferentProvider(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*provider.ReleaseEvidenceCandidate)
+	}{
+		{name: "CREATE provider differs", mutate: func(c *provider.ReleaseEvidenceCandidate) { c.Create.ProviderID = "provider-b" }},
+		{name: "DELETE provider differs", mutate: func(c *provider.ReleaseEvidenceCandidate) { c.Delete.ProviderID = "provider-b" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, resolver, journal := draReceiptTestHandler(t, draReceiptSPIFFEAuthenticator(t))
+			tc.mutate(&resolver.candidate)
+			req := httptest.NewRequest(http.MethodPost, draReceiptIngestPath,
+				bytes.NewReader(draReceiptTestBody(t, draReceiptTestSigned())))
+			req.Header.Set("Content-Type", "application/json")
+			req.TLS = draReceiptTestTLS()
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != http.StatusForbidden || resolver.calls != 1 || journal.calls != 0 {
+				t.Fatalf("cross-Provider historical evidence reached journal: HTTP %d evidence=%d journal=%d",
+					rec.Code, resolver.calls, journal.calls)
+			}
+		})
 	}
 }
 
