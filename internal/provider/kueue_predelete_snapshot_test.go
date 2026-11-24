@@ -266,7 +266,7 @@ func TestKueueJobAdapterRecordsAndRequiresPreDeleteDRASnapshot(t *testing.T) {
 	}
 	badCollection := collection
 	badCollection.Evidence.Pod.UID = "successor-pod-uid"
-	if _, err := adapter.RecordPreDeleteDRASnapshot(context.Background(), remove, badCollection, deviceSet); !errors.Is(err, ErrInvalidKueueObservation) {
+	if _, err := adapter.RecordPreDeleteDRASnapshot(context.Background(), remove, badCollection, deviceSet); !errors.Is(err, ErrInvalidPreDeleteDRASnapshot) {
 		t.Fatalf("mismatched Pod UID was recorded: %v", err)
 	}
 }
@@ -316,8 +316,23 @@ func TestKueueJobAdapterBlocksDRADeleteBeforeExternalSideEffectWithoutSnapshot(t
 	if err := adapter.UseQueuedResourceClaimTemplate("gpu-template"); err != nil {
 		t.Fatal(err)
 	}
-	create, observed := createSuspendedJob(t, adapter, api)
-	remove := kueueDeleteRequest(create, observed)
+	create := kueueAdapterRequest()
+	if _, err := adapter.Apply(context.Background(), create); err != nil {
+		t.Fatal(err)
+	}
+	jobName := kueueCreateJobName(create.TenantID, create.OperationID)
+	api.mu.Lock()
+	job := api.jobs[jobName]
+	api.mu.Unlock()
+	if job.Metadata.UID == "" {
+		t.Fatal("fake API did not persist created Job UID")
+	}
+	remove := create
+	remove.OperationID = "op-delete-snapshot-gate"
+	remove.IdempotencyKey = "idem-delete-snapshot-gate"
+	remove.Kind = operation.Delete
+	remove.TargetResourceID = namespace + "/" + jobName
+	remove.TargetResourceUID = job.Metadata.UID
 	if _, err := adapter.Apply(context.Background(), remove); !errors.Is(err, ErrPreDeleteDRASnapshotRequired) {
 		t.Fatalf("DRA DELETE without snapshot was not blocked: %v", err)
 	}
