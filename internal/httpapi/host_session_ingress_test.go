@@ -254,6 +254,38 @@ func TestNewHostSessionIngressHandlerRequiresDedicatedTrustAndRepository(t *test
 	}
 }
 
+// A verified client certificate is not enough when the negotiated transport is legacy TLS.
+func TestHostSessionIngressRejectsLegacyTLSBeforeRepository(t *testing.T) {
+	authority := newHostCredentialAuthority(t)
+	clientCert := authority.issue(t, hostSessionIngressSubject, 91)
+	leaf, err := x509.ParseCertificate(clientCert.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuer, err := x509.ParseCertificate(clientCert.Certificate[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	repo := &hostSessionIngressRepositoryStub{}
+	handler := newHostSessionIngressHandler(t, authority, repo)
+	request := httptest.NewRequest(http.MethodPost, hostSessionStartPath,
+		strings.NewReader(`{"expected_epoch":0,"ttl_seconds":30}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", "legacy-tls-host-start")
+	request.TLS = &tls.ConnectionState{
+		Version:          tls.VersionTLS12,
+		PeerCertificates: []*x509.Certificate{leaf},
+		VerifiedChains:   [][]*x509.Certificate{{leaf, issuer}},
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if calls, _ := repo.observedStart(); response.Code != http.StatusUnauthorized || calls != 0 {
+		t.Fatalf("legacy TLS reached HostSession repository: HTTP %d calls=%d", response.Code, calls)
+	}
+}
+
 func TestHostSessionIngressStartsAndRecordsOnlyDedicatedHostCredential(t *testing.T) {
 	authority := newHostCredentialAuthority(t)
 	clientCert := authority.issue(t, hostSessionIngressSubject, 2)
