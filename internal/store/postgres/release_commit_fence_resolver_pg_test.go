@@ -78,8 +78,16 @@ func TestResolveReleaseCommitFenceDerivesAndLocksCurrentRows(t *testing.T) {
 		got.CreateOperationVersion != 2 || got.DeleteOperationVersion != 1 {
 		t.Fatalf("resolved fence does not match current durable rows: %+v", got)
 	}
-	if err := ValidateReleaseCommitFence(ctx, tx, got); err != nil {
-		t.Fatalf("database-derived fence did not validate in same transaction: %v", err)
+	wrongTenantTx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResolveReleaseCommitFence(ctx, wrongTenantTx, "tenant-other",
+		workload, allocation, createID, deleteID); !errors.Is(err, ErrReleaseCommitFence) {
+		t.Fatalf("wrong tenant resolved another tenant's fence: %v", err)
+	}
+	if err := wrongTenantTx.Rollback(); err != nil {
+		t.Fatal(err)
 	}
 
 	// The resolver must retain locks on all four authoritative rows in the
@@ -111,7 +119,7 @@ func TestResolveReleaseCommitFenceDerivesAndLocksCurrentRows(t *testing.T) {
 	}
 }
 
-func TestResolveReleaseCommitFenceRejectsWrongTenantAndMissingTransaction(t *testing.T) {
+func TestResolveReleaseCommitFenceRejectsMissingTransactionAndMalformedScope(t *testing.T) {
 	if _, err := ResolveReleaseCommitFence(context.Background(), nil,
 		"tenant-a", "workload-a", "allocation-a", "create-a", "delete-a"); !errors.Is(err, ErrReleaseCommitFence) {
 		t.Fatalf("missing transaction was accepted: %v", err)
