@@ -124,7 +124,9 @@ CREATE TABLE public.compute_host_sessions (
     expires_at TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (host_id, epoch),
     UNIQUE (start_request_id),
-    CHECK (issued_at < expires_at)
+    CHECK (epoch = expected_epoch + 1),
+    CHECK (issued_at < expires_at),
+    CHECK (expires_at = issued_at + pg_catalog.make_interval(secs => ttl_seconds::DOUBLE PRECISION))
 );
 
 CREATE TABLE public.compute_host_session_heartbeats (
