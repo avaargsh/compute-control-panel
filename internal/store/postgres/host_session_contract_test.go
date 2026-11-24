@@ -68,7 +68,7 @@ func TestHostSessionStartAndHeartbeatDatabaseContract(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT pg_catalog.clock_timestamp()`).Scan(&after); err != nil {
 		t.Fatal(err)
 	}
-	if first.Binding != binding || first.Epoch != 1 || first.SessionID == "" ||
+	if first.Binding != binding || first.Epoch != 1 || !strings.HasPrefix(first.SessionID, "hs_") ||
 		first.IssuedAt.Before(before) || first.IssuedAt.After(after) ||
 		!first.ExpiresAt.After(first.IssuedAt) ||
 		first.LastSequence != 0 || first.LastDigest != "" || !first.LastRecordedAt.IsZero() {
@@ -148,12 +148,24 @@ func TestHostSessionExpiredEpochReplacementAndProviderDrain(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(1100 * time.Millisecond)
+	expiredHeartbeat := hostidentity.Heartbeat{
+		Binding: binding, Epoch: first.Epoch, SessionID: first.SessionID,
+		Sequence: 1, Digest: "sha256:" + strings.Repeat("f", 64),
+	}
+	if _, _, err := repo.RecordHostHeartbeat(ctx, expiredHeartbeat); !errors.Is(err, ErrHostSessionRejected) ||
+		hostSessionSQLState(err) != "23514" {
+		t.Fatalf("expired session accepted a heartbeat: %v", err)
+	}
 	second, err := repo.StartHostSession(ctx, binding, first.Epoch, 30*time.Second)
 	if err != nil {
 		t.Fatalf("expired predecessor should advance one durable epoch: %v", err)
 	}
 	if second.Epoch != first.Epoch+1 || second.SessionID == first.SessionID {
 		t.Fatalf("session epoch did not advance monotonically: first=%+v second=%+v", first, second)
+	}
+	if _, _, err := repo.RecordHostHeartbeat(ctx, expiredHeartbeat); !errors.Is(err, ErrHostSessionRejected) ||
+		hostSessionSQLState(err) != "23514" {
+		t.Fatalf("superseded epoch accepted a heartbeat: %v", err)
 	}
 
 	if _, err := repo.BeginProviderDrain(ctx, binding.ProviderID, 1, "SESSION_FENCE_TEST"); err != nil {
@@ -250,16 +262,16 @@ func TestHostSessionRestrictedWriterAndCatalogBoundary(t *testing.T) {
 			canReadSessions, canInsertSessions, canReadHeartbeats, canInsertHeartbeats)
 	}
 
-	first, err := repo.StartHostSession(ctx, binding, 0, 30*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
 	writerRepo, err := NewRepository(writer)
 	if err != nil {
 		t.Fatal(err)
 	}
+	writerFirst, err := writerRepo.StartHostSession(ctx, binding, 0, 30*time.Second)
+	if err != nil {
+		t.Fatalf("restricted writer could not invoke the session-start function: %v", err)
+	}
 	heartbeat := hostidentity.Heartbeat{
-		Binding: binding, Epoch: first.Epoch, SessionID: first.SessionID,
+		Binding: binding, Epoch: writerFirst.Epoch, SessionID: writerFirst.SessionID,
 		Sequence: 1, Digest: "sha256:" + strings.Repeat("e", 64),
 	}
 	if disposition, _, err := writerRepo.RecordHostHeartbeat(ctx, heartbeat); err != nil || disposition != hostidentity.Accept {
@@ -339,6 +351,22 @@ func TestHostSessionRestrictedWriterAndCatalogBoundary(t *testing.T) {
 	}
 	if unexpectedGrant {
 		t.Fatal("HostSession objects have unexpected grants beyond the owner and dedicated writer")
+	}
+
+	var alwaysTriggers int
+	if err := admin.QueryRowContext(ctx, `
+		SELECT count(*)::integer
+		FROM pg_catalog.pg_trigger t
+		WHERE t.tgrelid IN (
+			'public.compute_host_sessions'::pg_catalog.regclass,
+			'public.compute_host_session_heartbeats'::pg_catalog.regclass
+		)
+		  AND t.tgenabled='A'
+	`).Scan(&alwaysTriggers); err != nil {
+		t.Fatal(err)
+	}
+	if alwaysTriggers != 4 {
+		t.Fatalf("HostSession ENABLE ALWAYS immutable trigger count=%d, want 4", alwaysTriggers)
 	}
 }
 
