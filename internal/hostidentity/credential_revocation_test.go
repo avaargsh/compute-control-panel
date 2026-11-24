@@ -285,6 +285,25 @@ func TestHostCredentialRevocationListStoreKeepsLastGoodSnapshotOnRejectedUpdate(
 	}
 }
 
+func TestHostCredentialRevocationListStoreDoesNotRemovePreviouslyRevokedSerial(t *testing.T) {
+	f := newHostCredentialRevocationFixture(t)
+	initial := f.crlNumber(t, f.issuer, f.key, 1, f.now.Add(-time.Minute), f.now.Add(time.Hour), 42)
+	rollback := f.crlNumber(t, f.issuer, f.key, 2, f.now.Add(-time.Minute), f.now.Add(time.Hour))
+	store, err := NewHostCredentialRevocationListStore([][]byte{initial}, []*x509.Certificate{f.issuer}, f.now)
+	if err != nil {
+		t.Fatalf("create revocation store: %v", err)
+	}
+	if _, err := store.VerifyHostCredential([][]byte{f.leafDER}, f.roots, "ccp.example", f.now); err == nil {
+		t.Fatal("fixture serial was not revoked by the initial CRL")
+	}
+	if err := store.Replace([][]byte{rollback}, f.now); err == nil {
+		t.Fatal("newer CRL silently removed a previously revoked certificate serial")
+	}
+	if _, err := store.VerifyHostCredential([][]byte{f.leafDER}, f.roots, "ccp.example", f.now); err == nil {
+		t.Fatal("rejected CRL rollback displaced the last known-good revocation")
+	}
+}
+
 func TestHostCredentialRevocationListStoreConcurrentReplacementCannotRollBack(t *testing.T) {
 	f := newHostCredentialRevocationFixture(t)
 	initial := f.crlNumber(t, f.issuer, f.key, 1, f.now.Add(-time.Minute), f.now.Add(time.Hour))
