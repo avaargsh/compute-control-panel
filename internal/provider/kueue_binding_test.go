@@ -266,6 +266,10 @@ func (failingBindingStore) GetCreatePin(string, Request) (KueueCreatePin, bool, 
 	return KueueCreatePin{}, false, errBindingUnreadable
 }
 
+func (failingBindingStore) GetCreatePinByJob(string, string, string) (KueueCreatePin, bool, error) {
+	return KueueCreatePin{}, false, errBindingUnreadable
+}
+
 func (failingBindingStore) PutCreatePin(string, Request, string, string) error {
 	return errBindingUnreadable
 }
@@ -276,6 +280,14 @@ func (failingBindingStore) GetDeleteTombstone(string, Request) (KueueDeleteTombs
 
 func (failingBindingStore) PutDeleteTombstone(string, Request, string, string, bool) error {
 	return errBindingUnreadable
+}
+
+func (failingBindingStore) PutPreDeleteDRASnapshot(string, Request, KueuePreDeleteDRASnapshot) (KueuePreDeleteDRASnapshot, error) {
+	return KueuePreDeleteDRASnapshot{}, errBindingUnreadable
+}
+
+func (failingBindingStore) GetPreDeleteDRASnapshot(string, Request) (KueuePreDeleteDRASnapshot, bool, error) {
+	return KueuePreDeleteDRASnapshot{}, false, errBindingUnreadable
 }
 
 func (failingBindingStore) CreatePinUID(string, string) (string, bool, error) {
