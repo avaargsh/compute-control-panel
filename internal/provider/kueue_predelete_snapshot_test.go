@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -325,5 +326,76 @@ func TestKueueJobAdapterBlocksDRADeleteBeforeExternalSideEffectWithoutSnapshot(t
 	}
 	if _, ok, err := adapter.bindings.GetDeleteTombstone(adapter.namespace, remove); err != nil || ok {
 		t.Fatalf("DELETE intent was persisted without pre-delete snapshot: exists=%t err=%v", ok, err)
+	}
+}
+
+
+func TestPostgresKueuePreDeleteSnapshotInsertGuardsRejectTenantAndLateWrites(t *testing.T) {
+	db := openProviderPostgresDB(t)
+	store, err := NewPostgresKueueJobBindingStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	create := uniqueKueueRequest(t)
+	const namespace = "tenant-a"
+	suffix := strings.TrimPrefix(create.OperationID, "op-")
+	jobName, jobUID := "job-"+suffix, "job-uid-"+suffix
+	remove := preDeleteDeleteRequest(create, namespace, jobName, jobUID)
+	if err := store.PutCreatePin(namespace, create, jobName, jobUID); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Direct SQL cannot write a DELETE tombstone for another tenant's pinned Job.
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO public.kueue_job_delete_tombstones(
+			namespace,tenant_id,operation_id,job_name,job_uid,workload_id,provider_id,
+			idempotency_key,request_digest,desired_generation,operation_kind,
+			target_resource_id,target_resource_uid,acknowledged
+		) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'DELETE',$11,$5,FALSE)`,
+		namespace, "tenant-other", "delete-cross-tenant-"+suffix, jobName, jobUID,
+		create.WorkloadID, create.ProviderID, "idem-cross-tenant-"+suffix, create.RequestDigest,
+		int64(remove.DesiredGeneration), namespace+"/"+jobName)
+	if postgresSQLState(err) != "23514" {
+		t.Fatalf("cross-tenant direct tombstone state=%s err=%v", postgresSQLState(err), err)
+	}
+
+	if err := store.PutDeleteTombstone(namespace, remove, jobName, jobUID, false); err != nil {
+		t.Fatal(err)
+	}
+	pin, ok, err := store.GetCreatePinByJob(namespace, create.TenantID, jobName)
+	if err != nil || !ok {
+		t.Fatalf("read CREATE pin for direct snapshot insert: ok=%t err=%v", ok, err)
+	}
+	snapshot := preDeleteSnapshotFixture(create, remove, namespace, jobName, jobUID)
+	canonical, err := validateKueuePreDeleteDRASnapshot(namespace, remove, pin, snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	createGeneration, err := kueueBindingGeneration(canonical.CreateGeneration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleteGeneration, err := kueueBindingGeneration(canonical.DeleteGeneration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	devices, err := json.Marshal(canonical.Devices)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.ExecContext(ctx, insertKueuePreDeleteSnapshotSQL,
+		canonical.Namespace, canonical.TenantID, canonical.DeleteOperationID, canonical.CreateOperationID,
+		canonical.WorkloadID, canonical.ProviderID, createGeneration, deleteGeneration,
+		canonical.Job.Name, canonical.Job.UID, canonical.Job.ResourceVersion,
+		canonical.KueueWorkload.Name, canonical.KueueWorkload.UID, canonical.KueueWorkload.ResourceVersion,
+		canonical.Pod.Name, canonical.Pod.UID, canonical.Pod.ResourceVersion, canonical.NodeName,
+		canonical.Claim.Name, canonical.Claim.UID, canonical.Claim.ResourceVersion, canonical.ClaimTemplateName,
+		canonical.PodClaimAlias, canonical.ConsumerContainer, devices, canonical.Source, canonical.AdapterVersion,
+		canonical.ObservedAt, canonical.Digest,
+	)
+	if postgresSQLState(err) != "55000" {
+		t.Fatalf("late direct snapshot insert state=%s err=%v", postgresSQLState(err), err)
 	}
 }
