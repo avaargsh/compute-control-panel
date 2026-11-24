@@ -2,10 +2,10 @@ package hostidentity
 
 import (
 	"crypto/ed25519"
-	"encoding/asn1"
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"math/big"
 	"net/url"
 	"testing"
@@ -174,10 +174,10 @@ func TestParseHostCredentialRevocationListsRejectsAmbiguousOrMalformedInput(t *t
 func TestParseHostCredentialRevocationListsRejectsUnsupportedCRLScopes(t *testing.T) {
 	f := newHostCredentialRevocationFixture(t)
 	for _, tc := range []struct {
-		name      string
-		oid       asn1.ObjectIdentifier
-		value     []byte
-		critical  bool
+		name     string
+		oid      asn1.ObjectIdentifier
+		value    []byte
+		critical bool
 	}{
 		{
 			name: "delta CRL indicator", oid: asn1.ObjectIdentifier{2, 5, 29, 27},
