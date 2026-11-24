@@ -210,8 +210,6 @@ CREATE TRIGGER compute_host_identity_subject_grant_audit_no_truncate
     FOR EACH STATEMENT EXECUTE FUNCTION public.compute_host_identity_subject_grant_audit_immutable();
 
 CREATE FUNCTION public.compute_host_session_start_authenticated(
-    p_tenant_id TEXT,
-    p_service_name TEXT,
     p_subject TEXT,
     p_expected_epoch BIGINT,
     p_start_request_id TEXT,
@@ -242,11 +240,8 @@ DECLARE
     v_now TIMESTAMPTZ;
     v_result RECORD;
 BEGIN
-    IF p_tenant_id IS NULL OR pg_catalog.octet_length(p_tenant_id) NOT BETWEEN 1 AND 256
-       OR pg_catalog.btrim(p_tenant_id) <> p_tenant_id OR p_tenant_id ~ '[[:cntrl:]]'
-       OR p_service_name IS DISTINCT FROM 'compute-host-agent'
-       OR p_subject IS NULL OR pg_catalog.octet_length(p_subject) NOT BETWEEN 1 AND 1024
-       OR pg_catalog.btrim(p_subject) <> p_subject OR p_subject !~ '^spiffe://[^/]+/.+$' THEN
+    IF p_subject IS NULL OR pg_catalog.octet_length(p_subject) NOT BETWEEN 1 AND 1024
+       OR pg_catalog.btrim(p_subject) <> p_subject OR p_subject !~ '^spiffe://[^/]+/host/[^/]+$' THEN
         RAISE EXCEPTION 'invalid authenticated HostSession principal'
             USING ERRCODE='28000';
     END IF;
@@ -259,8 +254,7 @@ BEGIN
       INTO v_host_id, v_provider_id, v_cluster_scope, v_node_uid,
            v_not_before, v_expires_at, v_revoked_at
       FROM public.compute_host_identity_subject_grants AS g
-     WHERE g.subject=p_subject AND g.tenant_id=p_tenant_id
-       AND g.service_name=p_service_name;
+     WHERE g.subject=p_subject AND g.service_name='compute-host-agent';
 
     v_now := pg_catalog.clock_timestamp();
     IF NOT FOUND OR v_revoked_at IS NOT NULL
@@ -290,8 +284,6 @@ END;
 $authenticated_start$;
 
 CREATE FUNCTION public.compute_host_session_heartbeat_authenticated(
-    p_tenant_id TEXT,
-    p_service_name TEXT,
     p_subject TEXT,
     p_epoch BIGINT,
     p_session_id TEXT,
@@ -315,11 +307,8 @@ DECLARE
     v_revoked_at TIMESTAMPTZ;
     v_now TIMESTAMPTZ;
 BEGIN
-    IF p_tenant_id IS NULL OR pg_catalog.octet_length(p_tenant_id) NOT BETWEEN 1 AND 256
-       OR pg_catalog.btrim(p_tenant_id) <> p_tenant_id OR p_tenant_id ~ '[[:cntrl:]]'
-       OR p_service_name IS DISTINCT FROM 'compute-host-agent'
-       OR p_subject IS NULL OR pg_catalog.octet_length(p_subject) NOT BETWEEN 1 AND 1024
-       OR pg_catalog.btrim(p_subject) <> p_subject OR p_subject !~ '^spiffe://[^/]+/.+$' THEN
+    IF p_subject IS NULL OR pg_catalog.octet_length(p_subject) NOT BETWEEN 1 AND 1024
+       OR pg_catalog.btrim(p_subject) <> p_subject OR p_subject !~ '^spiffe://[^/]+/host/[^/]+$' THEN
         RAISE EXCEPTION 'invalid authenticated HostSession principal'
             USING ERRCODE='28000';
     END IF;
@@ -332,8 +321,7 @@ BEGIN
       INTO v_host_id, v_provider_id, v_cluster_scope, v_node_uid,
            v_not_before, v_expires_at, v_revoked_at
       FROM public.compute_host_identity_subject_grants AS g
-     WHERE g.subject=p_subject AND g.tenant_id=p_tenant_id
-       AND g.service_name=p_service_name;
+     WHERE g.subject=p_subject AND g.service_name='compute-host-agent';
 
     v_now := pg_catalog.clock_timestamp();
     IF NOT FOUND OR v_revoked_at IS NOT NULL
@@ -364,8 +352,8 @@ REVOKE ALL ON SEQUENCE public.compute_host_identity_subject_grant_audit_event_id
 REVOKE ALL ON FUNCTION public.compute_host_identity_subject_grant_guard() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.compute_host_identity_subject_grant_audit_append() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.compute_host_identity_subject_grant_audit_immutable() FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.compute_host_session_start_authenticated(TEXT,TEXT,TEXT,BIGINT,TEXT,INTEGER) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.compute_host_session_heartbeat_authenticated(TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.compute_host_session_start_authenticated(TEXT,BIGINT,TEXT,INTEGER) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.compute_host_session_heartbeat_authenticated(TEXT,BIGINT,TEXT,BIGINT,TEXT) FROM PUBLIC;
 
 GRANT USAGE ON SCHEMA public TO ccp_host_session_guard_owner;
 GRANT SELECT (
@@ -383,9 +371,9 @@ ALTER FUNCTION public.compute_host_identity_subject_grant_audit_append()
     OWNER TO ccp_host_session_guard_owner;
 ALTER FUNCTION public.compute_host_identity_subject_grant_audit_immutable()
     OWNER TO ccp_host_session_guard_owner;
-ALTER FUNCTION public.compute_host_session_start_authenticated(TEXT,TEXT,TEXT,BIGINT,TEXT,INTEGER)
+ALTER FUNCTION public.compute_host_session_start_authenticated(TEXT,BIGINT,TEXT,INTEGER)
     OWNER TO ccp_host_session_guard_owner;
-ALTER FUNCTION public.compute_host_session_heartbeat_authenticated(TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT)
+ALTER FUNCTION public.compute_host_session_heartbeat_authenticated(TEXT,BIGINT,TEXT,BIGINT,TEXT)
     OWNER TO ccp_host_session_guard_owner;
 
 SET ROLE ccp_host_session_guard_owner;
@@ -393,9 +381,9 @@ REVOKE EXECUTE ON FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT
     FROM ccp_host_session_writer;
 REVOKE EXECUTE ON FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT)
     FROM ccp_host_session_writer;
-GRANT EXECUTE ON FUNCTION public.compute_host_session_start_authenticated(TEXT,TEXT,TEXT,BIGINT,TEXT,INTEGER)
+GRANT EXECUTE ON FUNCTION public.compute_host_session_start_authenticated(TEXT,BIGINT,TEXT,INTEGER)
     TO ccp_host_session_writer;
-GRANT EXECUTE ON FUNCTION public.compute_host_session_heartbeat_authenticated(TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT)
+GRANT EXECUTE ON FUNCTION public.compute_host_session_heartbeat_authenticated(TEXT,BIGINT,TEXT,BIGINT,TEXT)
     TO ccp_host_session_writer;
 RESET ROLE;
 
@@ -416,9 +404,9 @@ COMMENT ON TABLE public.compute_host_identity_subject_grants IS
     'DBA-provisioned exact SPIFFE subject -> immutable HostIdentity binding grant; revocation is one-way and serialized with authenticated HostSession operations.';
 COMMENT ON TABLE public.compute_host_identity_subject_grant_audit IS
     'Append-only audit of HostIdentity subject grant creation and revocation; changed_by is the database session_user, not an asserted human identity.';
-COMMENT ON FUNCTION public.compute_host_session_start_authenticated(TEXT,TEXT,TEXT,BIGINT,TEXT,INTEGER) IS
+COMMENT ON FUNCTION public.compute_host_session_start_authenticated(TEXT,BIGINT,TEXT,INTEGER) IS
     'Authenticated HostSession start wrapper. Resolves active tenant/service/subject grant and serializes grant revocation before calling the internal epoch CAS.';
-COMMENT ON FUNCTION public.compute_host_session_heartbeat_authenticated(TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT) IS
+COMMENT ON FUNCTION public.compute_host_session_heartbeat_authenticated(TEXT,BIGINT,TEXT,BIGINT,TEXT) IS
     'Authenticated HostSession heartbeat wrapper. Resolves active tenant/service/subject grant and serializes grant revocation before recording the heartbeat.';
 
 DO $host_session_subject_grant_acl_attestation$
