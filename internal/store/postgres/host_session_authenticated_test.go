@@ -188,7 +188,6 @@ func TestHostSessionSubjectGrantRevocationFencesConcurrentHeartbeat(t *testing.T
 	}
 }
 
-
 func TestHostSessionSubjectGrantCannotBeSharedAcrossHostBindings(t *testing.T) {
 	admin := openIntegrationDB(t)
 	_, first := hostSessionFixture(t, admin)
