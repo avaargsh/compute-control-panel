@@ -103,9 +103,9 @@ func verifyHostCredentialRevocation(chains [][]*x509.Certificate, lists []*x509.
 
 // VerifyHostCredential validates presented DER certificates against an explicit,
 // host-only trust bundle and the v1 spiffe://domain/host/machine-id profile.
-// It is not proof of private-key possession, machine attestation, authorization
-// or revocation. A future direct mTLS transport must prove possession and
-// resolve the returned subject against the current independent host authority.
+// It is not proof of machine attestation or software authorization. A direct
+// mTLS listener must prove private-key possession, and the returned subject
+// must resolve against the current independent host authority.
 // No caller-provided certificate bytes alone may authorize a session write.
 func VerifyHostCredential(chain [][]byte, roots *x509.CertPool, trustDomain string, revocationLists []*x509.RevocationList, now time.Time) (string, error) {
 	if roots == nil || now.IsZero() || len(chain) == 0 || len(chain) > 8 || len(trustDomain) > 253 {
