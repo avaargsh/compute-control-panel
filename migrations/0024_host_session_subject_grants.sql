@@ -52,7 +52,7 @@ CREATE TABLE public.compute_host_identity_subject_grants (
         CHECK (pg_catalog.octet_length(subject) BETWEEN 1 AND 1024
                AND pg_catalog.btrim(subject)=subject
                AND subject !~ '[[:cntrl:]]'
-               AND subject ~ '^spiffe://[^/]+/.+$'),
+               AND subject ~ '^spiffe://[^/]+/host/[^/]+$'),
     tenant_id TEXT NOT NULL
         CHECK (pg_catalog.octet_length(tenant_id) BETWEEN 1 AND 256
                AND pg_catalog.btrim(tenant_id)=tenant_id
@@ -466,9 +466,9 @@ BEGIN
        OR pg_catalog.has_function_privilege(writer_oid,
           'public.compute_host_session_heartbeat(text,text,text,text,text,bigint,text,bigint,text)'::pg_catalog.regprocedure,'EXECUTE')
        OR NOT pg_catalog.has_function_privilege(writer_oid,
-          'public.compute_host_session_start_authenticated(text,text,text,bigint,text,integer)'::pg_catalog.regprocedure,'EXECUTE')
+          'public.compute_host_session_start_authenticated(text,bigint,text,integer)'::pg_catalog.regprocedure,'EXECUTE')
        OR NOT pg_catalog.has_function_privilege(writer_oid,
-          'public.compute_host_session_heartbeat_authenticated(text,text,text,bigint,text,bigint,text)'::pg_catalog.regprocedure,'EXECUTE') THEN
+          'public.compute_host_session_heartbeat_authenticated(text,bigint,text,bigint,text)'::pg_catalog.regprocedure,'EXECUTE') THEN
         RAISE EXCEPTION 'HostSession writer must execute authenticated wrappers only';
     END IF;
 
