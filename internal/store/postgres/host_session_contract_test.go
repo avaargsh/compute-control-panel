@@ -115,19 +115,19 @@ func TestHostSessionStartAndHeartbeatDatabaseContract(t *testing.T) {
 		t.Fatalf("lost-ACK start replay did not return the original fence: first=%+v replay=%+v err=%v", first, replayedStart, err)
 	}
 
+	// A new repository instance must observe the durable active epoch. It must
+	// not replace it merely because a process restarted or expectedEpoch is stale.
+	restarted, err := NewRepository(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	changedPayload := HostSessionStartRequest{
 		Binding: binding, ExpectedEpoch: 0, RequestID: "start-initial-" + binding.HostID, TTL: 30 * time.Second,
 	}
 	if _, err := restarted.StartHostSession(ctx, changedPayload); !errors.Is(err, ErrHostSessionRejected) ||
 		hostSessionSQLState(err) != "23514" {
 		t.Fatalf("same start request ID with changed TTL was not rejected: %v", err)
-	}
-
-	// A new repository instance must observe the durable active epoch. It must
-	// not replace it merely because a process restarted or expectedEpoch is stale.
-	restarted, err := NewRepository(db)
-	if err != nil {
-		t.Fatal(err)
 	}
 	if _, err := restarted.StartHostSession(ctx, HostSessionStartRequest{Binding: binding, ExpectedEpoch: 0, RequestID: "start-restart-" + binding.HostID, TTL: 60 * time.Second}); !errors.Is(err, ErrHostSessionRejected) ||
 		hostSessionSQLState(err) != "23514" {
