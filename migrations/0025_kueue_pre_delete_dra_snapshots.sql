@@ -73,8 +73,9 @@ CREATE TABLE public.kueue_job_pre_delete_dra_snapshots (
           AND consumer_container ~ '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'),
 
     devices JSONB NOT NULL
-        CHECK (pg_catalog.jsonb_typeof(devices) = 'array'
-          AND pg_catalog.jsonb_array_length(devices) BETWEEN 1 AND 128),
+        CHECK (CASE WHEN pg_catalog.jsonb_typeof(devices) = 'array'
+          THEN pg_catalog.jsonb_array_length(devices) BETWEEN 1 AND 128
+          ELSE FALSE END),
     source TEXT NOT NULL CHECK (source <> '' AND source = pg_catalog.btrim(source)),
     adapter_version TEXT NOT NULL CHECK (adapter_version <> '' AND adapter_version = pg_catalog.btrim(adapter_version)),
     observed_at TIMESTAMPTZ NOT NULL,
