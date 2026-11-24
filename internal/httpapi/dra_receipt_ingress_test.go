@@ -59,7 +59,7 @@ func draReceiptTestTLS() *tls.ConnectionState {
 	leaf := &x509.Certificate{Raw: []byte("verified-client-cert"), URIs: []*url.URL{{
 		Scheme: "spiffe", Host: "example.org", Path: "/ns/dra/sa/driver",
 	}}}
-	return &tls.ConnectionState{PeerCertificates: []*x509.Certificate{leaf}, VerifiedChains: [][]*x509.Certificate{{leaf}}}
+	return &tls.ConnectionState{Version: tls.VersionTLS13, PeerCertificates: []*x509.Certificate{leaf}, VerifiedChains: [][]*x509.Certificate{{leaf}}}
 }
 
 func draReceiptSPIFFEAuthenticator(t *testing.T) WorkloadAuthenticator {
