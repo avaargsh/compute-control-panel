@@ -27,6 +27,7 @@ const hostSessionIngressSubject = "spiffe://ccp.example/host/machine-001"
 
 type hostSessionIngressRepositoryStub struct {
 	mu               sync.Mutex
+	binding          hostidentity.Binding
 	startRequest     postgres.AuthenticatedHostSessionStartRequest
 	heartbeatRequest postgres.AuthenticatedHostHeartbeatRequest
 	fence            hostidentity.SessionFence
@@ -36,19 +37,6 @@ type hostSessionIngressRepositoryStub struct {
 	heartbeatErr     error
 	startCalls       int
 	heartbeatCalls   int
-}
-
-func (s *hostSessionIngressRepositoryStub) ResolveHostBinding(
-	_ context.Context, subject string,
-) (hostidentity.Binding, error) {
-	s.resolveCalls++
-	if s.resolveErr != nil {
-		return hostidentity.Binding{}, s.resolveErr
-	}
-	if s.binding.Subject != subject {
-		return hostidentity.Binding{}, errors.New("unknown host subject")
-	}
-	return s.binding, nil
 }
 
 func (s *hostSessionIngressRepositoryStub) StartAuthenticatedHostSession(
@@ -189,7 +177,7 @@ func startHostSessionIngressTLSServer(
 }
 
 func newHostSessionIngressHandler(
-	t *testing.T, repo *hostSessionIngressRepositoryStub,
+	t *testing.T, roots *x509.CertPool, repo *hostSessionIngressRepositoryStub,
 ) http.Handler {
 	t.Helper()
 	if repo.binding.Subject == "" {
@@ -199,7 +187,7 @@ func newHostSessionIngressHandler(
 		}
 	}
 	handler, err := NewHostSessionIngressHandler(HostSessionIngressDependencies{
-		HostTrustDomain: "ccp.example", Now: time.Now, Repository: repo,
+		HostTrustRoots: roots, HostTrustDomain: "ccp.example", Repository: repo,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -237,7 +225,7 @@ func TestHostSessionIngressStartsAndRecordsOnlyDedicatedHostCredential(t *testin
 		},
 		disposition: hostidentity.Accept, recordedAt: recordedAt,
 	}
-	handler := newHostSessionIngressHandler(t, repo)
+	handler := newHostSessionIngressHandler(t, authority.roots, repo)
 	server, client := startHostSessionIngressTLSServer(t, handler, authority.roots, &clientCert)
 
 	start, err := http.NewRequest(http.MethodPost, server.URL+hostSessionStartPath,
