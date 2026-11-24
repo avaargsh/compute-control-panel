@@ -171,6 +171,10 @@ REVOKE ALL ON FUNCTION public.compute_host_identity_enrollment_guard() FROM PUBL
 -- Keep that capability inside this transaction, never on the runtime role.
 GRANT CREATE ON SCHEMA public TO ccp_host_identity_guard_owner;
 ALTER FUNCTION public.compute_host_identity_enrollment_guard() OWNER TO ccp_host_identity_guard_owner;
+-- The migration role needed EXECUTE to attach the trigger before ownership
+-- transfer. Remove that temporary creator grant; only the NOLOGIN function
+-- owner retains EXECUTE after this point.
+REVOKE ALL ON FUNCTION public.compute_host_identity_enrollment_guard() FROM CURRENT_USER;
 REVOKE CREATE ON SCHEMA public FROM ccp_host_identity_guard_owner;
 
 ALTER TABLE public.compute_host_identity_bindings
