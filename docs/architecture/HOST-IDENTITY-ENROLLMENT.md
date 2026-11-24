@@ -1,6 +1,6 @@
 # HostIdentity PostgreSQL enrollment boundary
 
-Status: **unmounted authenticated-ingress candidate**. Immutable HostIdentity bindings and durable session-epoch/heartbeat receipts exist in PostgreSQL. The dedicated host-only X.509 verifier, revocable subject-grant boundary and standalone session/heartbeat HTTP handler are implemented in PR #197 but are not mounted. No independent hardware attestation, administrator enrollment workflow, certificate CRL/OCSP revocation, Kubernetes Lease ingestion, hardware trust, or GPU capacity authority is enabled.
+Status: **unmounted authenticated-ingress candidate**. Immutable HostIdentity bindings and durable session-epoch/heartbeat receipts exist in PostgreSQL. The dedicated host-only X.509 verifier, revocable subject-grant boundary and standalone session/heartbeat HTTP handler are implemented in PR #200 but are not mounted. No independent hardware attestation, administrator enrollment workflow, certificate CRL/OCSP revocation, Kubernetes Lease ingestion, hardware trust, or GPU capacity authority is enabled.
 
 ## Authority and lifecycle
 
@@ -63,7 +63,7 @@ The session table intentionally has no foreign key to the binding table: session
 
 The raw tuple-based database entrypoints are internal persistence primitives, not host authentication. Production ingress must call only the authenticated wrappers. Migration 0024 adds an immutable DBA-provisioned subject grant, a one-way DB-timestamped revocation field, append-only grant audit, and a fixed-search-path SECURITY DEFINER wrapper that resolves the subject to the exact immutable binding. The writer cannot read or mutate the grant table or invoke the raw functions.
 
-## Implemented authenticated host ingress candidate (PR #197; not mounted)
+## Implemented authenticated host ingress candidate (PR #200; not mounted)
 
 The transport identity is a **dedicated machine certificate**, not a workload/Console service-account identity. The standalone handler in `internal/httpapi/host_session_ingress.go` uses the host-only verifier in `internal/hostidentity/credential.go`; it does not call the workload SPIFFE authenticator or accept a tenant, service, subject, HostID, ProviderID, cluster scope or Node UID from request JSON.
 
