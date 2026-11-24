@@ -108,6 +108,12 @@ DECLARE
     pinned_workload_id TEXT;
     pinned_provider_id TEXT;
 BEGIN
+    IF NEW.operation_kind <> 'DELETE' OR
+       NEW.target_resource_id <> NEW.namespace || '/' || NEW.job_name OR
+       NEW.target_resource_uid <> NEW.job_uid THEN
+        RAISE EXCEPTION 'DELETE tombstone target does not match its Job identity'
+            USING ERRCODE = '23514';
+    END IF;
     SELECT tenant_id, job_uid, workload_id, provider_id
       INTO pinned_tenant_id, pinned_job_uid, pinned_workload_id, pinned_provider_id
       FROM public.kueue_job_create_pins
