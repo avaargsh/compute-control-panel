@@ -499,7 +499,7 @@ COMMENT ON TABLE public.compute_host_sessions IS
 COMMENT ON TABLE public.compute_host_session_heartbeats IS
     'Append-only per-epoch heartbeat receipts; exact replay is idempotent and does not extend session expiry.';
 COMMENT ON FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,INTEGER) IS
-    'Unmounted internal CAS entrypoint; caller must authenticate/revoke principal before invoking; locks Provider and immutable HostIdentity binding.';
+    'Unmounted internal CAS entrypoint; caller must authenticate/revoke principal and persist/reuse a stable start_request_id; exact replay returns the original session, changed payload is rejected.';
 COMMENT ON FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT) IS
     'Unmounted internal heartbeat entrypoint; enforces active latest epoch, DB clock, monotonic sequence and exact replay without expiry extension.';
 
