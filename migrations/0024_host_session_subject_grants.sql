@@ -73,6 +73,9 @@ CREATE TABLE public.compute_host_identity_subject_grants (
     FOREIGN KEY (host_id, provider_id, cluster_scope, node_uid, subject)
         REFERENCES public.compute_host_identity_bindings
             (host_id, provider_id, cluster_scope, node_uid, subject),
+    CHECK (pg_catalog.split_part(subject,'/host/',2)=host_id
+       AND pg_catalog.strpos(pg_catalog.split_part(subject,'/host/',2),'/')=0
+       AND pg_catalog.split_part(subject,'/host/',3)=''),
     CHECK (expires_at IS NULL OR not_before < expires_at),
     CHECK ((revoked_at IS NULL) = (revocation_reason IS NULL))
 );
@@ -406,9 +409,9 @@ COMMENT ON TABLE public.compute_host_identity_subject_grants IS
 COMMENT ON TABLE public.compute_host_identity_subject_grant_audit IS
     'Append-only audit of HostIdentity subject grant creation and revocation; changed_by is the database session_user, not an asserted human identity.';
 COMMENT ON FUNCTION public.compute_host_session_start_authenticated(TEXT,BIGINT,TEXT,INTEGER) IS
-    'Authenticated HostSession start wrapper. Resolves active tenant/service/subject grant and serializes grant revocation before calling the internal epoch CAS.';
+    'Authenticated HostSession start wrapper. Resolves the dedicated host-certificate subject grant and serializes revocation before the internal epoch CAS.';
 COMMENT ON FUNCTION public.compute_host_session_heartbeat_authenticated(TEXT,BIGINT,TEXT,BIGINT,TEXT) IS
-    'Authenticated HostSession heartbeat wrapper. Resolves active tenant/service/subject grant and serializes grant revocation before recording the heartbeat.';
+    'Authenticated HostSession heartbeat wrapper. Resolves the dedicated host-certificate subject grant and serializes revocation before recording the heartbeat.';
 
 DO $host_session_subject_grant_acl_attestation$
 DECLARE
