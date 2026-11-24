@@ -230,4 +230,3 @@ func preDeleteSnapshotMatchesDelete(snapshot KueuePreDeleteDRASnapshot, namespac
 			return got
 		}())
 }
-
