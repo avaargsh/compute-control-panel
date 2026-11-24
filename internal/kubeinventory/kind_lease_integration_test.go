@@ -9,6 +9,39 @@ import (
 	"time"
 )
 
+// TestKindLeaseBeforeGrantIsForbidden uses the actual short-lived
+// ServiceAccount Token, not a kubectl impersonated SubjectAccessReview.
+// It is run before creating the disposable Lease RoleBinding.
+func TestKindLeaseBeforeGrantIsForbidden(t *testing.T) {
+	if os.Getenv("CCP_KIND_INVENTORY_SMOKE") != "1" || os.Getenv("CCP_KIND_LEASE_PREGRANT") != "1" {
+		t.Skip("requires the disposable kind pre-grant RBAC phase")
+	}
+	required := func(name string) string {
+		t.Helper()
+		value := os.Getenv(name)
+		if value == "" {
+			t.Fatalf("missing kind pre-grant environment %s", name)
+		}
+		return value
+	}
+	reader, err := NewReader(Config{
+		APIServer: required("CCP_KIND_API_SERVER"),
+		CAFile: required("CCP_KIND_CA_FILE"),
+		TokenFile: required("CCP_KIND_ALLOWED_TOKEN_FILE"),
+		ClusterID: "kind-inventory", TenantID: "tenant-kind", ProjectID: "project-kind",
+		ResourceNames: []string{"nvidia.com/gpu"},
+		ObservationTTL: time.Minute, Timeout: 10 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if _, err := reader.getNodeLease(ctx, required("CCP_KIND_LEASE_NODE_NAME")); !errors.Is(err, ErrLeaseForbidden) {
+		t.Fatalf("authorized inventory SA unexpectedly has pre-grant Lease GET (expected 403), err=%v", err)
+	}
+}
+
 // TestKindLeaseGetLeastPrivilege is an opt-in, real Kubernetes API and RBAC
 // acceptance test. The disposable kind script provides short-lived credentials
 // and the exact Node Lease name. It does not prove physical GPU health.
