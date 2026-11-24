@@ -39,7 +39,7 @@ type draReceiptTestResolver struct {
 
 func (r *draReceiptTestResolver) ResolveDRAReceiptVerifier(_ context.Context, _ WorkloadPrincipal, _ provider.DRAUnprepareEvent) (DRAReceiptVerifierResolution, error) {
 	r.verifierCalls++
-	return DRAReceiptVerifierResolution{Verifier: r.verifier, ServerNow: r.serverNow}, nil
+	return DRAReceiptVerifierResolution{Verifier: r.verifier, DatabaseNow: r.serverNow}, nil
 }
 
 func (r *draReceiptTestResolver) ResolveDRAReceiptEvidence(_ context.Context, _ WorkloadPrincipal, _ provider.DRAUnprepareEvent) (provider.ReleaseEvidenceCandidate, error) {
