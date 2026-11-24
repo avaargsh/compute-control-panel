@@ -200,16 +200,16 @@ func TestSignedRecordedAndCurrentGenerationOneTransaction(t *testing.T) {
 		"sha256:"+strings.Repeat("c", 64), "delete-req-"+suffix, p.TargetResourceID, p.TargetResourceUID)
 	asOf := time.Now().UTC()
 	candidate, signed, verifier, privateKey := signedSameTxFixture(t, p, asOf)
-	probe := func(f ReleaseCommitFence, c provider.ReleaseEvidenceCandidate, s provider.SignedDRAUnprepare) error {
+	probe := func(c provider.ReleaseEvidenceCandidate, s provider.SignedDRAUnprepare) error {
 		t.Helper()
 		tx, e := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 		if e != nil {
 			t.Fatal(e)
 		}
 		defer tx.Rollback()
-		return ValidateRecordedReleaseSameTx(ctx, tx, f, verifier, c, s, asOf)
+		return ValidateRecordedReleaseSameTx(ctx, tx, p.TenantID, p.WorkloadID, p.AllocationID, p.CreateOperationID, p.DeleteOperationID, verifier, c, s, asOf)
 	}
-	if e := probe(p, candidate, signed); !errors.Is(e, provider.ErrDRAReceiptSourceUntrusted) {
+	if e := probe(candidate, signed); !errors.Is(e, provider.ErrDRAReceiptSourceUntrusted) {
 		t.Fatalf("unregistered signer accepted before journal lookup: %v", e)
 	}
 	// A separate disposable-DBA test principal registers the exact signer.
@@ -220,7 +220,7 @@ func TestSignedRecordedAndCurrentGenerationOneTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if e := probe(p, candidate, signed); !errors.Is(e, provider.ErrDRAReceiptNotRecorded) {
+	if e := probe(candidate, signed); !errors.Is(e, provider.ErrDRAReceiptNotRecorded) {
 		t.Fatalf("registered but not recorded event accepted: %v", e)
 	}
 	dsn, err := url.Parse(os.Getenv("DATABASE_URL"))
@@ -236,7 +236,7 @@ func TestSignedRecordedAndCurrentGenerationOneTransaction(t *testing.T) {
 	if fresh, e := journal.VerifyAndRecord(ctx, verifier, candidate, signed, asOf); e != nil || !fresh {
 		t.Fatalf("restricted signed journal append: fresh=%t err=%v", fresh, e)
 	}
-	if e := probe(p, candidate, signed); e != nil {
+	if e := probe(candidate, signed); e != nil {
 		t.Fatalf("matching current generation and recorded source refused: %v", e)
 	}
 	t.Run("historical node binding without native Kueue admission rejected", func(t *testing.T) {
@@ -244,16 +244,16 @@ func TestSignedRecordedAndCurrentGenerationOneTransaction(t *testing.T) {
 			bad := candidate
 			bad.PriorQueue.Job.KueueAdmitted = false
 			bad.PriorQueue.Job.KueueAdmissionCondition = provider.KueueConditionEvidence{Status: nativeStatus}
-			if e := probe(p, bad, signed); !errors.Is(e, provider.ErrUncorrelatedDRAUnprepare) {
+			if e := probe(bad, signed); !errors.Is(e, provider.ErrUncorrelatedDRAUnprepare) {
 				t.Fatalf("native admission %q promoted release evidence: %v", nativeStatus, e)
 			}
 		}
 	})
 	t.Run("successor Job UID rejected", func(t *testing.T) {
-		bad := p
-		bad.TargetResourceUID = "successor-uid"
-		if e := probe(bad, candidate, signed); !errors.Is(e, ErrReleaseCommitFence) {
-			t.Fatalf("successor UID accepted: %v", e)
+		bad := candidate
+		bad.Create.ProviderResourceUID = "successor-uid"
+		if e := probe(bad, signed); !errors.Is(e, provider.ErrUncorrelatedDRAUnprepare) {
+			t.Fatalf("mismatched CREATE resource UID accepted: %v", e)
 		}
 	})
 	t.Run("signed but unrecorded new event rejected", func(t *testing.T) {
@@ -264,7 +264,7 @@ func TestSignedRecordedAndCurrentGenerationOneTransaction(t *testing.T) {
 			t.Fatal(e)
 		}
 		other.Signature = ed25519.Sign(privateKey, append([]byte("CCP:DRA:NodeUnprepareResources:v1\n"), payload...))
-		if e := probe(p, candidate, other); !errors.Is(e, provider.ErrDRAReceiptNotRecorded) {
+		if e := probe(candidate, other); !errors.Is(e, provider.ErrDRAReceiptNotRecorded) {
 			t.Fatalf("unrecorded event accepted: %v", e)
 		}
 	})
@@ -272,7 +272,7 @@ func TestSignedRecordedAndCurrentGenerationOneTransaction(t *testing.T) {
 		tampered := signed
 		tampered.Signature = append([]byte(nil), signed.Signature...)
 		tampered.Signature[0] ^= 0xff
-		if e := probe(p, candidate, tampered); !errors.Is(e, provider.ErrUncorrelatedDRAUnprepare) {
+		if e := probe(candidate, tampered); !errors.Is(e, provider.ErrUncorrelatedDRAUnprepare) {
 			t.Fatalf("bad signature accepted: %v", e)
 		}
 	})
@@ -282,7 +282,7 @@ func TestSignedRecordedAndCurrentGenerationOneTransaction(t *testing.T) {
 			t.Fatal(e)
 		}
 		defer holder.Rollback()
-		if e := ValidateRecordedReleaseSameTx(ctx, holder, p, verifier, candidate, signed, asOf); e != nil {
+		if e := ValidateRecordedReleaseSameTx(ctx, holder, p.TenantID, p.WorkloadID, p.AllocationID, p.CreateOperationID, p.DeleteOperationID, verifier, candidate, signed, asOf); e != nil {
 			t.Fatalf("same-transaction preflight: %v", e)
 		}
 		for _, tc := range []struct {
@@ -317,13 +317,13 @@ func TestSignedRecordedAndCurrentGenerationOneTransaction(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		if e := probe(p, candidate, signed); !errors.Is(e, provider.ErrDRAReceiptSourceUntrusted) {
+		if e := probe(candidate, signed); !errors.Is(e, provider.ErrDRAReceiptSourceUntrusted) {
 			t.Fatalf("revoked signer accepted: %v", e)
 		}
 	})
 	t.Run("superseding generation remains fail closed", func(t *testing.T) {
 		mustExecOne("UPDATE public.compute_workloads SET desired_generation=3, version=version+1 WHERE tenant_id=$1 AND workload_id=$2", p.TenantID, p.WorkloadID)
-		if e := probe(p, candidate, signed); !errors.Is(e, ErrReleaseCommitFence) {
+		if e := probe(candidate, signed); !errors.Is(e, ErrReleaseCommitFence) {
 			t.Fatalf("stale generation passed: %v", e)
 		}
 	})
