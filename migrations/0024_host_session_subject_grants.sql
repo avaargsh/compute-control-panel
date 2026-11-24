@@ -240,6 +240,7 @@ DECLARE
     v_expires_at TIMESTAMPTZ;
     v_revoked_at TIMESTAMPTZ;
     v_now TIMESTAMPTZ;
+    v_result RECORD;
 BEGIN
     IF p_tenant_id IS NULL OR pg_catalog.octet_length(p_tenant_id) NOT BETWEEN 1 AND 256
        OR pg_catalog.btrim(p_tenant_id) <> p_tenant_id OR p_tenant_id ~ '[[:cntrl:]]'
@@ -247,7 +248,7 @@ BEGIN
        OR p_subject IS NULL OR pg_catalog.octet_length(p_subject) NOT BETWEEN 1 AND 1024
        OR pg_catalog.btrim(p_subject) <> p_subject OR p_subject !~ '^spiffe://[^/]+/.+$' THEN
         RAISE EXCEPTION 'invalid authenticated HostSession principal'
-            USING ERRCODE='42501';
+            USING ERRCODE='28000';
     END IF;
 
     PERFORM pg_catalog.pg_advisory_xact_lock_shared(
@@ -266,14 +267,25 @@ BEGIN
        OR v_not_before > v_now
        OR (v_expires_at IS NOT NULL AND v_expires_at <= v_now) THEN
         RAISE EXCEPTION 'HostIdentity subject grant is absent, expired or revoked'
-            USING ERRCODE='42501';
+            USING ERRCODE='28000';
     END IF;
 
-    RETURN QUERY
-    SELECT * FROM public.compute_host_session_start(
+    SELECT * INTO STRICT v_result FROM public.compute_host_session_start(
         v_host_id, v_provider_id, v_cluster_scope, v_node_uid, p_subject,
         p_expected_epoch, p_start_request_id, p_ttl_seconds
     );
+    -- The raw CAS may wait on Provider/binding/request locks. Recheck
+    -- after it returns; an exception rolls back any tentative insertion.
+    v_now := pg_catalog.clock_timestamp();
+    IF v_now < v_not_before
+       OR (v_expires_at IS NOT NULL AND
+           (v_now >= v_expires_at OR v_result.expires_at > v_expires_at)) THEN
+        RAISE EXCEPTION 'HostIdentity authorization window cannot cover session'
+            USING ERRCODE='28000';
+    END IF;
+    RETURN QUERY SELECT v_result.host_id, v_result.epoch, v_result.session_id,
+        v_result.provider_id, v_result.cluster_scope, v_result.node_uid,
+        v_result.subject, v_result.issued_at, v_result.expires_at;
 END;
 $authenticated_start$;
 
@@ -309,7 +321,7 @@ BEGIN
        OR p_subject IS NULL OR pg_catalog.octet_length(p_subject) NOT BETWEEN 1 AND 1024
        OR pg_catalog.btrim(p_subject) <> p_subject OR p_subject !~ '^spiffe://[^/]+/.+$' THEN
         RAISE EXCEPTION 'invalid authenticated HostSession principal'
-            USING ERRCODE='42501';
+            USING ERRCODE='28000';
     END IF;
 
     PERFORM pg_catalog.pg_advisory_xact_lock_shared(
@@ -328,7 +340,7 @@ BEGIN
        OR v_not_before > v_now
        OR (v_expires_at IS NOT NULL AND v_expires_at <= v_now) THEN
         RAISE EXCEPTION 'HostIdentity subject grant is absent, expired or revoked'
-            USING ERRCODE='42501';
+            USING ERRCODE='28000';
     END IF;
 
     RETURN QUERY
@@ -336,6 +348,13 @@ BEGIN
         v_host_id, v_provider_id, v_cluster_scope, v_node_uid, p_subject,
         p_epoch, p_session_id, p_sequence, p_digest
     );
+    -- RETURN QUERY buffers rows; raising here rolls back the receipt too.
+    v_now := pg_catalog.clock_timestamp();
+    IF v_now < v_not_before
+       OR (v_expires_at IS NOT NULL AND v_now >= v_expires_at) THEN
+        RAISE EXCEPTION 'HostIdentity authorization expired during heartbeat'
+            USING ERRCODE='28000';
+    END IF;
 END;
 $authenticated_heartbeat$;
 
