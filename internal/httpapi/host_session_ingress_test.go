@@ -97,8 +97,8 @@ func newHostCredentialAuthority(t *testing.T) *hostCredentialAuthority {
 	}
 	caTemplate := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
-		Subject: pkix.Name{CommonName: "CCP host-only test CA"},
-		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour),
+		Subject:      pkix.Name{CommonName: "CCP host-only test CA"},
+		NotBefore:    now.Add(-time.Hour), NotAfter: now.Add(time.Hour),
 		IsCA: true, BasicConstraintsValid: true,
 		KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
 	}
@@ -128,10 +128,10 @@ func (a *hostCredentialAuthority) issue(t *testing.T, subject string, serial int
 	}
 	leafTemplate := &x509.Certificate{
 		SerialNumber: big.NewInt(serial),
-		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour),
-		KeyUsage: x509.KeyUsageDigitalSignature,
+		NotBefore:    now.Add(-time.Hour), NotAfter: now.Add(time.Hour),
+		KeyUsage:    x509.KeyUsageDigitalSignature,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
-		URIs: []*url.URL{uri},
+		URIs:        []*url.URL{uri},
 	}
 	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, a.ca, publicKey, a.key)
 	if err != nil {
@@ -143,8 +143,8 @@ func (a *hostCredentialAuthority) issue(t *testing.T, subject string, serial int
 	}
 	return tls.Certificate{
 		Certificate: [][]byte{leafDER, a.ca.Raw},
-		PrivateKey: privateKey,
-		Leaf: leaf,
+		PrivateKey:  privateKey,
+		Leaf:        leaf,
 	}
 }
 
@@ -156,7 +156,7 @@ func startHostSessionIngressTLSServer(
 	server.TLS = &tls.Config{
 		MinVersion: tls.VersionTLS13,
 		ClientAuth: tls.RequireAndVerifyClientCert,
-		ClientCAs: roots,
+		ClientCAs:  roots,
 	}
 	server.StartTLS()
 	t.Cleanup(server.Close)
