@@ -254,6 +254,89 @@ func TestHostSessionExpiredEpochReplacementAndProviderDrain(t *testing.T) {
 	}
 }
 
+// A Provider Drain that already owns the Provider row lock must serialize
+// against session issuance. Once Drain commits, the waiting start must reject.
+func TestHostSessionStartWaitsForProviderDrain(t *testing.T) {
+	db := openIntegrationDB(t)
+	repo, binding := hostSessionFixture(t, db)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+
+	var drainPID int
+	if err := tx.QueryRowContext(ctx, `SELECT pg_catalog.pg_backend_pid()`).Scan(&drainPID); err != nil {
+		t.Fatal(err)
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE public.compute_providers
+		SET state='DRAINING', version=2,
+		    last_reason_code='SESSION_START_RACE',
+		    updated_at=pg_catalog.clock_timestamp()
+		WHERE provider_id=$1 AND state='REGISTERED' AND version=1
+	`, binding.ProviderID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count, err := result.RowsAffected(); err != nil || count != 1 {
+		t.Fatalf("Drain lock fixture rows=%d err=%v", count, err)
+	}
+
+	started := make(chan error, 1)
+	go func() {
+		_, err := repo.StartHostSession(ctx, HostSessionStartRequest{
+			Binding: binding, ExpectedEpoch: 0,
+			RequestID: "start-drain-race-" + binding.HostID,
+			TTL:       30 * time.Second,
+		})
+		started <- err
+	}()
+
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	waiting := false
+	for !waiting {
+		select {
+		case err := <-started:
+			t.Fatalf("session start completed before the Drain row lock was released: %v", err)
+		case <-deadline.C:
+			t.Fatal("session start never waited behind the Provider Drain row lock")
+		case <-ticker.C:
+			if err := db.QueryRowContext(ctx, `
+				SELECT $1 = ANY(pg_catalog.pg_blocking_pids($2))
+			`, drainPID, backendPIDForHostSession(t, ctx, db, binding.HostID)).Scan(&waiting); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-started:
+		if !errors.Is(err, ErrHostSessionRejected) || hostSessionSQLState(err) != "23514" {
+			t.Fatalf("session start after committed Drain should reject, got %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("session start did not finish after Drain committed")
+	}
+
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM public.compute_host_sessions WHERE host_id=$1`, binding.HostID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("session rows after Drain won race=%d, want 0", count)
+	}
+}
+
 func TestHostSessionConcurrentStartHasOneWinner(t *testing.T) {
 	db := openIntegrationDB(t)
 	repo, binding := hostSessionFixture(t, db)
