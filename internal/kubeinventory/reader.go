@@ -223,7 +223,10 @@ type nodeList struct {
 }
 
 type node struct {
+	APIVersion string `json:"apiVersion"`
+	Kind       string `json:"kind"`
 	Metadata struct {
+		Namespace         string  `json:"namespace"`
 		Name              string  `json:"name"`
 		UID               string  `json:"uid"`
 		ResourceVersion   string  `json:"resourceVersion"`
