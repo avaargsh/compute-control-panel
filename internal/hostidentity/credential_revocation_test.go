@@ -349,7 +349,7 @@ func TestHostCredentialRevocationListStoreConcurrentReadersObserveAtomicSnapshot
 	const iterations = 32
 	start := make(chan struct{})
 	firstReads := make(chan struct{}, readers)
-	errorsSeen := make(chan error, readers*iterations)
+	errorsSeen := make(chan error, readers*(iterations+1))
 	var wg sync.WaitGroup
 	for i := 0; i < readers; i++ {
 		wg.Add(1)
