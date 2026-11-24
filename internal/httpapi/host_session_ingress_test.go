@@ -93,7 +93,7 @@ func TestNewHostSessionIngressHandlerRequiresSPIFFEAuthenticatorAndRepository(t 
 		Authenticator: hostSessionIngressFakeAuthenticator{principal: WorkloadPrincipal{
 			TenantID: "tenant-host-ingress", Subject: hostSessionIngressSubject, Service: "compute-host-agent",
 		}},
-		Repository: repo,
+		Repository:    repo,
 	}); err == nil {
 		t.Fatal("arbitrary authenticator was allowed to impersonate the TLS peer")
 	}
@@ -114,7 +114,7 @@ func TestHostSessionIngressStartsAndRecordsOnlyAuthenticatedHostAgent(t *testing
 	}
 	handler, err := NewHostSessionIngressHandler(HostSessionIngressDependencies{
 		Authenticator: hostSessionIngressAuthenticator(t, "compute-host-agent"),
-		Repository: repo,
+		Repository:    repo,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -181,7 +181,7 @@ func TestHostSessionIngressRejectsUnauthenticatedAndNonHostPrincipals(t *testing
 	repo := &hostSessionIngressRepositoryStub{}
 	handler, err := NewHostSessionIngressHandler(HostSessionIngressDependencies{
 		Authenticator: hostSessionIngressAuthenticator(t, "agent-runtime"),
-		Repository: repo,
+		Repository:    repo,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -210,7 +210,7 @@ func TestHostSessionIngressRejectsAmbiguousHeartbeatJSONAndInvalidSessionFields(
 	repo := &hostSessionIngressRepositoryStub{}
 	handler, err := NewHostSessionIngressHandler(HostSessionIngressDependencies{
 		Authenticator: hostSessionIngressAuthenticator(t, "compute-host-agent"),
-		Repository: repo,
+		Repository:    repo,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -238,7 +238,7 @@ func TestHostSessionIngressMapsRepositoryFencesWithoutLeakingErrors(t *testing.T
 	repo := &hostSessionIngressRepositoryStub{startErr: postgres.ErrHostSessionUnauthorized}
 	handler, err := NewHostSessionIngressHandler(HostSessionIngressDependencies{
 		Authenticator: hostSessionIngressAuthenticator(t, "compute-host-agent"),
-		Repository: repo,
+		Repository:    repo,
 	})
 	if err != nil {
 		t.Fatal(err)
