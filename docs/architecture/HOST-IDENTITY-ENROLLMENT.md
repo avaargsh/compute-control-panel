@@ -80,7 +80,7 @@ The transport identity is a **dedicated machine certificate**, not a workload/Co
 
 Migration `0024_host_session_subject_grants.sql` creates `compute_host_identity_subject_grants` and its append-only audit table.
 
-- A DBA/operator provisions a grant only after independent enrollment approval. The row binds one dedicated host URI subject to one immutable HostID/Provider/cluster/native Node UID tuple and records the owning tenant. The subject suffix must equal HostID; subject is unique and HostID is unique, so one service-account certificate cannot silently become a shared identity for multiple hosts.
+- A DBA/operator provisions a grant only after independent enrollment approval. The row binds one dedicated host URI subject (whose machine-id is an external identity, not necessarily the internal HostID) to one immutable HostID/Provider/cluster/native Node UID tuple and records the owning tenant. Subject is a primary key and HostID is unique, so one host certificate cannot silently become a shared identity for multiple hosts, nor can one HostID be silently rebound to another subject.
 - Grants are not created by the host endpoint. Runtime writer credentials cannot SELECT/INSERT/UPDATE/DELETE/TRUNCATE grants or read the audit table. The grant owner remains a separate administrative boundary.
 - Revocation is a one-way `revoked_at` / reason update. A trigger assigns the database timestamp and appends an audit event with `session_user`; grants and audit history cannot be deleted or truncated.
 - The authenticated SQL wrappers accept only the verified certificate subject. They resolve the exact grant and fixed `compute-host-agent` service in PostgreSQL; tenant/service are not caller-supplied parameters. They acquire a transaction-scoped shared advisory lock keyed by subject. The revocation trigger acquires the matching exclusive lock, so an in-flight start/heartbeat commits before revocation, while a request queued behind revocation observes the revoked grant.
@@ -93,8 +93,8 @@ Provisioning is an administrative operation, not an API. Example shape (replace 
 INSERT INTO public.compute_host_identity_subject_grants
     (subject, tenant_id, service_name, host_id, provider_id, cluster_scope, node_uid, expires_at)
 VALUES
-    ('spiffe://ccp.example/host/<host-id>', '<tenant-id>', 'compute-host-agent',
-     '<host-id>', '<provider-id>', '<cluster-scope>', '<native-node-uid>', '<authorization-expiry>');
+    ('spiffe://ccp.example/host/<machine-id>', '<tenant-id>', 'compute-host-agent',
+     '<internal-host-id>', '<provider-id>', '<cluster-scope>', '<native-node-uid>', '<authorization-expiry>');
 ```
 
 Revoke a subject once; the trigger supplies the authoritative timestamp and appends the audit row:
@@ -129,7 +129,7 @@ The handler registers routes only on a private mux returned by `NewHostSessionIn
 | Case | Required outcome |
 | --- | --- |
 | No mTLS, wrong host CA, expired certificate, workload URI, ambiguous/non-canonical SAN | Reject before repository call |
-| Certificate URI subject has no exact grant, wrong host suffix, wrong immutable binding or revoked/expired grant | Reject; no session/heartbeat row |
+| Certificate URI subject has no exact grant, maps to the wrong immutable binding, or has a revoked/expired grant | Reject; no session/heartbeat row |
 | Same subject mapped to another HostID or another subject mapped to an existing HostID | Database uniqueness/FK/check rejection |
 | Grant revocation races session start/heartbeat | Shared/exclusive subject lock gives one clear order; requests after revocation reject |
 | Grant expires while waiting on Provider/binding locks | Postflight DB-clock check rejects and rolls back tentative rows |
