@@ -320,7 +320,7 @@ func (s *PostgresKueueJobBindingStore) PutPreDeleteDRASnapshot(
 		}
 		return previous, nil
 	}
-	tomb, hasTombstone, err := queryKueueDeleteTombstone(ctx, tx,
+	_, hasTombstone, err := queryKueueDeleteTombstone(ctx, tx,
 		selectKueueDeleteTombstoneSQL+" FOR UPDATE", namespace, req.TenantID, req.OperationID)
 	if err != nil {
 		return KueuePreDeleteDRASnapshot{}, err
