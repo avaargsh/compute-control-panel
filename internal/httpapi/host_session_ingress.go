@@ -49,11 +49,12 @@ type hostSessionIngressHandler struct {
 // the same narrowly scoped host CA bundle.
 func NewHostSessionIngressHandler(deps HostSessionIngressDependencies) (http.Handler, error) {
 	if deps.HostTrustRoots == nil || strings.TrimSpace(deps.HostTrustDomain) == "" ||
+		strings.TrimSpace(deps.HostTrustDomain) != deps.HostTrustDomain ||
 		len(deps.HostTrustDomain) > 253 || missingProviderManagementDependency(deps.Repository) {
 		return nil, errors.New("host session ingress requires a dedicated host trust bundle, trust domain and repository")
 	}
 	h := &hostSessionIngressHandler{
-		roots: deps.HostTrustRoots, trustDomain: deps.HostTrustDomain, repo: deps.Repository,
+		roots: deps.HostTrustRoots.Clone(), trustDomain: deps.HostTrustDomain, repo: deps.Repository,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST "+hostSessionStartPath, h.start)
