@@ -56,7 +56,7 @@ func releaseCandidateFixture() ReleaseEvidenceCandidate {
 		ProviderResourceID: "tenant-a/job-a", ProviderResourceUID: "job-uid-a",
 	}
 	claim := previousDRAClaimAllocation()
-	return ReleaseEvidenceCandidate{
+	candidate := ReleaseEvidenceCandidate{
 		ExpectedAllocationID: "allocation-a",
 
 		Create:          create,
@@ -85,6 +85,8 @@ func releaseCandidateFixture() ReleaseEvidenceCandidate {
 			},
 		},
 	}
+	candidate.PreDeleteSnapshot = releaseCandidatePreDeleteSnapshot(candidate)
+	return candidate
 }
 
 func TestReleaseEvidenceCorrelationRejectsCrossAllocationSplicing(t *testing.T) {
