@@ -221,16 +221,17 @@ func openProviderPostgresDB(t *testing.T) *sql.DB {
 	if err := db.PingContext(ctx); err != nil {
 		t.Fatalf("ping PostgreSQL: %v", err)
 	}
-	var pins, tombs bool
+	var pins, tombs, snapshots bool
 	var migration string
 	if err := db.QueryRowContext(ctx, `
 		SELECT to_regclass('public.kueue_job_create_pins') IS NOT NULL,
 		       to_regclass('public.kueue_job_delete_tombstones') IS NOT NULL,
-		       COALESCE((SELECT name FROM schema_migrations WHERE version = 14), '')`).Scan(&pins, &tombs, &migration); err != nil {
+		       to_regclass('public.kueue_job_pre_delete_dra_snapshots') IS NOT NULL,
+		       COALESCE((SELECT name FROM schema_migrations WHERE version = 25), '')`).Scan(&pins, &tombs, &snapshots, &migration); err != nil {
 		t.Fatalf("read kueue binding schema: %v", err)
 	}
-	if !pins || !tombs || migration != "0014_kueue_job_binding.sql" {
-		t.Fatalf("migration 0014 is not applied: pins=%t tombs=%t migration=%q", pins, tombs, migration)
+	if !pins || !tombs || !snapshots || migration != "0025_kueue_pre_delete_dra_snapshots.sql" {
+		t.Fatalf("migration 0025 is not applied: pins=%t tombs=%t snapshots=%t migration=%q", pins, tombs, snapshots, migration)
 	}
 	return db
 }
