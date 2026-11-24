@@ -264,7 +264,7 @@ func TestKueueJobAdapterRecordsAndRequiresPreDeleteDRASnapshot(t *testing.T) {
 	}
 	badCollection := collection
 	badCollection.Evidence.Pod.UID = "successor-pod-uid"
-	if _, err := adapter.RecordPreDeleteDRASnapshot(context.Background(), remove, badCollection, deviceSet); !errors.Is(err, ErrInvalidPreDeleteDRASnapshot) {
+	if _, err := adapter.RecordPreDeleteDRASnapshot(context.Background(), remove, badCollection, deviceSet); !errors.Is(err, ErrInvalidKueueObservation) {
 		t.Fatalf("mismatched Pod UID was recorded: %v", err)
 	}
 }
