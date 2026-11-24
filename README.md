@@ -2,6 +2,16 @@
 
 Go-based Compute Control Plane for self-hosted, Kubernetes-first heterogeneous compute.
 
+## Try the local Demo
+
+The synthetic-only Dashboard, Clusters and GPUs preview is available on `main`. It needs a Go toolchain matching `go.mod`, but no Kubernetes cluster, GPU, PostgreSQL or cloud credentials.
+
+```bash
+go run ./cmd/ccp-demo -addr 127.0.0.1:8081
+```
+
+Open `http://127.0.0.1:8081` on the same machine. See the [Demo Quickstart](docs/product/DEMO-CONSOLE-QUICKSTART.md) for verification and limitations. This is not an authenticated live Console; never expose the Demo publicly.
+
 ## Interview highlights
 
 - **Evidence-first Compute Economics**: Separates allocated GPU time, active time, attributable direct cost, reserved/unallocated capacity, and revenue/margin. Costing is derived from immutable, provenance-tracked evidence with exact decimal arithmetic; incomplete or contradictory evidence fails closed.
