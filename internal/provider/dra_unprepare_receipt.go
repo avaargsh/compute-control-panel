@@ -70,8 +70,9 @@ type DRAUnprepareVerifier struct {
 type DRAUnprepareCorrelation struct {
 	Release       ReleaseEvidenceCorrelation
 	Event         DRAUnprepareEvent
-	PayloadSHA256 string
-	KeySHA256     string
+	PayloadSHA256           string
+	KeySHA256               string
+	PreDeleteSnapshotDigest string
 	Signature     [ed25519.SignatureSize]byte
 }
 
@@ -188,8 +189,9 @@ func (v *DRAUnprepareVerifier) Correlate(
 	return DRAUnprepareCorrelation{
 		Release:       release,
 		Event:         event,
-		PayloadSHA256: "sha256:" + hex.EncodeToString(digest[:]),
-		KeySHA256:     "sha256:" + hex.EncodeToString(keyDigest[:]),
+		PayloadSHA256:           "sha256:" + hex.EncodeToString(digest[:]),
+		KeySHA256:               "sha256:" + hex.EncodeToString(keyDigest[:]),
+		PreDeleteSnapshotDigest: candidate.PreDeleteSnapshot.Digest,
 		Signature:     signature,
 	}, nil
 }
