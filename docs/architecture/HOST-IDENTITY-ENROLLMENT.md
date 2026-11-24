@@ -62,11 +62,11 @@ Heartbeat receipts use the same Provider → binding → latest-session lock ord
 
 These database entrypoints are not host authentication. Before calling them, a future transport must independently validate the machine certificate/SPIFFE identity, revocation and subject-to-binding resolution. No enrollment/heartbeat HTTP route, hardware attestation, physical GPU identity, GPU health or capacity readiness is enabled by this migration.
 
-## Verification
+## Session verification
 
 The exact-source PostgreSQL 16 acceptance suite proves first epoch issuance, database-generated ID/time, active predecessor rejection after repository restart, expiry-gated epoch increment, concurrent first-start single-winner CAS, Provider Drain rejection, heartbeat monotonicity, exact replay idempotency, conflict rejection, unchanged session expiry, function-only restricted LOGIN access, immutable history and SECURITY DEFINER/ACL catalog boundaries. CI requires these tests to run without SKIP.
 
-## Verification
+## HostIdentity binding verification
 
 The disposable PostgreSQL 16 acceptance test uses a real, distinct LOGIN with only HostIdentity INSERT. It proves:
 
