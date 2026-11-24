@@ -63,6 +63,46 @@ The session table intentionally has no foreign key to the binding table: session
 
 These database entrypoints are not host authentication. Before calling them, a future transport must independently validate the machine certificate/SPIFFE identity, revocation and subject-to-binding resolution. No enrollment/heartbeat HTTP route, hardware attestation, physical GPU identity, GPU health or capacity readiness is enabled by this migration.
 
+## Proposed authenticated host ingress contract (not mounted)
+
+The next implementation gate (#182 gate 3) is authentication and revocation, not a second session store. The existing workload SPIFFE verifier in `internal/httpapi/spiffe_auth.go` verifies a peer chain and resolves workload grants; a host is a distinct principal class. Do not let a workload/Console credential become a host credential simply because it has a URI SAN. Reuse audited certificate verification primitives where appropriate, not the workload principal's Tenant/Project grants.
+
+### Identity and authority
+
+- The administrative enrollment workflow uses an authenticated administrative principal and exact Provider management authorization. An independent machine-attestation authority must establish the canonical machine subject, registered Provider/cluster scope and native Node UID before the immutable binding is inserted. A host's self-reported Node name/UID, forwarded identity header, Kubernetes Lease or certificate CN is never sufficient.
+- Host transport requires direct mutually authenticated TLS with a narrowly configured host trust bundle, a verified leaf and exactly one canonical allowed host URI identity. Reject ambiguous/malformed identities, expired credentials and unknown trust domains. Do not accept a host-supplied subject as authority. Certificate rotation preserves the binding only when the independent authority confirms the same subject and machine identity.
+- Resolve the verified subject to exactly one current approved binding within the authenticated scope. Ambiguity, missing evidence, revoked identities, unavailable authority and cross-Provider/cluster/Node-UID claims fail closed. No lookup keyed solely by HostID or Node name. The existing immutable binding and Provider registry remain authoritative; no automatic rebind.
+- A revocation check made before a database call is not atomic authorization: the caller could block on Provider/binding locks until the credential or grant expires. Before production ingress, design a versioned, independently administered active authorization fence that is checked under the same transactional lock boundary as session start/heartbeat, with database-clock expiry checked after waits. Explicitly test the revocation/expiry race. Migration 0023 does not provide this authority yet.
+
+### Proposed typed request/response contract
+
+| Operation | Caller input (untrusted) | Server-owned result |
+| --- | --- | --- |
+| Admin enrollment | Requested Provider/cluster/native Node identity and attestation reference | Immutable binding, DB receipt time; no live capacity claim |
+| Session start | Stable request ID, expected epoch, bounded requested TTL | Exact persisted epoch, opaque session ID, issue/expiry times |
+| Heartbeat | Epoch, session ID, positive sequence, bounded typed observation | ACCEPT or REPLAY and original DB receipt time |
+
+The transport obtains the binding from the trusted authority for every operation, never from request JSON. It must compute the canonical SHA-256 digest over the accepted typed observation rather than trust a client digest. Define the canonical encoding/version and size limits before implementing the endpoint. The server owns the TTL policy cap and must not grant a session beyond the current credential/authorization window. No endpoint is registered by this design.
+
+For a lost session-start ACK, retry the exact durable request ID and payload; never invent a new request ID or increment expected epoch until the previous intent is resolved. The repository can return a historical receipt even after Drain. Receipt replay is not authorization: ingress must still check current identity status, Provider state, expiry and latest epoch before allowing any new effect. Heartbeat replay never extends expiry.
+
+### Pre-mount acceptance matrix
+
+| Case | Required outcome |
+| --- | --- |
+| No mTLS, wrong trust bundle, workload credential or ambiguous URI | Reject before persistence |
+| Unknown/revoked subject or foreign binding tuple | Reject; no session/heartbeat row |
+| Authority unavailable or returns more than one binding | Reject; no fallback to a claimed identity |
+| Revocation or expiry while blocked on Provider/binding lock | Reject at the durable effect boundary |
+| Drain races with new session/heartbeat | Existing transaction fences reject the new effect |
+| Duplicate start intent / lost ACK | Original receipt only, not a fresh grant |
+| Same sequence with changed canonical payload | Reject |
+| Stale epoch, expired session or clock rollback | Reject |
+| Node replacement or machine identity mismatch | Quarantine/supersession workflow; no implicit adoption |
+| Fresh authenticated heartbeat with missing physical device evidence | No physical GPU READY/free/released assertion |
+
+Use a disposable real TLS client/server, restricted PostgreSQL roles, independent authorization data, exact-head race tests and a process restart fixture before mounting. Verify the role cannot directly mutate binding, Provider or session tables. This contract does not authorize public exposure, commands, hardware readiness, Allocation RELEASED, G04/G05 or Cost FINAL.
+
 ## Session verification
 
 The exact-source PostgreSQL 16 acceptance suite proves first epoch issuance, database-generated ID/time, active predecessor rejection after repository restart, expiry-gated epoch increment, concurrent first-start single-winner CAS, Provider Drain rejection, heartbeat monotonicity, exact replay idempotency, conflict rejection, unchanged session expiry, function-only restricted LOGIN access, immutable history and SECURITY DEFINER/ACL catalog boundaries. CI requires these tests to run without SKIP.
