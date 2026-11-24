@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -38,7 +40,7 @@ func signedSameTxFixture(t *testing.T, p ReleaseCommitFence, asOf time.Time) (
 	}
 	device := provider.DRAAllocatedDevice{
 		Request: "gpu", Driver: "gpu.example.com", Pool: "pool-a",
-		Device: "device-a", ShareID: "share-a",
+		Device: "device-a",
 	}
 	q := provider.KueueQueueBindingEvidence{
 		Job: provider.KueueJobEvidence{
@@ -109,6 +111,22 @@ func signedSameTxFixture(t *testing.T, p ReleaseCommitFence, asOf time.Time) (
 			},
 		},
 	}
+	snapshot := provider.KueuePreDeleteDRASnapshot{
+		Namespace: ns, TenantID: p.TenantID, WorkloadID: p.WorkloadID, ProviderID: p.ProviderID,
+		CreateOperationID: p.CreateOperationID, DeleteOperationID: p.DeleteOperationID,
+		CreateGeneration: uint64(p.AllocationGeneration), DeleteGeneration: uint64(p.DeleteGeneration),
+		Job: job, KueueWorkload: q.Job.KueueWorkload, Pod: pod, NodeName: "gpu-node-a",
+		Claim: claim, ClaimTemplateName: "gpu-template", PodClaimAlias: "gpu",
+		ConsumerContainer: "worker", Devices: []provider.DRAAllocatedDevice{device},
+		Source: "postgres-test", AdapterVersion: "test-v1", ObservedAt: asOf.Add(-2 * time.Minute),
+	}
+	snapshotRaw, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshotDigest := sha256.Sum256(snapshotRaw)
+	snapshot.Digest = "sha256:" + hex.EncodeToString(snapshotDigest[:])
+	candidate.PreDeleteSnapshot = &snapshot
 	candidate.ProviderAbsence = operation.Observation{
 		OperationID: p.DeleteOperationID, TenantID: p.TenantID, WorkloadID: p.WorkloadID,
 		ProviderID: p.ProviderID, DesiredGeneration: uint64(p.DeleteGeneration),
