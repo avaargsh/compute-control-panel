@@ -39,6 +39,10 @@ func TestHostSessionAuthenticatedStartHeartbeatAndGrantRevocation(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	resolved, err := repo.ResolveHostBinding(ctx, binding.Subject)
+	if err != nil || resolved != binding {
+		t.Fatalf("resolve active host subject grant: binding=%+v err=%v", resolved, err)
+	}
 	start := AuthenticatedHostSessionStartRequest{
 		Subject:       binding.Subject,
 		ExpectedEpoch: 0, RequestID: "authenticated-start-" + randomSuffix(t), TTL: 30 * time.Second,
@@ -95,6 +99,9 @@ func TestHostSessionAuthenticatedStartHeartbeatAndGrantRevocation(t *testing.T) 
 		ExpectedEpoch: 1, RequestID: "revoked-start-" + randomSuffix(t), TTL: 30 * time.Second,
 	}); !errors.Is(err, ErrHostSessionUnauthorized) {
 		t.Fatalf("revoked host subject started a successor session: %v", err)
+	}
+	if _, err := repo.ResolveHostBinding(ctx, binding.Subject); !errors.Is(err, ErrHostSessionUnauthorized) {
+		t.Fatalf("revoked host subject resolved to an active binding: %v", err)
 	}
 }
 
@@ -236,7 +243,7 @@ func TestHostSessionWriterCanOnlyInvokeAuthenticatedFunctions(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	var rawStart, rawHeartbeat, authenticatedStart, authenticatedHeartbeat bool
+	var rawStart, rawHeartbeat, resolver, authenticatedStart, authenticatedHeartbeat bool
 	err = writer.QueryRowContext(ctx, `
 		SELECT
 			pg_catalog.has_function_privilege(current_user,
@@ -244,16 +251,18 @@ func TestHostSessionWriterCanOnlyInvokeAuthenticatedFunctions(t *testing.T) {
 			pg_catalog.has_function_privilege(current_user,
 				'public.compute_host_session_heartbeat(text,text,text,text,text,bigint,text,bigint,text)', 'EXECUTE'),
 			pg_catalog.has_function_privilege(current_user,
+				'public.compute_host_identity_subject_resolve(text)', 'EXECUTE'),
+			pg_catalog.has_function_privilege(current_user,
 				'public.compute_host_session_start_authenticated(text,bigint,text,integer)', 'EXECUTE'),
 			pg_catalog.has_function_privilege(current_user,
 				'public.compute_host_session_heartbeat_authenticated(text,bigint,text,bigint,text)', 'EXECUTE')
-	`).Scan(&rawStart, &rawHeartbeat, &authenticatedStart, &authenticatedHeartbeat)
+	`).Scan(&rawStart, &rawHeartbeat, &resolver, &authenticatedStart, &authenticatedHeartbeat)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rawStart || rawHeartbeat || !authenticatedStart || !authenticatedHeartbeat {
-		t.Fatalf("unexpected HostSession function ACLs: raw=%t/%t authenticated=%t/%t",
-			rawStart, rawHeartbeat, authenticatedStart, authenticatedHeartbeat)
+	if rawStart || rawHeartbeat || !resolver || !authenticatedStart || !authenticatedHeartbeat {
+		t.Fatalf("unexpected HostSession function ACLs: raw=%t/%t resolver=%t authenticated=%t/%t",
+			rawStart, rawHeartbeat, resolver, authenticatedStart, authenticatedHeartbeat)
 	}
 
 	for _, statement := range []string{
