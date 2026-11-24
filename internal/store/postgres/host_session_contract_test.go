@@ -630,6 +630,14 @@ func TestHostSessionInvalidInputsFailBeforeDatabase(t *testing.T) {
 	if _, err := repo.StartHostSession(ctx, HostSessionStartRequest{Binding: binding, ExpectedEpoch: 0, RequestID: "", TTL: time.Second}); !errors.Is(err, ErrHostSessionInvalid) {
 		t.Fatalf("empty session start idempotency key accepted: %v", err)
 	}
+
+	for _, requestID := range []string{" leading", "trailing ", "line\nbreak", strings.Repeat("x", 257)} {
+		if _, err := repo.StartHostSession(ctx, HostSessionStartRequest{
+			Binding: binding, ExpectedEpoch: 0, RequestID: requestID, TTL: time.Second,
+		}); !errors.Is(err, ErrHostSessionInvalid) {
+			t.Fatalf("invalid session start idempotency key %q accepted: %v", requestID, err)
+		}
+	}
 	if _, err := repo.StartHostSession(ctx, HostSessionStartRequest{Binding: binding, ExpectedEpoch: -1, RequestID: "negative-epoch", TTL: time.Second}); !errors.Is(err, ErrHostSessionInvalid) {
 		t.Fatalf("negative expected epoch accepted: %v", err)
 	}
