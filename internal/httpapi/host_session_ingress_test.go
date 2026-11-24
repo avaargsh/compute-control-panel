@@ -20,6 +20,14 @@ import (
 
 const hostSessionIngressSubject = "spiffe://example.org/ns/compute-host/sa/host-agent"
 
+type hostSessionIngressFakeAuthenticator struct {
+	principal WorkloadPrincipal
+}
+
+func (a hostSessionIngressFakeAuthenticator) Authenticate(context.Context, *http.Request) (WorkloadPrincipal, error) {
+	return a.principal, nil
+}
+
 type hostSessionIngressRepositoryStub struct {
 	startRequest     postgres.AuthenticatedHostSessionStartRequest
 	heartbeatRequest postgres.AuthenticatedHostHeartbeatRequest
@@ -82,7 +90,7 @@ func TestNewHostSessionIngressHandlerRequiresSPIFFEAuthenticatorAndRepository(t 
 		t.Fatal("missing HostSession repository allowed ingress construction")
 	}
 	if _, err := NewHostSessionIngressHandler(HostSessionIngressDependencies{
-		Authenticator: testWorkloadAuthenticator{principal: WorkloadPrincipal{
+		Authenticator: hostSessionIngressFakeAuthenticator{principal: WorkloadPrincipal{
 			TenantID: "tenant-host-ingress", Subject: hostSessionIngressSubject, Service: "compute-host-agent",
 		}},
 		Repository: repo,
