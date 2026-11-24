@@ -28,7 +28,7 @@ func unprepareTestReceipt(private ed25519.PrivateKey) SignedDRAUnprepare {
 		PodUID: "pod-uid-a", AllocatedClaimResourceVersion: "150",
 		AllocatedDevice: DRAAllocatedDevice{
 			Request: "gpu", Driver: "gpu.example.com", Pool: "pool-a",
-			Device: "device-a", ShareID: "share-a",
+			Device: "device-a",
 		},
 		CompletedAt: time.Date(2026, 11, 10, 10, 0, 30, 0, time.UTC),
 	}
