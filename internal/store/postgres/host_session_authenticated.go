@@ -56,6 +56,33 @@ func authenticatedHostSessionError(operation string, err error) error {
 	return hostSessionPersistenceError(operation, err)
 }
 
+// ResolveHostBinding implements hostidentity.HostIdentityResolver. This is a
+// preflight lookup for the TLS authenticator only; Start/Heartbeat wrappers
+// independently recheck the subject grant inside their write transaction.
+func (r *Repository) ResolveHostBinding(ctx context.Context, subject string) (hostidentity.Binding, error) {
+	if r == nil || r.db == nil {
+		return hostidentity.Binding{}, ErrHostSessionInvalid
+	}
+	if err := validateAuthenticatedHostIdentity(subject); err != nil {
+		return hostidentity.Binding{}, err
+	}
+	var binding hostidentity.Binding
+	err := r.db.QueryRowContext(ctx, `
+		SELECT host_id, provider_id, cluster_scope, node_uid, subject
+		FROM public.compute_host_identity_subject_resolve($1)`, subject,
+	).Scan(
+		&binding.HostID, &binding.ProviderID, &binding.ClusterScope,
+		&binding.NodeUID, &binding.Subject,
+	)
+	if err != nil {
+		return hostidentity.Binding{}, authenticatedHostSessionError("resolve authenticated HostIdentity binding", err)
+	}
+	if !validHostSessionBinding(binding) || binding.Subject != subject {
+		return hostidentity.Binding{}, fmt.Errorf("%w: database returned a mismatched HostIdentity binding", ErrHostSessionRejected)
+	}
+	return binding, nil
+}
+
 // StartAuthenticatedHostSession calls only the transactional authenticated
 // wrapper. It never falls back to the raw tuple function. The HTTP handler
 // remains unmounted until the independent enrollment and operational gates pass.
