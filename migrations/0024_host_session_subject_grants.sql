@@ -213,6 +213,387 @@ CREATE TRIGGER compute_host_identity_subject_grant_audit_no_truncate
     BEFORE TRUNCATE ON public.compute_host_identity_subject_grant_audit
     FOR EACH STATEMENT EXECUTE FUNCTION public.compute_host_identity_subject_grant_audit_immutable();
 
+CREATE FUNCTION public.compute_host_identity_subject_resolve(
+    p_subject TEXT
+) RETURNS TABLE (
+    host_id TEXT,
+    provider_id TEXT,
+    cluster_scope TEXT,
+    node_uid TEXT,
+    subject TEXT
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $subject_resolve$
+DECLARE
+    v_host_id TEXT;
+    v_provider_id TEXT;
+    v_cluster_scope TEXT;
+    v_node_uid TEXT;
+    v_not_before TIMESTAMPTZ;
+    v_expires_at TIMESTAMPTZ;
+    v_revoked_at TIMESTAMPTZ;
+    v_now TIMESTAMPTZ;
+BEGIN
+    IF p_subject IS NULL OR pg_catalog.octet_length(p_subject) NOT BETWEEN 1 AND 1024
+       OR pg_catalog.btrim(p_subject) <> p_subject
+       OR p_subject !~ '^spiffe://[^/]+/host/[^/]+    p_subject TEXT,
+    p_expected_epoch BIGINT,
+    p_start_request_id TEXT,
+    p_ttl_seconds INTEGER
+) RETURNS TABLE (
+    host_id TEXT,
+    epoch BIGINT,
+    session_id TEXT,
+    provider_id TEXT,
+    cluster_scope TEXT,
+    node_uid TEXT,
+    subject TEXT,
+    issued_at TIMESTAMPTZ,
+    expires_at TIMESTAMPTZ
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $authenticated_start$
+DECLARE
+    v_host_id TEXT;
+    v_provider_id TEXT;
+    v_cluster_scope TEXT;
+    v_node_uid TEXT;
+    v_not_before TIMESTAMPTZ;
+    v_expires_at TIMESTAMPTZ;
+    v_revoked_at TIMESTAMPTZ;
+    v_now TIMESTAMPTZ;
+    v_result RECORD;
+BEGIN
+    IF p_subject IS NULL OR pg_catalog.octet_length(p_subject) NOT BETWEEN 1 AND 1024
+       OR pg_catalog.btrim(p_subject) <> p_subject OR p_subject !~ '^spiffe://[^/]+/host/[^/]+$' THEN
+        RAISE EXCEPTION 'invalid authenticated HostSession principal'
+            USING ERRCODE='28000';
+    END IF;
+
+    PERFORM pg_catalog.pg_advisory_xact_lock_shared(
+        pg_catalog.hashtextextended(p_subject,0)
+    );
+    SELECT g.host_id, g.provider_id, g.cluster_scope, g.node_uid,
+           g.not_before, g.expires_at, g.revoked_at
+      INTO v_host_id, v_provider_id, v_cluster_scope, v_node_uid,
+           v_not_before, v_expires_at, v_revoked_at
+      FROM public.compute_host_identity_subject_grants AS g
+     WHERE g.subject=p_subject AND g.service_name='compute-host-agent';
+
+    v_now := pg_catalog.clock_timestamp();
+    IF NOT FOUND OR v_revoked_at IS NOT NULL
+       OR v_not_before > v_now
+       OR (v_expires_at IS NOT NULL AND v_expires_at <= v_now) THEN
+        RAISE EXCEPTION 'HostIdentity subject grant is absent, expired or revoked'
+            USING ERRCODE='28000';
+    END IF;
+
+    SELECT * INTO STRICT v_result FROM public.compute_host_session_start(
+        v_host_id, v_provider_id, v_cluster_scope, v_node_uid, p_subject,
+        p_expected_epoch, p_start_request_id, p_ttl_seconds
+    );
+    -- The raw CAS may wait on Provider/binding/request locks. Recheck
+    -- after it returns; an exception rolls back any tentative insertion.
+    v_now := pg_catalog.clock_timestamp();
+    IF v_now < v_not_before
+       OR (v_expires_at IS NOT NULL AND
+           (v_now >= v_expires_at OR v_result.expires_at > v_expires_at)) THEN
+        RAISE EXCEPTION 'HostIdentity authorization window cannot cover session'
+            USING ERRCODE='28000';
+    END IF;
+    RETURN QUERY SELECT v_result.host_id, v_result.epoch, v_result.session_id,
+        v_result.provider_id, v_result.cluster_scope, v_result.node_uid,
+        v_result.subject, v_result.issued_at, v_result.expires_at;
+END;
+$authenticated_start$;
+
+CREATE FUNCTION public.compute_host_session_heartbeat_authenticated(
+    p_subject TEXT,
+    p_epoch BIGINT,
+    p_session_id TEXT,
+    p_sequence BIGINT,
+    p_digest TEXT
+) RETURNS TABLE (
+    disposition TEXT,
+    recorded_at TIMESTAMPTZ
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $authenticated_heartbeat$
+DECLARE
+    v_host_id TEXT;
+    v_provider_id TEXT;
+    v_cluster_scope TEXT;
+    v_node_uid TEXT;
+    v_not_before TIMESTAMPTZ;
+    v_expires_at TIMESTAMPTZ;
+    v_revoked_at TIMESTAMPTZ;
+    v_now TIMESTAMPTZ;
+BEGIN
+    IF p_subject IS NULL OR pg_catalog.octet_length(p_subject) NOT BETWEEN 1 AND 1024
+       OR pg_catalog.btrim(p_subject) <> p_subject OR p_subject !~ '^spiffe://[^/]+/host/[^/]+$' THEN
+        RAISE EXCEPTION 'invalid authenticated HostSession principal'
+            USING ERRCODE='28000';
+    END IF;
+
+    PERFORM pg_catalog.pg_advisory_xact_lock_shared(
+        pg_catalog.hashtextextended(p_subject,0)
+    );
+    SELECT g.host_id, g.provider_id, g.cluster_scope, g.node_uid,
+           g.not_before, g.expires_at, g.revoked_at
+      INTO v_host_id, v_provider_id, v_cluster_scope, v_node_uid,
+           v_not_before, v_expires_at, v_revoked_at
+      FROM public.compute_host_identity_subject_grants AS g
+     WHERE g.subject=p_subject AND g.service_name='compute-host-agent';
+
+    v_now := pg_catalog.clock_timestamp();
+    IF NOT FOUND OR v_revoked_at IS NOT NULL
+       OR v_not_before > v_now
+       OR (v_expires_at IS NOT NULL AND v_expires_at <= v_now) THEN
+        RAISE EXCEPTION 'HostIdentity subject grant is absent, expired or revoked'
+            USING ERRCODE='28000';
+    END IF;
+
+    RETURN QUERY
+    SELECT * FROM public.compute_host_session_heartbeat(
+        v_host_id, v_provider_id, v_cluster_scope, v_node_uid, p_subject,
+        p_epoch, p_session_id, p_sequence, p_digest
+    );
+    -- RETURN QUERY buffers rows; raising here rolls back the receipt too.
+    v_now := pg_catalog.clock_timestamp();
+    IF v_now < v_not_before
+       OR (v_expires_at IS NOT NULL AND v_now >= v_expires_at) THEN
+        RAISE EXCEPTION 'HostIdentity authorization expired during heartbeat'
+            USING ERRCODE='28000';
+    END IF;
+END;
+$authenticated_heartbeat$;
+
+REVOKE ALL ON TABLE public.compute_host_identity_subject_grants FROM PUBLIC;
+REVOKE ALL ON TABLE public.compute_host_identity_subject_grant_audit FROM PUBLIC;
+REVOKE ALL ON SEQUENCE public.compute_host_identity_subject_grant_audit_event_id_seq FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.compute_host_identity_subject_grant_guard() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.compute_host_identity_subject_grant_audit_append() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.compute_host_identity_subject_grant_audit_immutable() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.compute_host_identity_subject_resolve(TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.compute_host_session_start_authenticated(TEXT,BIGINT,TEXT,INTEGER) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.compute_host_session_heartbeat_authenticated(TEXT,BIGINT,TEXT,BIGINT,TEXT) FROM PUBLIC;
+
+GRANT USAGE ON SCHEMA public TO ccp_host_session_guard_owner;
+GRANT SELECT (
+    subject, tenant_id, service_name, host_id, provider_id, cluster_scope,
+    node_uid, not_before, expires_at, revoked_at
+) ON public.compute_host_identity_subject_grants TO ccp_host_session_guard_owner;
+GRANT INSERT ON public.compute_host_identity_subject_grant_audit TO ccp_host_session_guard_owner;
+GRANT USAGE ON SEQUENCE public.compute_host_identity_subject_grant_audit_event_id_seq
+    TO ccp_host_session_guard_owner;
+
+GRANT CREATE ON SCHEMA public TO ccp_host_session_guard_owner;
+ALTER FUNCTION public.compute_host_identity_subject_grant_guard()
+    OWNER TO ccp_host_session_guard_owner;
+ALTER FUNCTION public.compute_host_identity_subject_grant_audit_append()
+    OWNER TO ccp_host_session_guard_owner;
+ALTER FUNCTION public.compute_host_identity_subject_grant_audit_immutable()
+    OWNER TO ccp_host_session_guard_owner;
+ALTER FUNCTION public.compute_host_identity_subject_resolve(TEXT)
+    OWNER TO ccp_host_session_guard_owner;
+ALTER FUNCTION public.compute_host_session_start_authenticated(TEXT,BIGINT,TEXT,INTEGER)
+    OWNER TO ccp_host_session_guard_owner;
+ALTER FUNCTION public.compute_host_session_heartbeat_authenticated(TEXT,BIGINT,TEXT,BIGINT,TEXT)
+    OWNER TO ccp_host_session_guard_owner;
+
+SET ROLE ccp_host_session_guard_owner;
+REVOKE EXECUTE ON FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,INTEGER)
+    FROM ccp_host_session_writer;
+REVOKE EXECUTE ON FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT)
+    FROM ccp_host_session_writer;
+GRANT EXECUTE ON FUNCTION public.compute_host_identity_subject_resolve(TEXT)
+    TO ccp_host_session_writer;
+GRANT EXECUTE ON FUNCTION public.compute_host_session_start_authenticated(TEXT,BIGINT,TEXT,INTEGER)
+    TO ccp_host_session_writer;
+GRANT EXECUTE ON FUNCTION public.compute_host_session_heartbeat_authenticated(TEXT,BIGINT,TEXT,BIGINT,TEXT)
+    TO ccp_host_session_writer;
+RESET ROLE;
+
+REVOKE CREATE ON SCHEMA public FROM ccp_host_session_guard_owner;
+
+ALTER TABLE public.compute_host_identity_subject_grants
+    ENABLE ALWAYS TRIGGER compute_host_identity_subject_grant_guard_row;
+ALTER TABLE public.compute_host_identity_subject_grants
+    ENABLE ALWAYS TRIGGER compute_host_identity_subject_grant_guard_truncate;
+ALTER TABLE public.compute_host_identity_subject_grants
+    ENABLE ALWAYS TRIGGER compute_host_identity_subject_grant_audit_append;
+ALTER TABLE public.compute_host_identity_subject_grant_audit
+    ENABLE ALWAYS TRIGGER compute_host_identity_subject_grant_audit_no_mutation;
+ALTER TABLE public.compute_host_identity_subject_grant_audit
+    ENABLE ALWAYS TRIGGER compute_host_identity_subject_grant_audit_no_truncate;
+
+COMMENT ON TABLE public.compute_host_identity_subject_grants IS
+    'DBA-provisioned exact SPIFFE subject -> immutable HostIdentity binding grant; revocation is one-way and serialized with authenticated HostSession operations.';
+COMMENT ON TABLE public.compute_host_identity_subject_grant_audit IS
+    'Append-only audit of HostIdentity subject grant creation and revocation; changed_by is the database session_user, not an asserted human identity.';
+COMMENT ON FUNCTION public.compute_host_identity_subject_resolve(TEXT) IS
+    'Preflight resolver for the host SPIFFE authenticator. Returns only the immutable binding behind an active subject grant; write wrappers recheck the grant atomically.';
+COMMENT ON FUNCTION public.compute_host_session_start_authenticated(TEXT,BIGINT,TEXT,INTEGER) IS
+    'Authenticated HostSession start wrapper. Resolves the dedicated host-certificate subject grant and serializes revocation before the internal epoch CAS.';
+COMMENT ON FUNCTION public.compute_host_session_heartbeat_authenticated(TEXT,BIGINT,TEXT,BIGINT,TEXT) IS
+    'Authenticated HostSession heartbeat wrapper. Resolves the dedicated host-certificate subject grant and serializes revocation before recording the heartbeat.';
+
+DO $host_session_subject_grant_acl_attestation$
+DECLARE
+    guard_owner_oid pg_catalog.oid;
+    writer_oid pg_catalog.oid;
+    grants_oid pg_catalog.oid := 'public.compute_host_identity_subject_grants'::pg_catalog.regclass;
+    audit_oid pg_catalog.oid := 'public.compute_host_identity_subject_grant_audit'::pg_catalog.regclass;
+BEGIN
+    SELECT oid INTO guard_owner_oid FROM pg_catalog.pg_roles WHERE rolname='ccp_host_session_guard_owner';
+    SELECT oid INTO writer_oid FROM pg_catalog.pg_roles WHERE rolname='ccp_host_session_writer';
+
+    IF pg_catalog.has_schema_privilege(guard_owner_oid,'public','CREATE')
+       OR pg_catalog.has_schema_privilege(writer_oid,'public','CREATE') THEN
+        RAISE EXCEPTION 'HostSession owner/writer roles must not retain schema CREATE';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM pg_catalog.pg_class c
+        CROSS JOIN LATERAL pg_catalog.aclexplode(c.relacl) a
+        WHERE c.oid IN (grants_oid,audit_oid)
+          AND a.grantee NOT IN (c.relowner,guard_owner_oid)
+    ) OR EXISTS (
+        SELECT 1 FROM pg_catalog.pg_attribute col
+        CROSS JOIN LATERAL pg_catalog.aclexplode(col.attacl) a
+        WHERE col.attrelid IN (grants_oid,audit_oid)
+          AND a.grantee NOT IN (
+              (SELECT c.relowner FROM pg_catalog.pg_class c WHERE c.oid=col.attrelid),
+              guard_owner_oid
+          )
+    ) THEN
+        RAISE EXCEPTION 'HostIdentity subject grant tables have unexpected direct/default grants';
+    END IF;
+
+    IF pg_catalog.has_table_privilege(writer_oid,grants_oid,'SELECT')
+       OR pg_catalog.has_table_privilege(writer_oid,grants_oid,'INSERT')
+       OR pg_catalog.has_table_privilege(writer_oid,grants_oid,'UPDATE')
+       OR pg_catalog.has_table_privilege(writer_oid,grants_oid,'DELETE')
+       OR pg_catalog.has_table_privilege(writer_oid,grants_oid,'TRUNCATE')
+       OR pg_catalog.has_table_privilege(writer_oid,audit_oid,'SELECT')
+       OR pg_catalog.has_table_privilege(writer_oid,audit_oid,'INSERT')
+       OR pg_catalog.has_table_privilege(writer_oid,audit_oid,'UPDATE')
+       OR pg_catalog.has_table_privilege(writer_oid,audit_oid,'DELETE')
+       OR pg_catalog.has_table_privilege(writer_oid,audit_oid,'TRUNCATE') THEN
+        RAISE EXCEPTION 'HostSession writer has direct HostIdentity subject grant table privileges';
+    END IF;
+
+    IF pg_catalog.has_function_privilege(writer_oid,
+          'public.compute_host_session_start(text,text,text,text,text,bigint,text,integer)'::pg_catalog.regprocedure,'EXECUTE')
+       OR pg_catalog.has_function_privilege(writer_oid,
+          'public.compute_host_session_heartbeat(text,text,text,text,text,bigint,text,bigint,text)'::pg_catalog.regprocedure,'EXECUTE')
+       OR NOT pg_catalog.has_function_privilege(writer_oid,
+          'public.compute_host_identity_subject_resolve(text)'::pg_catalog.regprocedure,'EXECUTE')
+       OR NOT pg_catalog.has_function_privilege(writer_oid,
+          'public.compute_host_session_start_authenticated(text,bigint,text,integer)'::pg_catalog.regprocedure,'EXECUTE')
+       OR NOT pg_catalog.has_function_privilege(writer_oid,
+          'public.compute_host_session_heartbeat_authenticated(text,bigint,text,bigint,text)'::pg_catalog.regprocedure,'EXECUTE') THEN
+        RAISE EXCEPTION 'HostSession writer must execute authenticated wrappers only';
+    END IF;
+
+    IF pg_catalog.has_table_privilege(guard_owner_oid,grants_oid,'INSERT')
+       OR pg_catalog.has_table_privilege(guard_owner_oid,grants_oid,'UPDATE')
+       OR pg_catalog.has_table_privilege(guard_owner_oid,grants_oid,'DELETE')
+       OR pg_catalog.has_table_privilege(guard_owner_oid,grants_oid,'TRUNCATE')
+       OR NOT pg_catalog.has_column_privilege(guard_owner_oid,grants_oid,'subject','SELECT')
+       OR NOT pg_catalog.has_column_privilege(guard_owner_oid,grants_oid,'tenant_id','SELECT')
+       OR NOT pg_catalog.has_column_privilege(guard_owner_oid,grants_oid,'service_name','SELECT')
+       OR NOT pg_catalog.has_column_privilege(guard_owner_oid,grants_oid,'host_id','SELECT')
+       OR NOT pg_catalog.has_column_privilege(guard_owner_oid,grants_oid,'provider_id','SELECT')
+       OR NOT pg_catalog.has_column_privilege(guard_owner_oid,grants_oid,'cluster_scope','SELECT')
+       OR NOT pg_catalog.has_column_privilege(guard_owner_oid,grants_oid,'node_uid','SELECT')
+       OR NOT pg_catalog.has_column_privilege(guard_owner_oid,grants_oid,'not_before','SELECT')
+       OR NOT pg_catalog.has_column_privilege(guard_owner_oid,grants_oid,'expires_at','SELECT')
+       OR NOT pg_catalog.has_column_privilege(guard_owner_oid,grants_oid,'revoked_at','SELECT')
+       OR NOT pg_catalog.has_table_privilege(guard_owner_oid,audit_oid,'INSERT')
+       OR NOT pg_catalog.has_sequence_privilege(guard_owner_oid,
+          'public.compute_host_identity_subject_grant_audit_event_id_seq'::pg_catalog.regclass,'USAGE')
+       OR pg_catalog.has_sequence_privilege(writer_oid,
+          'public.compute_host_identity_subject_grant_audit_event_id_seq'::pg_catalog.regclass,'USAGE') THEN
+        RAISE EXCEPTION 'HostSession guard owner or writer has unexpected grant/audit privileges';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_proc p
+        CROSS JOIN LATERAL pg_catalog.aclexplode(
+            COALESCE(p.proacl,pg_catalog.acldefault('f',p.proowner))
+        ) a
+        WHERE p.oid IN (
+            'public.compute_host_identity_subject_grant_guard()'::pg_catalog.regprocedure,
+            'public.compute_host_identity_subject_grant_audit_append()'::pg_catalog.regprocedure,
+            'public.compute_host_identity_subject_grant_audit_immutable()'::pg_catalog.regprocedure,
+            'public.compute_host_identity_subject_resolve(text)'::pg_catalog.regprocedure,
+            'public.compute_host_session_start(text,text,text,text,text,bigint,text,integer)'::pg_catalog.regprocedure,
+            'public.compute_host_session_heartbeat(text,text,text,text,text,bigint,text,bigint,text)'::pg_catalog.regprocedure,
+            'public.compute_host_session_start_authenticated(text,bigint,text,integer)'::pg_catalog.regprocedure,
+            'public.compute_host_session_heartbeat_authenticated(text,bigint,text,bigint,text)'::pg_catalog.regprocedure
+        )
+        AND (
+            a.grantee=0
+            OR (p.oid IN (
+                'public.compute_host_identity_subject_resolve(text)'::pg_catalog.regprocedure,
+                'public.compute_host_session_start_authenticated(text,bigint,text,integer)'::pg_catalog.regprocedure,
+                'public.compute_host_session_heartbeat_authenticated(text,bigint,text,bigint,text)'::pg_catalog.regprocedure
+            ) AND a.grantee NOT IN (p.proowner,writer_oid))
+            OR (p.oid NOT IN (
+                'public.compute_host_session_start_authenticated(text,bigint,text,integer)'::pg_catalog.regprocedure,
+                'public.compute_host_session_heartbeat_authenticated(text,bigint,text,bigint,text)'::pg_catalog.regprocedure
+            ) AND a.grantee<>p.proowner)
+        )
+    ) THEN
+        RAISE EXCEPTION 'HostSession functions have unexpected direct/PUBLIC EXECUTE grants';
+    END IF;
+END;
+$host_session_subject_grant_acl_attestation$;
+ THEN
+        RAISE EXCEPTION 'invalid host SPIFFE subject'
+            USING ERRCODE='28000';
+    END IF;
+
+    PERFORM pg_catalog.pg_advisory_xact_lock_shared(
+        pg_catalog.hashtextextended(p_subject,0)
+    );
+    SELECT g.host_id, g.provider_id, g.cluster_scope, g.node_uid,
+           g.not_before, g.expires_at, g.revoked_at
+      INTO v_host_id, v_provider_id, v_cluster_scope, v_node_uid,
+           v_not_before, v_expires_at, v_revoked_at
+      FROM public.compute_host_identity_subject_grants AS g
+     WHERE g.subject=p_subject AND g.service_name='compute-host-agent';
+
+    v_now := pg_catalog.clock_timestamp();
+    IF NOT FOUND OR v_revoked_at IS NOT NULL
+       OR v_not_before > v_now
+       OR (v_expires_at IS NOT NULL AND v_expires_at <= v_now) THEN
+        RAISE EXCEPTION 'HostIdentity subject grant is absent, expired or revoked'
+            USING ERRCODE='28000';
+    END IF;
+
+    RETURN QUERY
+    SELECT b.host_id, b.provider_id, b.cluster_scope, b.node_uid, b.subject
+      FROM public.compute_host_identity_bindings AS b
+     WHERE b.host_id=v_host_id AND b.provider_id=v_provider_id
+       AND b.cluster_scope=v_cluster_scope AND b.node_uid=v_node_uid
+       AND b.subject=p_subject;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'HostIdentity binding does not match the subject grant'
+            USING ERRCODE='28000';
+    END IF;
+END;
+$subject_resolve$;
+
 CREATE FUNCTION public.compute_host_session_start_authenticated(
     p_subject TEXT,
     p_expected_epoch BIGINT,
