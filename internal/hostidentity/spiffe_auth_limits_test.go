@@ -34,7 +34,7 @@ func TestHostSPIFFEAuthenticatorRejectsOversizedIdentityBeforeResolver(t *testin
 	req := httptest.NewRequest("GET", "https://ccp.example/", nil)
 	req.TLS = &tls.ConnectionState{
 		PeerCertificates: []*x509.Certificate{cert},
-		VerifiedChains: [][]*x509.Certificate{{cert}},
+		VerifiedChains:   [][]*x509.Certificate{{cert}},
 	}
 	if _, err := auth.Authenticate(context.Background(), req); !errors.Is(err, ErrHostAuthentication) {
 		t.Fatalf("oversized identity accepted: %v", err)
@@ -49,10 +49,10 @@ func TestNewHostSPIFFEAuthenticatorRejectsInvalidConfiguration(t *testing.T) {
 	resolver := &hostAuthTestResolver{}
 	var typedNil *hostAuthTestResolver
 	cases := []struct {
-		name string
-		domain string
+		name     string
+		domain   string
 		resolver HostIdentityResolver
-		clock func() time.Time
+		clock    func() time.Time
 	}{
 		{name: "empty trust domain", domain: "", resolver: resolver, clock: now},
 		{name: "path in trust domain", domain: "ccp.example/host", resolver: resolver, clock: now},
