@@ -307,3 +307,23 @@ func TestPostgresKueuePreDeleteDRASnapshotIsImmutable(t *testing.T) {
 		t.Fatalf("immutable snapshot truncate state=%s err=%v", postgresSQLState(err), err)
 	}
 }
+
+
+func TestKueueJobAdapterBlocksDRADeleteBeforeExternalSideEffectWithoutSnapshot(t *testing.T) {
+	adapter, api, server := newKueueAdapterFixture(t, &kueueAPI{})
+	defer server.Close()
+	if err := adapter.UseQueuedResourceClaimTemplate("gpu-template"); err != nil {
+		t.Fatal(err)
+	}
+	create, observed := createSuspendedJob(t, adapter, api)
+	remove := kueueDeleteRequest(create, observed)
+	if _, err := adapter.Apply(context.Background(), remove); !errors.Is(err, ErrPreDeleteDRASnapshotRequired) {
+		t.Fatalf("DRA DELETE without snapshot was not blocked: %v", err)
+	}
+	if api.deleteCount() != 0 || api.storedJobs() != 1 {
+		t.Fatalf("missing snapshot caused external DELETE: deletes=%d stored=%d", api.deleteCount(), api.storedJobs())
+	}
+	if _, ok, err := adapter.bindings.GetDeleteTombstone(adapter.namespace, remove); err != nil || ok {
+		t.Fatalf("DELETE intent was persisted without pre-delete snapshot: exists=%t err=%v", ok, err)
+	}
+}
