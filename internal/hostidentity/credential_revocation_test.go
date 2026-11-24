@@ -217,7 +217,7 @@ func TestHostCredentialRevocationListStoreRotatesAndRejectsNewlyRevokedSerial(t 
 	initial := f.crlNumber(t, f.issuer, f.key, 1, f.now.Add(-time.Minute), f.now.Add(time.Hour))
 	revoked := f.crlNumber(t, f.issuer, f.key, 2, f.now.Add(-time.Minute), f.now.Add(time.Hour), 42)
 
-	store, err := NewHostCredentialRevocationListStore([][]byte{initial}, f.now)
+	store, err := NewHostCredentialRevocationListStore([][]byte{initial}, []*x509.Certificate{f.issuer}, f.now)
 	if err != nil {
 		t.Fatalf("create revocation store: %v", err)
 	}
@@ -238,6 +238,26 @@ func TestHostCredentialRevocationListStoreKeepsLastGoodSnapshotOnRejectedUpdate(
 	older := f.crlNumber(t, f.issuer, f.key, 1, f.now.Add(-time.Minute), f.now.Add(time.Hour))
 	sameNumberDifferent := f.crlNumber(t, f.issuer, f.key, 2, f.now.Add(-time.Minute), f.now.Add(time.Hour), 99)
 	expired := f.crlNumber(t, f.issuer, f.key, 3, f.now.Add(-time.Hour), f.now)
+	wrongPublic, wrongKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(9), Subject: f.issuer.Subject,
+		NotBefore: f.now.Add(-time.Hour), NotAfter: f.now.Add(24 * time.Hour),
+		IsCA: true, BasicConstraintsValid: true,
+		KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		SubjectKeyId: []byte{9, 8, 7, 6},
+	}
+	wrongDER, err := x509.CreateCertificate(rand.Reader, wrongTemplate, wrongTemplate, wrongPublic, wrongKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongIssuer, err := x509.ParseCertificate(wrongDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongSigner := f.crlNumber(t, wrongIssuer, wrongKey, 3, f.now.Add(-time.Minute), f.now.Add(time.Hour))
 	store, err := NewHostCredentialRevocationListStore([][]byte{initial}, f.now)
 	if err != nil {
 		t.Fatalf("create revocation store: %v", err)
@@ -251,6 +271,7 @@ func TestHostCredentialRevocationListStoreKeepsLastGoodSnapshotOnRejectedUpdate(
 		{name: "older CRL number", crls: [][]byte{older}},
 		{name: "same CRL number with different bytes", crls: [][]byte{sameNumberDifferent}},
 		{name: "expired CRL", crls: [][]byte{expired}},
+		{name: "wrong signing key with same issuer name", crls: [][]byte{wrongSigner}},
 		{name: "missing issuer CRL", crls: nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
