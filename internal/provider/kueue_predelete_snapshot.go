@@ -183,6 +183,60 @@ func (a *KueueJobAdapter) RecordPreDeleteDRASnapshot(
 	return a.bindings.PutPreDeleteDRASnapshot(a.namespace, req, snapshot)
 }
 
+// preDeleteSnapshotMatchesReleaseCandidate binds the persisted pre-DELETE
+// snapshot to the exact historical CREATE, DELETE, Job, Kueue Workload, Pod,
+// Node, Claim and device identities used by release correlation. The digest
+// detects mutation; it is not a signature or source-authentication mechanism.
+func preDeleteSnapshotMatchesReleaseCandidate(
+	snapshot KueuePreDeleteDRASnapshot, candidate ReleaseEvidenceCandidate,
+) bool {
+	prior := candidate.PriorPodClaim
+	job := candidate.PriorQueue.Job
+	if snapshot.Digest == "" || snapshot.Digest != kueuePreDeleteSnapshotDigest(snapshot) ||
+		!validKubeName(snapshot.Namespace) ||
+		snapshot.TenantID != candidate.Create.TenantID ||
+		snapshot.WorkloadID != candidate.Create.WorkloadID ||
+		snapshot.ProviderID != candidate.Create.ProviderID ||
+		snapshot.CreateOperationID != candidate.Create.ID ||
+		snapshot.DeleteOperationID != candidate.Delete.ID ||
+		snapshot.CreateGeneration != candidate.Create.Generation ||
+		snapshot.DeleteGeneration != candidate.Delete.Generation ||
+		snapshot.Job != job.Job ||
+		snapshot.KueueWorkload != job.KueueWorkload ||
+		snapshot.Pod != prior.Pod || snapshot.Pod != job.Pod ||
+		snapshot.NodeName != prior.NodeName || snapshot.NodeName != job.PodNodeName ||
+		snapshot.Claim != prior.Claim.Claim ||
+		snapshot.PodClaimAlias != prior.PodClaimAlias ||
+		snapshot.ConsumerContainer != prior.ConsumerContainer ||
+		snapshot.Job.Namespace != snapshot.Namespace ||
+		snapshot.Job.UID != candidate.Create.ProviderResourceUID ||
+		snapshot.Job.UID != candidate.Delete.TargetResourceUID ||
+		candidate.Create.ProviderResourceID != snapshot.Namespace+"/"+snapshot.Job.Name ||
+		candidate.Delete.TargetResourceID != snapshot.Namespace+"/"+snapshot.Job.Name ||
+		!validKubernetesRef(snapshot.Job) ||
+		!validKubernetesRef(snapshot.KueueWorkload) ||
+		!validKubernetesRef(snapshot.Pod) ||
+		!validKubernetesRef(snapshot.Claim) ||
+		!validKubeName(snapshot.ClaimTemplateName) ||
+		!validKubeName(snapshot.PodClaimAlias) ||
+		!validKubeName(snapshot.ConsumerContainer) ||
+		!validObservationLabel(snapshot.Source) ||
+		!validObservationLabel(snapshot.AdapterVersion) ||
+		snapshot.ObservedAt.IsZero() || len(snapshot.Devices) == 0 {
+		return false
+	}
+	devices, ok := canonicalDRADeviceSet(snapshot.Devices, prior.Claim.Device.Request)
+	if !ok || !reflect.DeepEqual(devices, snapshot.Devices) {
+		return false
+	}
+	for _, device := range devices {
+		if device == prior.Claim.Device {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *KueueJobAdapter) requirePreDeleteDRASnapshot(req Request) error {
 	if a == nil || a.bindings == nil {
 		return ErrInvalidKueueObservation
