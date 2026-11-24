@@ -8,6 +8,10 @@ on:
   pull_request_target:
     types: [opened, reopened, synchronize, edited]
 
+concurrency:
+  group: ccp-migration-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
