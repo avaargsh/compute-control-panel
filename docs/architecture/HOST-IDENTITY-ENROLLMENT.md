@@ -139,7 +139,8 @@ The handler registers routes only on a private mux returned by `NewHostSessionIn
 | Drain races with session start/heartbeat | Existing Provider row lock and session fence reject new effect |
 | Lost start ACK / exact heartbeat replay | Original session/receipt only; heartbeat replay does not extend expiry |
 | Certificate serial revoked, missing or expired issuer CRL | Reject before repository access; exact issuer signature, AKI, freshness and serial are checked on every request |
-| CRL update malformed, stale, regressing, missing an issuer, or removing a revoked serial | Reject replacement and retain last known-good snapshot; expired snapshots still reject every host request |\n| CRL distribution source unavailable or OCSP response required | No fetcher, scheduler or OCSP client exists; keep listener unmounted if automated distribution/OCSP is mandatory |
+| CRL update malformed, stale, regressing, missing an issuer, or removing a revoked serial | Reject replacement and retain last known-good snapshot; expired snapshots still reject every host request |
+| CRL distribution source unavailable or OCSP response required | No fetcher, scheduler or OCSP client exists; keep listener unmounted if automated distribution/OCSP is mandatory |
 | Missing TPM/TEE/Node Lease/device evidence | No hardware trust, GPU READY/free/released or capacity assertion |
 
 This is an internal software identity and durable session boundary only. It does not add an enrollment API, hardware attestation, OCSP validation or automated CRL refresh/distribution, Kubernetes Lease freshness, physical GPU UUID evidence, health, DRA release, G04/G05 or Cost FINAL. Keep the handler unmounted until the independent machine authority, operational grant provisioning, CRL refresh/OCSP operating requirements, dedicated listener configuration, independent security review, exact-head CI and branch governance are separately approved.
