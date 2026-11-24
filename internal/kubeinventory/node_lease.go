@@ -21,9 +21,9 @@ type nodeLease struct {
 		} `json:"ownerReferences"`
 	} `json:"metadata"`
 	Spec struct {
-		HolderIdentity        string     `json:"holderIdentity"`
-		RenewTime             *time.Time `json:"renewTime"`
-		LeaseDurationSeconds  *int32     `json:"leaseDurationSeconds"`
+		HolderIdentity       string     `json:"holderIdentity"`
+		RenewTime            *time.Time `json:"renewTime"`
+		LeaseDurationSeconds *int32     `json:"leaseDurationSeconds"`
 	} `json:"spec"`
 }
 
