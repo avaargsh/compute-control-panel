@@ -56,6 +56,9 @@ func releaseCandidateFixture() ReleaseEvidenceCandidate {
 		ProviderResourceID: "tenant-a/job-a", ProviderResourceUID: "job-uid-a",
 	}
 	claim := previousDRAClaimAllocation()
+	// Pre-delete snapshot capture intentionally supports non-shared direct
+	// device allocations only; keep the historical receipt fixture in scope.
+	claim.Device.ShareID = ""
 	candidate := ReleaseEvidenceCandidate{
 		ExpectedAllocationID: "allocation-a",
 
