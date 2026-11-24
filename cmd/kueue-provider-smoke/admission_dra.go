@@ -112,6 +112,20 @@ func admissionInspectDRA(getenv func(string) string, out io.Writer) error {
 	if obs.Result != operation.ResourcePresent || obs.ResourceUID != pin.UID || obs.ResourceID != pin.Namespace+"/"+pin.Name {
 		return provider.ErrInvalidDRAObservation
 	}
+	// Persist the exact observed allocation before the later DELETE process.
+	// The snapshot is API history, not device-release authority.
+	remove := admissionDeleteRequest(pin.Namespace+"/"+pin.Name, pin.UID)
+	podClaim := inv.PodClaim
+	deviceSet := provider.DRADeviceSetObservation{
+		Pod: podClaim.Pod, Claim: podClaim.Claim.Claim, NodeName: podClaim.NodeName,
+		ClaimTemplateName: draQuery.ClaimTemplateName, PodClaimAlias: podClaim.PodClaimAlias,
+		ConsumerContainer: podClaim.ConsumerContainer, Devices: []provider.DRAAllocatedDevice{podClaim.Claim.Device},
+	}
+	snapshot, err := adapter.RecordPreDeleteDRASnapshot(ctx, remove, first, deviceSet)
+	if err != nil {
+		return fmt.Errorf("persist pre-delete DRA snapshot: %w", err)
+	}
+	evidence["pre_delete_snapshot_digest"] = snapshot.Digest
 	evidence["release_seed"] = admissionReleaseSeed{Pin: pin, Queue: queue, PodClaim: inv.PodClaim}
 	commit, err := checkedSmokeSourceCommit(getenv)
 	if err != nil {

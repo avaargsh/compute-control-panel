@@ -266,6 +266,10 @@ func (failingBindingStore) GetCreatePin(string, Request) (KueueCreatePin, bool, 
 	return KueueCreatePin{}, false, errBindingUnreadable
 }
 
+func (failingBindingStore) GetCreatePinByJob(string, string, string) (KueueCreatePin, bool, error) {
+	return KueueCreatePin{}, false, errBindingUnreadable
+}
+
 func (failingBindingStore) PutCreatePin(string, Request, string, string) error {
 	return errBindingUnreadable
 }
@@ -276,6 +280,14 @@ func (failingBindingStore) GetDeleteTombstone(string, Request) (KueueDeleteTombs
 
 func (failingBindingStore) PutDeleteTombstone(string, Request, string, string, bool) error {
 	return errBindingUnreadable
+}
+
+func (failingBindingStore) PutPreDeleteDRASnapshot(string, Request, KueuePreDeleteDRASnapshot) (KueuePreDeleteDRASnapshot, error) {
+	return KueuePreDeleteDRASnapshot{}, errBindingUnreadable
+}
+
+func (failingBindingStore) GetPreDeleteDRASnapshot(string, Request) (KueuePreDeleteDRASnapshot, bool, error) {
+	return KueuePreDeleteDRASnapshot{}, false, errBindingUnreadable
 }
 
 func (failingBindingStore) CreatePinUID(string, string) (string, bool, error) {
@@ -331,8 +343,9 @@ func TestServiceAccountJobAdapterInjectsTrustedBindingStore(t *testing.T) {
 
 type rejectedBindingWrites struct {
 	*MemoryKueueJobBindingStore
-	rejectCreate bool
-	rejectDelete bool
+	rejectCreate    bool
+	rejectDelete    bool
+	rejectDeleteACK bool
 }
 
 func (s *rejectedBindingWrites) PutCreatePin(ns string, req Request, name, uid string) error {
@@ -343,7 +356,7 @@ func (s *rejectedBindingWrites) PutCreatePin(ns string, req Request, name, uid s
 }
 
 func (s *rejectedBindingWrites) PutDeleteTombstone(ns string, req Request, name, uid string, acknowledged bool) error {
-	if s.rejectDelete {
+	if s.rejectDelete || (acknowledged && s.rejectDeleteACK) {
 		return errBindingUnreadable
 	}
 	return s.MemoryKueueJobBindingStore.PutDeleteTombstone(ns, req, name, uid, acknowledged)
@@ -371,7 +384,7 @@ func TestKueueSuccessfulCreateThenBindingWriteFailureRemainsUnknown(t *testing.T
 	}
 }
 
-func TestKueueSuccessfulDeleteThenBindingWriteFailureRemainsUnknown(t *testing.T) {
+func TestKueueDeleteIntentWriteFailureBlocksSideEffect(t *testing.T) {
 	store := &rejectedBindingWrites{MemoryKueueJobBindingStore: NewMemoryKueueJobBindingStore()}
 	adapter, api, server := newKueueAdapterFixtureWithStore(t, &kueueAPI{}, store)
 	defer server.Close()
@@ -379,20 +392,38 @@ func TestKueueSuccessfulDeleteThenBindingWriteFailureRemainsUnknown(t *testing.T
 	remove := kueueDeleteRequest(create, observed)
 	store.rejectDelete = true
 	_, err := adapter.Apply(context.Background(), remove)
-	if !errors.Is(err, ErrAcknowledgementLost) || !errors.Is(err, errBindingUnreadable) {
-		t.Fatalf("successful Kubernetes DELETE with failed tombstone was not UNKNOWN: %v", err)
+	if !errors.Is(err, errBindingUnreadable) {
+		t.Fatalf("failed DELETE intent was not propagated: %v", err)
 	}
-	if api.deleteCount() != 1 || api.storedJobs() != 0 {
-		t.Fatalf("DELETE side effect missing or duplicated: deletes=%d jobs=%d", api.deleteCount(), api.storedJobs())
+	if api.deleteCount() != 0 || api.storedJobs() != 1 {
+		t.Fatalf("DELETE without committed intent: deletes=%d jobs=%d", api.deleteCount(), api.storedJobs())
 	}
 	if _, ok, err := store.GetDeleteTombstone("tenant-a", remove); err != nil || ok {
 		t.Fatalf("uncommitted tombstone trusted: ok=%v err=%v", ok, err)
 	}
+}
+
+func TestKueueSuccessfulDeleteThenBindingWriteFailureRemainsUnknown(t *testing.T) {
+	store := &rejectedBindingWrites{MemoryKueueJobBindingStore: NewMemoryKueueJobBindingStore()}
+	adapter, api, server := newKueueAdapterFixtureWithStore(t, &kueueAPI{}, store)
+	defer server.Close()
+	create, observed := createSuspendedJob(t, adapter, api)
+	remove := kueueDeleteRequest(create, observed)
+	store.rejectDeleteACK = true
+	_, err := adapter.Apply(context.Background(), remove)
+	if !errors.Is(err, ErrAcknowledgementLost) || !errors.Is(err, errBindingUnreadable) {
+		t.Fatalf("successful Kubernetes DELETE with failed acknowledgement was not UNKNOWN: %v", err)
+	}
+	if api.deleteCount() != 1 || api.storedJobs() != 0 {
+		t.Fatalf("DELETE side effect missing or duplicated: deletes=%d jobs=%d", api.deleteCount(), api.storedJobs())
+	}
+	if tomb, ok, err := store.GetDeleteTombstone("tenant-a", remove); err != nil || !ok || tomb.Acknowledged {
+		t.Fatalf("expected durable unacknowledged intent: %+v ok=%v err=%v", tomb, ok, err)
+	}
 	next := reopenKueueAdapter(t, server, store)
 	obs, err := next.Inspect(context.Background(), remove)
-	if err != nil || obs.Result != operation.ObservationConflict ||
-		obs.ReasonCode != "MISSING_AUTHORITATIVE_OPERATION" || obs.Result == operation.TargetAbsent {
-		t.Fatalf("bare 404 incorrectly proved release: %+v err=%v", obs, err)
+	if err != nil || obs.Result != operation.TargetAbsent || obs.TargetResourceUID != remove.TargetResourceUID {
+		t.Fatalf("pinned absence not recovered: %+v err=%v", obs, err)
 	}
 }
 

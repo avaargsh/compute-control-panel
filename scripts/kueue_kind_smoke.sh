@@ -1330,7 +1330,8 @@ if ! wait_for 'stable same-workload Job/Pod/Claim/ResourceSlice API evidence' si
 fi
 export CCP_KUEUE_RELEASE_SEED="$dir/m2-release-seed.json"
 jq -e --arg sha "$CCP_SMOKE_SOURCE_COMMIT" '
-  .ccp_commit == $sha and .ccp_commit_source == "CI_CHECKOUT_UNATTESTED"' \
+  .ccp_commit == $sha and .ccp_commit_source == "CI_CHECKOUT_UNATTESTED" and
+  (.pre_delete_snapshot_digest | test("^sha256:[0-9a-f]{64}$"))' \
   "$dir/m1-single-workload-dra.json" >/dev/null
 jq -e '.release_seed' "$dir/m1-single-workload-dra.json" > "$CCP_KUEUE_RELEASE_SEED"
 jq 'del(.release_seed)' "$dir/m1-single-workload-dra.json"

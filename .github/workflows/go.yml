@@ -280,6 +280,21 @@ jobs:
             exit 1
           fi
           printf 'verified_release_fence_resolver_source_sha=%s\n' "$(git rev-parse --verify HEAD)"
+      - name: Require immutable pre-delete DRA snapshot PostgreSQL contract (no skip)
+        shell: bash
+        env:
+          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
+        run: |
+          set -euo pipefail
+          go test -count=1 -v -run "^(TestKueuePreDeleteDRASnapshotStoreConformance|TestKueuePreDeleteDRASnapshotRejectsSnapshotAfterDeleteIntent|TestPostgresKueuePreDeleteSnapshotSerializesWithDeleteIntent|TestKueueJobAdapterRecordsAndRequiresPreDeleteDRASnapshot|TestKueueJobAdapterBlocksDRADeleteBeforeExternalSideEffectWithoutSnapshot|TestPostgresKueuePreDeleteDRASnapshotIsImmutable|TestPostgresKueuePreDeleteSnapshotInsertGuardsRejectTenantAndLateWrites)$" ./internal/provider | tee kueue-predelete-dra-snapshot-pg.log
+          for test in TestKueuePreDeleteDRASnapshotStoreConformance TestKueuePreDeleteDRASnapshotRejectsSnapshotAfterDeleteIntent TestPostgresKueuePreDeleteSnapshotSerializesWithDeleteIntent TestKueueJobAdapterRecordsAndRequiresPreDeleteDRASnapshot TestKueueJobAdapterBlocksDRADeleteBeforeExternalSideEffectWithoutSnapshot TestPostgresKueuePreDeleteDRASnapshotIsImmutable TestPostgresKueuePreDeleteSnapshotInsertGuardsRejectTenantAndLateWrites; do
+            grep -F -- "--- PASS: $test" kueue-predelete-dra-snapshot-pg.log
+          done
+          if grep -F -- '--- SKIP:' kueue-predelete-dra-snapshot-pg.log; then
+            echo 'pre-delete DRA snapshot PostgreSQL acceptance was skipped' >&2
+            exit 1
+          fi
+          printf 'verified_kueue_predelete_dra_snapshot_source_sha=%s\n' "$(git rev-parse --verify HEAD)"
       - name: Require real PostgreSQL correlated release bridge acceptance (no skip)
         shell: bash
         env:

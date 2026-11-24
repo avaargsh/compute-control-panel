@@ -281,6 +281,10 @@ func grantKueueBindingPrivileges(t *testing.T, admin *sql.DB, role string) {
 		"GRANT UPDATE (acknowledged, updated_at) ON public.kueue_job_delete_tombstones TO "+role,
 		"GRANT EXECUTE ON FUNCTION public.kueue_job_create_pin_guard() TO "+role,
 		"GRANT EXECUTE ON FUNCTION public.kueue_job_delete_tombstone_guard() TO "+role,
+		"GRANT SELECT, INSERT ON public.kueue_job_pre_delete_dra_snapshots TO "+role,
+		"GRANT EXECUTE ON FUNCTION public.kueue_job_pre_delete_dra_snapshot_guard() TO "+role,
+		"GRANT EXECUTE ON FUNCTION public.kueue_job_delete_tombstone_insert_guard() TO "+role,
+		"GRANT EXECUTE ON FUNCTION public.kueue_job_pre_delete_dra_snapshot_insert_guard() TO "+role,
 	); err != nil {
 		t.Fatal(err)
 	}

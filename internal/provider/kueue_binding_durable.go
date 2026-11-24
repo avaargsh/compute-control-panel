@@ -118,25 +118,32 @@ func verifyKueueBindingSchema(ctx context.Context, db *sql.DB) error {
 		SELECT
 		  pg_catalog.to_regclass('public.kueue_job_create_pins') IS NOT NULL
 		  AND pg_catalog.to_regclass('public.kueue_job_delete_tombstones') IS NOT NULL
+		  AND pg_catalog.to_regclass('public.kueue_job_pre_delete_dra_snapshots') IS NOT NULL
 		  AND (
 		    SELECT count(*) FROM pg_catalog.pg_proc p
 		    JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
 		    WHERE n.nspname = 'public'
-		      AND p.proname IN ('kueue_job_create_pin_guard', 'kueue_job_delete_tombstone_guard')
+		      AND p.proname IN ('kueue_job_create_pin_guard', 'kueue_job_delete_tombstone_guard',
+		        'kueue_job_pre_delete_dra_snapshot_guard', 'kueue_job_delete_tombstone_insert_guard',
+		        'kueue_job_pre_delete_dra_snapshot_insert_guard')
 		      AND p.proconfig = ARRAY['search_path=pg_catalog, pg_temp']::pg_catalog.text[]
-		  ) = 2
+		  ) = 5
 		  AND (
 		    SELECT count(*) FROM (VALUES
 		      ('kueue_job_create_pins'::pg_catalog.name, 'kueue_job_create_pin_no_rewrite'::pg_catalog.name),
 		      ('kueue_job_create_pins'::pg_catalog.name, 'kueue_job_create_pin_no_truncate'::pg_catalog.name),
 		      ('kueue_job_delete_tombstones'::pg_catalog.name, 'kueue_job_delete_tombstone_no_rewrite'::pg_catalog.name),
-		      ('kueue_job_delete_tombstones'::pg_catalog.name, 'kueue_job_delete_tombstone_no_truncate'::pg_catalog.name)
+		      ('kueue_job_delete_tombstones'::pg_catalog.name, 'kueue_job_delete_tombstone_no_truncate'::pg_catalog.name),
+		      ('kueue_job_pre_delete_dra_snapshots'::pg_catalog.name, 'kueue_job_pre_delete_dra_snapshot_before_insert'::pg_catalog.name),
+		      ('kueue_job_pre_delete_dra_snapshots'::pg_catalog.name, 'kueue_job_pre_delete_dra_snapshot_no_update_delete'::pg_catalog.name),
+		      ('kueue_job_pre_delete_dra_snapshots'::pg_catalog.name, 'kueue_job_pre_delete_dra_snapshot_no_truncate'::pg_catalog.name),
+		      ('kueue_job_delete_tombstones'::pg_catalog.name, 'kueue_job_delete_tombstone_before_insert'::pg_catalog.name)
 		    ) AS required(relname, tgname)
 		    JOIN pg_catalog.pg_class c ON c.relname = required.relname
 		    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
 		    JOIN pg_catalog.pg_trigger t
 		      ON t.tgrelid = c.oid AND t.tgname = required.tgname AND t.tgenabled = 'A'
-		  ) = 4
+		  ) = 8
 	`).Scan(&ready)
 	if err != nil {
 		return fmt.Errorf("%w: cannot read kueue binding schema: %v", ErrKueueBindingSchema, err)
@@ -204,8 +211,13 @@ func verifyKueueBindingRole(ctx context.Context, db *sql.DB) error {
 		    AND pg_catalog.has_table_privilege(current_user, 'public.kueue_job_delete_tombstones'::pg_catalog.regclass, 'INSERT')
 		    AND pg_catalog.has_column_privilege(current_user, 'public.kueue_job_delete_tombstones'::pg_catalog.regclass, 'acknowledged', 'UPDATE')
 		    AND pg_catalog.has_column_privilege(current_user, 'public.kueue_job_delete_tombstones'::pg_catalog.regclass, 'updated_at', 'UPDATE')
+		    AND pg_catalog.has_table_privilege(current_user, 'public.kueue_job_pre_delete_dra_snapshots'::pg_catalog.regclass, 'SELECT')
+		    AND pg_catalog.has_table_privilege(current_user, 'public.kueue_job_pre_delete_dra_snapshots'::pg_catalog.regclass, 'INSERT')
 		    AND pg_catalog.has_function_privilege(current_user, 'public.kueue_job_create_pin_guard()'::pg_catalog.regprocedure, 'EXECUTE')
 		    AND pg_catalog.has_function_privilege(current_user, 'public.kueue_job_delete_tombstone_guard()'::pg_catalog.regprocedure, 'EXECUTE')
+		    AND pg_catalog.has_function_privilege(current_user, 'public.kueue_job_pre_delete_dra_snapshot_guard()'::pg_catalog.regprocedure, 'EXECUTE')
+		    AND pg_catalog.has_function_privilege(current_user, 'public.kueue_job_delete_tombstone_insert_guard()'::pg_catalog.regprocedure, 'EXECUTE')
+		    AND pg_catalog.has_function_privilege(current_user, 'public.kueue_job_pre_delete_dra_snapshot_insert_guard()'::pg_catalog.regprocedure, 'EXECUTE')
 		  ) THEN 'missing_binding_dml'
 		  WHEN
 		    pg_catalog.has_table_privilege(current_user, 'public.kueue_job_create_pins'::pg_catalog.regclass, 'DELETE')
@@ -216,6 +228,10 @@ func verifyKueueBindingRole(ctx context.Context, db *sql.DB) error {
 		    OR pg_catalog.has_table_privilege(current_user, 'public.kueue_job_delete_tombstones'::pg_catalog.regclass, 'TRUNCATE')
 		    OR pg_catalog.has_table_privilege(current_user, 'public.kueue_job_delete_tombstones'::pg_catalog.regclass, 'TRIGGER')
 		    OR pg_catalog.has_table_privilege(current_user, 'public.kueue_job_delete_tombstones'::pg_catalog.regclass, 'REFERENCES')
+		    OR pg_catalog.has_table_privilege(current_user, 'public.kueue_job_pre_delete_dra_snapshots'::pg_catalog.regclass, 'DELETE')
+		    OR pg_catalog.has_table_privilege(current_user, 'public.kueue_job_pre_delete_dra_snapshots'::pg_catalog.regclass, 'TRUNCATE')
+		    OR pg_catalog.has_table_privilege(current_user, 'public.kueue_job_pre_delete_dra_snapshots'::pg_catalog.regclass, 'TRIGGER')
+		    OR pg_catalog.has_table_privilege(current_user, 'public.kueue_job_pre_delete_dra_snapshots'::pg_catalog.regclass, 'REFERENCES')
 		    OR EXISTS (
 		      SELECT 1 FROM pg_catalog.pg_attribute a
 		      WHERE a.attrelid = 'public.kueue_job_create_pins'::pg_catalog.regclass
@@ -236,6 +252,15 @@ func verifyKueueBindingRole(ctx context.Context, db *sql.DB) error {
 		          OR pg_catalog.has_column_privilege(current_user, a.attrelid, a.attname, 'REFERENCES')
 		        )
 		    )
+		    OR EXISTS (
+		      SELECT 1 FROM pg_catalog.pg_attribute a
+		      WHERE a.attrelid = 'public.kueue_job_pre_delete_dra_snapshots'::pg_catalog.regclass
+		        AND a.attnum > 0 AND NOT a.attisdropped
+		        AND (
+		          pg_catalog.has_column_privilege(current_user, a.attrelid, a.attname, 'UPDATE')
+		          OR pg_catalog.has_column_privilege(current_user, a.attrelid, a.attname, 'REFERENCES')
+		        )
+		    )
 		    THEN 'binding_privilege'
 		  WHEN EXISTS (
 		    SELECT 1
@@ -243,7 +268,7 @@ func verifyKueueBindingRole(ctx context.Context, db *sql.DB) error {
 		    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
 		    WHERE n.nspname = 'public'
 		      AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
-		      AND c.relname NOT IN ('kueue_job_create_pins', 'kueue_job_delete_tombstones')
+		      AND c.relname NOT IN ('kueue_job_create_pins', 'kueue_job_delete_tombstones', 'kueue_job_pre_delete_dra_snapshots')
 		      AND (
 		        pg_catalog.has_table_privilege(current_user, c.oid, 'SELECT')
 		        OR pg_catalog.has_table_privilege(current_user, c.oid, 'INSERT')

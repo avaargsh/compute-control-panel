@@ -258,7 +258,7 @@ func relistRead(ctx context.Context, adapter *provider.KueueJobAdapter) func() (
 }
 
 func relistRecord(getenv func(string) string, out io.Writer) error {
-	adapter, err := openAdmissionAdapter(getenv)
+	adapter, err := openQueuedBindingAdapter(getenv, admissionLocalQueue)
 	if err != nil {
 		return err
 	}
@@ -354,7 +354,7 @@ func relistRecord(getenv func(string) string, out io.Writer) error {
 }
 
 func relistWindow(getenv func(string) string, out io.Writer) error {
-	adapter, err := openAdmissionAdapter(getenv)
+	adapter, err := openQueuedBindingAdapter(getenv, admissionLocalQueue)
 	if err != nil {
 		return err
 	}
@@ -427,7 +427,7 @@ func relistConverge(getenv func(string) string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	adapter, err := openAdmissionAdapter(getenv)
+	adapter, err := openQueuedBindingAdapter(getenv, admissionLocalQueue)
 	if err != nil {
 		return err
 	}
@@ -607,7 +607,7 @@ func relistDelete(getenv func(string) string, out io.Writer) error {
 		return err
 	}
 	defer func() { _ = pins.Close() }()
-	adapter, err := openAdmissionAdapter(getenv)
+	adapter, err := openQueuedBindingAdapter(getenv, admissionLocalQueue)
 	if err != nil {
 		return err
 	}
@@ -652,7 +652,7 @@ func relistRecoverDelete(getenv func(string) string, out io.Writer) error {
 		return err
 	}
 	defer func() { _ = pins.Close() }()
-	adapter, err := openAdmissionAdapter(getenv)
+	adapter, err := openQueuedBindingAdapter(getenv, admissionLocalQueue)
 	if err != nil {
 		return err
 	}
@@ -781,7 +781,7 @@ func relistRecoverSuccessor(getenv func(string) string, out io.Writer) error {
 		return err
 	}
 	defer func() { _ = pins.Close() }()
-	adapter, err := openAdmissionAdapter(getenv)
+	adapter, err := openQueuedBindingAdapter(getenv, admissionLocalQueue)
 	if err != nil {
 		return err
 	}

@@ -19,6 +19,7 @@ type DRADeviceSetQuery struct {
 type DRADeviceSetObservation struct {
 	Pod, Claim        KubernetesResourceRef
 	NodeName          string
+	ClaimTemplateName string
 	PodClaimAlias     string
 	ConsumerContainer string
 	Devices           []DRAAllocatedDevice
@@ -206,5 +207,6 @@ func (r *KubernetesObservationReader) ObserveDRAPodDeviceSet(ctx context.Context
 		return reject()
 	}
 	return DRADeviceSetObservation{Pod: refFromKube(first.Metadata.kubeMeta), Claim: prior,
-		NodeName: first.Spec.NodeName, PodClaimAlias: q.Pod.PodClaimAlias, ConsumerContainer: consumer, Devices: want}, nil
+		NodeName: first.Spec.NodeName, ClaimTemplateName: q.Pod.ClaimTemplateName,
+		PodClaimAlias: q.Pod.PodClaimAlias, ConsumerContainer: consumer, Devices: want}, nil
 }
