@@ -180,6 +180,21 @@ func hostCredentialRevocationListsAdvance(previous, next []*x509.RevocationList)
 		if current.Number.Cmp(old.Number) == 0 && !bytes.Equal(current.Raw, old.Raw) {
 			return false
 		}
+		nextRevoked := make(map[string]struct{}, len(current.RevokedCertificateEntries))
+		for _, entry := range current.RevokedCertificateEntries {
+			if entry.SerialNumber == nil || entry.SerialNumber.Sign() <= 0 {
+				return false
+			}
+			nextRevoked[string(entry.SerialNumber.Bytes())] = struct{}{}
+		}
+		for _, entry := range old.RevokedCertificateEntries {
+			if entry.SerialNumber == nil || entry.SerialNumber.Sign() <= 0 {
+				return false
+			}
+			if _, retained := nextRevoked[string(entry.SerialNumber.Bytes())]; !retained {
+				return false
+			}
+		}
 	}
 	return true
 }
