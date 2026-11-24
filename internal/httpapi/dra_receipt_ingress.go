@@ -124,8 +124,10 @@ type DRAReceiptVerifierResolver interface {
 // DRAReceiptEvidenceResolver resolves historical CREATE/DELETE, Provider
 // absence, Kueue/Pod and ResourceClaim evidence from authenticated,
 // server-controlled stores/collectors. It is called only after the signature,
-// source scope and freshness have been verified. Event fields are index hints,
-// never authority or evidence supplied by the HTTP caller.
+// source scope and freshness have been verified. The resolver MUST fetch the
+// exact durable pre-delete snapshot by the server-derived CREATE/DELETE identity
+// and include it in the candidate; event fields are index hints, never authority
+// or evidence supplied by the HTTP caller.
 type DRAReceiptEvidenceResolver interface {
 	ResolveDRAReceiptEvidence(context.Context, WorkloadPrincipal, string, provider.DRAUnprepareEvent) (provider.ReleaseEvidenceCandidate, error)
 }
