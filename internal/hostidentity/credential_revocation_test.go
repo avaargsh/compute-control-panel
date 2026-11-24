@@ -236,7 +236,7 @@ func TestHostCredentialRevocationListStoreKeepsLastGoodSnapshotOnRejectedUpdate(
 	f := newHostCredentialRevocationFixture(t)
 	initial := f.crlNumber(t, f.issuer, f.key, 2, f.now.Add(-time.Minute), f.now.Add(time.Hour))
 	older := f.crlNumber(t, f.issuer, f.key, 1, f.now.Add(-time.Minute), f.now.Add(time.Hour))
-	sameNumberDifferent := f.crlNumber(t, f.issuer, f.key, 2, f.now.Add(-2*time.Minute), f.now.Add(time.Hour))
+	sameNumberDifferent := f.crlNumber(t, f.issuer, f.key, 2, f.now.Add(-time.Minute), f.now.Add(time.Hour), 99)
 	expired := f.crlNumber(t, f.issuer, f.key, 3, f.now.Add(-time.Hour), f.now)
 	store, err := NewHostCredentialRevocationListStore([][]byte{initial}, f.now)
 	if err != nil {
