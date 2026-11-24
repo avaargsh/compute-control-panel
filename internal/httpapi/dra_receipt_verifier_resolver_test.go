@@ -15,10 +15,10 @@ type registeredDRAReceiptVerifierSourceStub struct {
 	calls      int
 	tenantID   string
 	providerID string
-	event    provider.DRAUnprepareEvent
-	verifier *provider.DRAUnprepareVerifier
-	database time.Time
-	err      error
+	event      provider.DRAUnprepareEvent
+	verifier   *provider.DRAUnprepareVerifier
+	database   time.Time
+	err        error
 }
 
 func (s *registeredDRAReceiptVerifierSourceStub) ResolveRegisteredDRAUnprepareVerifier(
