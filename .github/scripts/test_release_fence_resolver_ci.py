@@ -9,8 +9,8 @@ class ReleaseFenceResolverSourceCI(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         raw = WORKFLOW.read_text(encoding="utf-8")
-        assert raw.count("\\n  release-fence-source:\\n") == 1
-        cls.verify, cls.source = raw.split("\\n  release-fence-source:\\n", 1)
+        assert raw.count("\n  release-fence-source:\n") == 1
+        cls.verify, cls.source = raw.split("\n  release-fence-source:\n", 1)
 
     def test_merged_tree_keeps_full_suite(self):
         self.assertIn("go test -race -count=1 ./...", self.verify)
