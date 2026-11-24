@@ -306,6 +306,7 @@ func TestHostSessionRestrictedWriterAndCatalogBoundary(t *testing.T) {
 		`UPDATE public.compute_host_sessions SET subject=subject WHERE host_id=$1`,
 		`DELETE FROM public.compute_host_session_heartbeats WHERE host_id=$1`,
 		`TRUNCATE public.compute_host_sessions`,
+		`SELECT public.compute_host_session_immutable_guard()`,
 		`SET ROLE ccp_host_session_guard_owner`,
 	} {
 		args := []any{binding.HostID}
@@ -350,6 +351,24 @@ func TestHostSessionRestrictedWriterAndCatalogBoundary(t *testing.T) {
 		t.Fatalf("unsafe session guard owner role: login=%t inherit=%t superuser=%t", canLogin, inherit, superuser)
 	}
 
+	var ownerCanSelectSessions, ownerCanInsertSessions bool
+	var ownerCanSelectHeartbeats, ownerCanInsertHeartbeats bool
+	if err := admin.QueryRowContext(ctx, `
+		SELECT
+			pg_catalog.has_table_privilege('ccp_host_session_guard_owner', 'public.compute_host_sessions', 'SELECT'),
+			pg_catalog.has_table_privilege('ccp_host_session_guard_owner', 'public.compute_host_sessions', 'INSERT'),
+			pg_catalog.has_table_privilege('ccp_host_session_guard_owner', 'public.compute_host_session_heartbeats', 'SELECT'),
+			pg_catalog.has_table_privilege('ccp_host_session_guard_owner', 'public.compute_host_session_heartbeats', 'INSERT')
+	`).Scan(&ownerCanSelectSessions, &ownerCanInsertSessions,
+		&ownerCanSelectHeartbeats, &ownerCanInsertHeartbeats); err != nil {
+		t.Fatal(err)
+	}
+	if !ownerCanSelectSessions || !ownerCanInsertSessions ||
+		!ownerCanSelectHeartbeats || !ownerCanInsertHeartbeats {
+		t.Fatalf("dedicated owner lost its session table privileges: sessions=%t/%t heartbeats=%t/%t",
+			ownerCanSelectSessions, ownerCanInsertSessions, ownerCanSelectHeartbeats, ownerCanInsertHeartbeats)
+	}
+
 	var unexpectedGrant bool
 	if err := admin.QueryRowContext(ctx, `
 		SELECT EXISTS (
@@ -364,7 +383,10 @@ func TestHostSessionRestrictedWriterAndCatalogBoundary(t *testing.T) {
 			WHERE p.oid IN (
 				'public.compute_host_session_start(text,text,text,text,text,bigint,integer)'::pg_catalog.regprocedure,
 				'public.compute_host_session_heartbeat(text,text,text,text,text,bigint,text,bigint,text)'::pg_catalog.regprocedure
-			) AND a.grantee NOT IN (p.proowner, pg_catalog.to_regrole('ccp_host_session_writer'))
+			) AND (
+				a.grantee NOT IN (p.proowner, pg_catalog.to_regrole('ccp_host_session_writer'))
+				OR (a.grantee=pg_catalog.to_regrole('ccp_host_session_writer') AND a.grantor <> p.proowner)
+			)
 		)
 	`).Scan(&unexpectedGrant); err != nil {
 		t.Fatal(err)
