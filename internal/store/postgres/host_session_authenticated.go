@@ -13,14 +13,10 @@ import (
 
 var ErrHostSessionUnauthorized = errors.New("host session authorization rejected")
 
-const hostAgentService = "compute-host-agent"
-
-// AuthenticatedHostSessionStartRequest contains only a server-verified identity
-// and normalized session intent. The database resolves the authoritative
-// binding; the remote host must never supply the tenant, service or subject.
+// AuthenticatedHostSessionStartRequest contains only a verified dedicated
+// host-certificate subject and normalized session intent. The database
+// resolves tenant, service and the immutable HostIdentity tuple from its grant.
 type AuthenticatedHostSessionStartRequest struct {
-	TenantID      string
-	Service       string
 	Subject       string
 	ExpectedEpoch int64
 	RequestID     string
@@ -28,8 +24,6 @@ type AuthenticatedHostSessionStartRequest struct {
 }
 
 type AuthenticatedHostHeartbeatRequest struct {
-	TenantID  string
-	Service   string
 	Subject   string
 	Epoch     int64
 	SessionID string
@@ -37,13 +31,16 @@ type AuthenticatedHostHeartbeatRequest struct {
 	Digest    string
 }
 
-func validateAuthenticatedHostIdentity(tenant, service, subject string) error {
-	if !validHostSessionIdentity(tenant, 256) || !validHostSessionIdentity(service, 256) ||
-		!validHostSessionIdentity(subject, 1024) || !strings.HasPrefix(subject, "spiffe://") {
+func validateAuthenticatedHostIdentity(subject string) error {
+	if !validHostSessionIdentity(subject, 1024) ||
+		!strings.HasPrefix(subject, "spiffe://") ||
+		!strings.Contains(subject, "/host/") ||
+		strings.HasSuffix(subject, "/host/") {
 		return ErrHostSessionInvalid
 	}
-	if service != hostAgentService {
-		return ErrHostSessionUnauthorized
+	machineID := subject[strings.LastIndex(subject, "/host/")+len("/host/"):]
+	if machineID == "" || strings.Contains(machineID, "/") {
+		return ErrHostSessionInvalid
 	}
 	return nil
 }
@@ -63,7 +60,7 @@ func authenticatedHostSessionError(operation string, err error) error {
 // transactional authorization wrapper. It never falls back to the raw tuple
 // function. Migration and real database acceptance are required before use.
 func (r *Repository) StartAuthenticatedHostSession(ctx context.Context, req AuthenticatedHostSessionStartRequest) (hostidentity.SessionFence, error) {
-	if err := validateAuthenticatedHostIdentity(req.TenantID, req.Service, req.Subject); err != nil {
+	if err := validateAuthenticatedHostIdentity(req.Subject); err != nil {
 		return hostidentity.SessionFence{}, err
 	}
 	if r == nil || r.db == nil || !validHostSessionIdentity(req.RequestID, 256) ||
@@ -76,9 +73,8 @@ func (r *Repository) StartAuthenticatedHostSession(ctx context.Context, req Auth
 	err := r.db.QueryRowContext(ctx, `
 		SELECT host_id, epoch, session_id, provider_id, cluster_scope,
 		       node_uid, subject, issued_at, expires_at
-		FROM public.compute_host_session_start_authenticated($1,$2,$3,$4,$5,$6)`,
-		req.TenantID, req.Service, req.Subject, req.ExpectedEpoch,
-		req.RequestID, int64(req.TTL/time.Second),
+		FROM public.compute_host_session_start_authenticated($1,$2,$3,$4)`,
+		req.Subject, req.ExpectedEpoch, req.RequestID, int64(req.TTL/time.Second),
 	).Scan(
 		&fence.Binding.HostID, &fence.Epoch, &fence.SessionID,
 		&fence.Binding.ProviderID, &fence.Binding.ClusterScope,
@@ -100,7 +96,7 @@ func (r *Repository) StartAuthenticatedHostSession(ctx context.Context, req Auth
 // RecordAuthenticatedHostHeartbeat requires the database wrapper to resolve
 // the binding and enforce active authorization and session fencing atomically.
 func (r *Repository) RecordAuthenticatedHostHeartbeat(ctx context.Context, req AuthenticatedHostHeartbeatRequest) (hostidentity.Disposition, time.Time, error) {
-	if err := validateAuthenticatedHostIdentity(req.TenantID, req.Service, req.Subject); err != nil {
+	if err := validateAuthenticatedHostIdentity(req.Subject); err != nil {
 		return hostidentity.Reject, time.Time{}, err
 	}
 	if r == nil || r.db == nil || req.Epoch <= 0 || req.Sequence <= 0 ||
@@ -113,9 +109,8 @@ func (r *Repository) RecordAuthenticatedHostHeartbeat(ctx context.Context, req A
 	var recordedAt time.Time
 	err := r.db.QueryRowContext(ctx, `
 		SELECT disposition, recorded_at
-		FROM public.compute_host_session_heartbeat_authenticated($1,$2,$3,$4,$5,$6,$7)`,
-		req.TenantID, req.Service, req.Subject, req.Epoch, req.SessionID,
-		req.Sequence, req.Digest,
+		FROM public.compute_host_session_heartbeat_authenticated($1,$2,$3,$4,$5)`,
+		req.Subject, req.Epoch, req.SessionID, req.Sequence, req.Digest,
 	).Scan(&disposition, &recordedAt)
 	if err != nil {
 		return hostidentity.Reject, time.Time{}, authenticatedHostSessionError("record authenticated HostSession heartbeat", err)
