@@ -2,6 +2,7 @@ package provider
 
 import (
 	"bytes"
+	"errors"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
@@ -202,14 +203,15 @@ func TestDRAUnprepareCorrelationRequiresExactDurablePreDeleteSnapshot(t *testing
 	t.Run("exact snapshot", func(t *testing.T) {
 		candidate := releaseCandidateFixture()
 		candidate.PreDeleteSnapshot = releaseCandidatePreDeleteSnapshot(candidate)
-		if got, err := verifier.Correlate(candidate, signed, asOf); err != nil || got.Release.AllocationID != "allocation-a" {
-			t.Fatalf("exact snapshot rejected: %+v err=%v", got, err)
+		if got, err := verifier.Correlate(candidate, signed, asOf); err != nil || got.Release.AllocationID != "allocation-a" ||
+			got.PreDeleteSnapshotDigest != candidate.PreDeleteSnapshot.Digest {
+			t.Fatalf("exact snapshot rejected or digest not retained: %+v err=%v", got, err)
 		}
 	})
 
 	t.Run("successor claim UID", func(t *testing.T) {
 		candidate := releaseCandidateFixture()
-		snapshot := releaseCandidatePreDeleteSnapshot(candidate)
+		snapshot := *releaseCandidatePreDeleteSnapshot(candidate)
 		snapshot.Claim.UID = "successor-claim-uid"
 		snapshot.Digest = kueuePreDeleteSnapshotDigest(snapshot)
 		candidate.PreDeleteSnapshot = &snapshot
