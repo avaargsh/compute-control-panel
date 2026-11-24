@@ -439,6 +439,16 @@ COMMENT ON FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT,TEXT,B
 COMMENT ON FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT) IS
     'Unmounted internal heartbeat entrypoint; enforces active latest epoch, DB clock, monotonic sequence and exact replay without expiry extension.';
 
+REVOKE ALL ON TABLE public.compute_host_sessions FROM PUBLIC;
+REVOKE ALL ON TABLE public.compute_host_sessions FROM CURRENT_USER;
+REVOKE ALL ON TABLE public.compute_host_session_heartbeats FROM PUBLIC;
+REVOKE ALL ON TABLE public.compute_host_session_heartbeats FROM CURRENT_USER;
+REVOKE ALL ON FUNCTION public.compute_host_session_immutable_guard() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.compute_host_session_immutable_guard() FROM CURRENT_USER;
+REVOKE ALL ON FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,INTEGER) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,INTEGER) FROM CURRENT_USER;
+REVOKE ALL ON FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT) FROM CURRENT_USER;
 -- The NOLOGIN owner is the only direct table owner. The runtime writer gets
 -- EXECUTE only; Provider and binding reads/locks remain inside the definer.
 GRANT CREATE ON SCHEMA public TO ccp_host_session_guard_owner;
@@ -450,16 +460,6 @@ ALTER FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT
 ALTER FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT)
     OWNER TO ccp_host_session_guard_owner;
 
-REVOKE ALL ON TABLE public.compute_host_sessions FROM PUBLIC;
-REVOKE ALL ON TABLE public.compute_host_sessions FROM CURRENT_USER;
-REVOKE ALL ON TABLE public.compute_host_session_heartbeats FROM PUBLIC;
-REVOKE ALL ON TABLE public.compute_host_session_heartbeats FROM CURRENT_USER;
-REVOKE ALL ON FUNCTION public.compute_host_session_immutable_guard() FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.compute_host_session_immutable_guard() FROM CURRENT_USER;
-REVOKE ALL ON FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,INTEGER) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,INTEGER) FROM CURRENT_USER;
-REVOKE ALL ON FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT) FROM CURRENT_USER;
 REVOKE ccp_host_session_guard_owner FROM CURRENT_USER;
 REVOKE CREATE ON SCHEMA public FROM ccp_host_session_guard_owner;
 
