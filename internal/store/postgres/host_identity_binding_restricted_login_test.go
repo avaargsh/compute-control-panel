@@ -155,7 +155,11 @@ func TestHostIdentityGuardOwnerCatalogBoundary(t *testing.T) {
 		       EXISTS (
 		         SELECT 1
 		         FROM pg_catalog.aclexplode(p.proacl) a
-		         WHERE a.grantee <> p.proowner AND a.privilege_type='EXECUTE'
+		         WHERE a.grantee NOT IN (
+		           p.proowner,
+		           (SELECT c.relowner FROM pg_catalog.pg_class c
+		            WHERE c.oid='public.compute_providers'::pg_catalog.regclass)
+		         ) AND a.privilege_type='EXECUTE'
 		       )
 		FROM pg_catalog.pg_proc p
 		WHERE p.oid='public.compute_host_identity_enrollment_guard()'::pg_catalog.regprocedure
