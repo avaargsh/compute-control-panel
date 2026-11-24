@@ -34,7 +34,7 @@ func preDeleteDeleteRequest(create Request, namespace, jobName, jobUID string) R
 	remove.Kind = operation.Delete
 	remove.OperationID = "del-" + create.OperationID
 	remove.IdempotencyKey = "idem-" + remove.OperationID
-	remove.TargetResourceID = adapter.namespace + "/" + jobName
+	remove.TargetResourceID = namespace + "/" + jobName
 	remove.TargetResourceUID = jobUID
 	return remove
 }
@@ -331,7 +331,7 @@ func TestKueueJobAdapterBlocksDRADeleteBeforeExternalSideEffectWithoutSnapshot(t
 	remove.OperationID = "op-delete-snapshot-gate"
 	remove.IdempotencyKey = "idem-delete-snapshot-gate"
 	remove.Kind = operation.Delete
-	remove.TargetResourceID = namespace + "/" + jobName
+	remove.TargetResourceID = adapter.namespace + "/" + jobName
 	remove.TargetResourceUID = job.Metadata.UID
 	if _, err := adapter.Apply(context.Background(), remove); !errors.Is(err, ErrPreDeleteDRASnapshotRequired) {
 		t.Fatalf("DRA DELETE without snapshot was not blocked: %v", err)
