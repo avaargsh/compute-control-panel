@@ -56,7 +56,7 @@ func TestRegisteredDRAReceiptVerifierResolverUsesAuthenticatedTenantAndDatabaseC
 	source := &registeredDRAReceiptVerifierSourceStub{
 		providerID: "provider-a",
 		verifier:   registeredDRAReceiptTestVerifier(t),
-		database: databaseNow,
+		database:   databaseNow,
 	}
 	resolver := &RegisteredDRAReceiptVerifierResolver{source: source}
 	event := provider.DRAUnprepareEvent{ClusterID: "cluster-a", SourceID: "source-a", KeyID: "key-a"}
