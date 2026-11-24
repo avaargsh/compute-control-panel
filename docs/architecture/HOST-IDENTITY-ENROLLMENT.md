@@ -26,7 +26,7 @@ The migration rejects unexpected ownership, membership, direct grants, default p
 - `SELECT(provider_id, cluster_scope, state)` on `public.compute_providers`.
 - `UPDATE(provider_id)` on `public.compute_providers`.
 
-PostgreSQL 16 requires UPDATE privilege on at least one column to execute `SELECT ... FOR SHARE`. The grant is deliberately limited to the immutable key column; the guard function never updates Provider state. The role is NOLOGIN, NOINHERIT, has no runtime members, and owns only the fixed-search-path `SECURITY DEFINER` trigger function. The function rejects invocation from any relation other than the permanent HostIdentity binding table, and PUBLIC EXECUTE is revoked.
+PostgreSQL 16 requires UPDATE privilege on at least one column to execute `SELECT ... FOR SHARE`. The grant is deliberately limited to the immutable key column; the guard function never updates Provider state. The role is NOLOGIN, NOINHERIT, has no runtime members, and owns only the fixed-search-path `SECURITY DEFINER` trigger function. The function rejects invocation from any relation other than the permanent HostIdentity binding table, and EXECUTE is revoked from PUBLIC and the migration user; only the NOLOGIN guard owner retains it.
 
 The migration temporarily grants schema CREATE only to transfer function ownership, then revokes it before commit. A non-superuser migrator must have the normal, separately approved ownership-transfer authority for this dedicated role. Never grant this role to an application or host-enrollment login.
 
