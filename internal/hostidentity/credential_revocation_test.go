@@ -28,10 +28,10 @@ func newHostCredentialRevocationFixture(t *testing.T) hostCredentialRevocationFi
 	}
 	caTemplate := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
-		Subject: pkix.Name{CommonName: "host revocation fixture CA"},
-		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(24 * time.Hour),
+		Subject:      pkix.Name{CommonName: "host revocation fixture CA"},
+		NotBefore:    now.Add(-time.Hour), NotAfter: now.Add(24 * time.Hour),
 		IsCA: true, BasicConstraintsValid: true,
-		KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
+		KeyUsage:     x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
 		SubjectKeyId: []byte{1, 2, 3, 4},
 	}
 	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, publicKey, privateKey)
@@ -55,10 +55,10 @@ func newHostCredentialRevocationFixture(t *testing.T) hostCredentialRevocationFi
 	}
 	leafTemplate := &x509.Certificate{
 		SerialNumber: big.NewInt(42),
-		NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Hour),
-		KeyUsage: x509.KeyUsageDigitalSignature,
+		NotBefore:    now.Add(-time.Minute), NotAfter: now.Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
-		URIs: []*url.URL{uri},
+		URIs:        []*url.URL{uri},
 	}
 	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, issuer, leafPublic, privateKey)
 	if err != nil {
@@ -74,14 +74,14 @@ func (f hostCredentialRevocationFixture) crl(t *testing.T, issuer *x509.Certific
 	entries := make([]x509.RevocationListEntry, 0, len(revoked))
 	for _, serial := range revoked {
 		entries = append(entries, x509.RevocationListEntry{
-			SerialNumber: big.NewInt(serial),
+			SerialNumber:   big.NewInt(serial),
 			RevocationTime: f.now.Add(-time.Minute),
 		})
 	}
 	der, err := x509.CreateRevocationList(rand.Reader, &x509.RevocationList{
-		Number: big.NewInt(1),
-		ThisUpdate: thisUpdate,
-		NextUpdate: nextUpdate,
+		Number:                    big.NewInt(1),
+		ThisUpdate:                thisUpdate,
+		NextUpdate:                nextUpdate,
 		RevokedCertificateEntries: entries,
 	}, issuer, key)
 	if err != nil {
@@ -103,10 +103,10 @@ func TestVerifyHostCredentialRequiresCurrentIssuerCRL(t *testing.T) {
 	}
 	otherTemplate := &x509.Certificate{
 		SerialNumber: big.NewInt(9),
-		Subject: f.issuer.Subject,
-		NotBefore: f.now.Add(-time.Hour), NotAfter: f.now.Add(24 * time.Hour),
+		Subject:      f.issuer.Subject,
+		NotBefore:    f.now.Add(-time.Hour), NotAfter: f.now.Add(24 * time.Hour),
 		IsCA: true, BasicConstraintsValid: true,
-		KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		KeyUsage:     x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
 		SubjectKeyId: []byte{9, 8, 7, 6},
 	}
 	otherDER, err := x509.CreateCertificate(rand.Reader, otherTemplate, otherTemplate, otherPublic, otherKey)
