@@ -123,7 +123,7 @@ CREATE TABLE public.compute_host_sessions (
     issued_at TIMESTAMPTZ NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (host_id, epoch),
-    UNIQUE (host_id, start_request_id),
+    UNIQUE (start_request_id),
     CHECK (issued_at < expires_at)
 );
 
@@ -215,6 +215,7 @@ DECLARE
     v_previous_node_uid TEXT;
     v_previous_subject TEXT;
     v_previous_expires_at TIMESTAMPTZ;
+    v_existing_host_id TEXT;
     v_existing_epoch BIGINT;
     v_existing_session_id TEXT;
     v_existing_provider TEXT;
@@ -246,6 +247,37 @@ BEGIN
         RAISE EXCEPTION 'invalid HostSession start request' USING ERRCODE='22023';
     END IF;
 
+    -- A stable request ID makes a lost-ACK retry return the original
+    -- server-issued session. Reusing it with a different payload is a conflict.
+    PERFORM pg_catalog.pg_advisory_xact_lock(
+        pg_catalog.hashtextextended(p_start_request_id, 0)
+    );
+    SELECT s.host_id, s.epoch, s.session_id, s.provider_id, s.cluster_scope,
+           s.node_uid, s.subject, s.expected_epoch, s.ttl_seconds,
+           s.issued_at, s.expires_at
+      INTO v_existing_host_id, v_existing_epoch, v_existing_session_id,
+           v_existing_provider, v_existing_scope, v_existing_node_uid,
+           v_existing_subject, v_existing_expected_epoch, v_existing_ttl_seconds,
+           v_existing_issued_at, v_existing_expires_at
+      FROM public.compute_host_sessions AS s
+     WHERE s.start_request_id=p_start_request_id;
+    IF FOUND THEN
+        IF v_existing_host_id IS DISTINCT FROM p_host_id
+           OR v_existing_provider IS DISTINCT FROM p_provider_id
+           OR v_existing_scope IS DISTINCT FROM p_cluster_scope
+           OR v_existing_node_uid IS DISTINCT FROM p_node_uid
+           OR v_existing_subject IS DISTINCT FROM p_subject
+           OR v_existing_expected_epoch IS DISTINCT FROM p_expected_epoch
+           OR v_existing_ttl_seconds IS DISTINCT FROM p_ttl_seconds THEN
+            RAISE EXCEPTION 'HostSession start request ID was reused with a different payload'
+                USING ERRCODE='23514';
+        END IF;
+        RETURN QUERY SELECT p_host_id, v_existing_epoch, v_existing_session_id,
+                            v_existing_provider, v_existing_scope, v_existing_node_uid,
+                            v_existing_subject, v_existing_issued_at, v_existing_expires_at;
+        RETURN;
+    END IF;
+
     SELECT p.cluster_scope, p.state
       INTO v_provider_scope, v_provider_state
       FROM public.compute_providers AS p
@@ -268,33 +300,6 @@ BEGIN
        OR v_binding_subject IS DISTINCT FROM p_subject THEN
         RAISE EXCEPTION 'HostSession start does not match the immutable HostIdentity binding'
             USING ERRCODE='23514';
-    END IF;
-
-    -- A stable request ID makes a lost-ACK retry return the original
-    -- server-issued session. Reusing it with a different payload is a conflict.
-    SELECT s.epoch, s.session_id, s.provider_id, s.cluster_scope, s.node_uid,
-           s.subject, s.expected_epoch, s.ttl_seconds, s.issued_at, s.expires_at
-      INTO v_existing_epoch, v_existing_session_id, v_existing_provider,
-           v_existing_scope, v_existing_node_uid, v_existing_subject,
-           v_existing_expected_epoch, v_existing_ttl_seconds,
-           v_existing_issued_at, v_existing_expires_at
-      FROM public.compute_host_sessions AS s
-     WHERE s.host_id=p_host_id AND s.start_request_id=p_start_request_id
-     FOR UPDATE;
-    IF FOUND THEN
-        IF v_existing_provider IS DISTINCT FROM p_provider_id
-           OR v_existing_scope IS DISTINCT FROM p_cluster_scope
-           OR v_existing_node_uid IS DISTINCT FROM p_node_uid
-           OR v_existing_subject IS DISTINCT FROM p_subject
-           OR v_existing_expected_epoch IS DISTINCT FROM p_expected_epoch
-           OR v_existing_ttl_seconds IS DISTINCT FROM p_ttl_seconds THEN
-            RAISE EXCEPTION 'HostSession start request ID was reused with a different payload'
-                USING ERRCODE='23514';
-        END IF;
-        RETURN QUERY SELECT p_host_id, v_existing_epoch, v_existing_session_id,
-                            v_existing_provider, v_existing_scope, v_existing_node_uid,
-                            v_existing_subject, v_existing_issued_at, v_existing_expires_at;
-        RETURN;
     END IF;
 
     SELECT s.epoch, s.provider_id, s.cluster_scope, s.node_uid, s.subject, s.expires_at
