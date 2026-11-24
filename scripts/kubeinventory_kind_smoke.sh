@@ -190,11 +190,7 @@ CCP_KIND_LEASE_TOKEN_FILE="$dir/lease-allow.token" \
 CCP_KIND_LEASE_NODE="$node_name" \
 CCP_KIND_LEASE_NODE_UID="$node_uid" \
 GOTOOLCHAIN=local \
-  go test -count=1 -timeout=3m -run '^TestKind(InventoryLeastPrivilege|NodeLeaseUIDPinnedRead) -v ./internal/kubeinventory
+  go test -count=1 -timeout=3m -run '^TestKind(InventoryLeastPrivilege|NodeLeaseUIDPinnedRead)$' -v ./internal/kubeinventory
 
-echo "L2 Kubernetes node inventory read and denial accepted for $source_commit"
-echo "No GPU device plugin, device allocation or L3 hardware evidence was tested"
- -v ./internal/kubeinventory
-
-echo "L2 Kubernetes node inventory read and denial accepted for $source_commit"
+echo "L2 Kubernetes node inventory and pinned Lease read/denial accepted for $source_commit"
 echo "No GPU device plugin, device allocation or L3 hardware evidence was tested"
