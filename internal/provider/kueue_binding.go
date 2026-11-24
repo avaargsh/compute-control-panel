@@ -122,9 +122,7 @@ func (s *MemoryKueueJobBindingStore) GetCreatePinByJob(namespace, tenantID, jobN
 // PutCreatePin stores a pin. An identical pin is idempotent. A different UID,
 // name, or request fingerprint for the same operation is a conflict.
 func (s *MemoryKueueJobBindingStore) PutCreatePin(namespace string, req Request, name, uid string) error {
-	if err := s.usable(); err != nil || !validKubeName(namespace) || !validKubeName(name) || !acceptableJobUID(uid) ||
-		req.Validate() != nil || req.Kind != operation.Delete ||
-		req.TargetResourceID != namespace+"/"+name || req.TargetResourceUID != uid {
+	if err := s.usable(); err != nil || !validKubeName(namespace) || !validKubeName(name) || !acceptableJobUID(uid) {
 		return ErrInvalidKueueObservation
 	}
 	s.mu.Lock()
@@ -163,7 +161,9 @@ func (s *MemoryKueueJobBindingStore) GetDeleteTombstone(namespace string, req Re
 // PutDeleteTombstone stores a DELETE intent. Once acknowledged, the tombstone
 // stays acknowledged. A different UID, name, or request fingerprint conflicts.
 func (s *MemoryKueueJobBindingStore) PutDeleteTombstone(namespace string, req Request, name, uid string, acknowledged bool) error {
-	if err := s.usable(); err != nil || !validKubeName(namespace) || !validKubeName(name) || !acceptableJobUID(uid) {
+	if err := s.usable(); err != nil || !validKubeName(namespace) || !validKubeName(name) || !acceptableJobUID(uid) ||
+		req.Validate() != nil || req.Kind != operation.Delete ||
+		req.TargetResourceID != namespace+"/"+name || req.TargetResourceUID != uid {
 		return ErrInvalidKueueObservation
 	}
 	s.mu.Lock()
