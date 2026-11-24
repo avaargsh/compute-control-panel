@@ -127,3 +127,102 @@ func TestKindInventoryLeastPrivilege(t *testing.T) {
 		t.Fatalf("missing rotated credential was not rejected: %v", err)
 	}
 }
+
+// TestKindNodeLeaseUIDPinnedRead exercises the real Kubernetes coordination
+// Lease GET endpoint with a distinct read-only service account. This is an
+// authenticated L2 source-identity test, NOT physical GPU readiness evidence.
+func TestKindNodeLeaseUIDPinnedRead(t *testing.T) {
+	if os.Getenv("CCP_KIND_INVENTORY_SMOKE") != "1" {
+		t.Skip("requires opt-in disposable kind Node list and pinned Lease GET RBAC")
+	}
+	required := func(name string) string {
+		t.Helper()
+		value := os.Getenv(name)
+		if value == "" {
+			t.Fatalf("missing required Lease kind environment %s", name)
+		}
+		return value
+	}
+	endpoint := required("CCP_KIND_API_SERVER")
+	caPath := required("CCP_KIND_CA_FILE")
+	allowed := required("CCP_KIND_LEASE_TOKEN_FILE")
+	denied := required("CCP_KIND_DENIED_TOKEN_FILE")
+	nodeName := required("CCP_KIND_LEASE_NODE")
+	nodeUID := required("CCP_KIND_LEASE_NODE_UID")
+
+	makeReader := func(token string) *Reader {
+		t.Helper()
+		reader, err := NewReader(Config{
+			APIServer: endpoint, CAFile: caPath, TokenFile: token,
+			ClusterID: "kind-inventory", TenantID: "tenant-kind", ProjectID: "project-kind",
+			ResourceNames: []string{"nvidia.com/gpu"}, ObservationTTL: time.Minute,
+			Timeout: 10 * time.Second,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return reader
+	}
+	reader := makeReader(allowed)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	observed, err := reader.observeNodeLease(ctx, "tenant-kind", []string{"project-kind"}, nodeName, nodeUID, time.Minute)
+	if err != nil || observed.Assessment.State != nodeLeaseFresh || !observed.Assessment.ExpiresAt.After(time.Now().UTC()) {
+		t.Fatalf("real Node/Lease API identity not current: state=%s reason=%s err=%v", observed.Assessment.State, observed.Assessment.ReasonCode, err)
+	}
+	stale, err := reader.observeNodeLease(ctx, "tenant-kind", []string{"project-kind"}, nodeName, "different-node-uid", time.Minute)
+	if err != nil || stale.Assessment.State != nodeLeaseUnknown {
+		t.Fatalf("same-name successor Node UID was adopted: %+v err=%v", stale, err)
+	}
+	scoped, err := reader.observeNodeLease(ctx, "tenant-kind", []string{"outside-project"}, nodeName, nodeUID, time.Minute)
+	if !errors.Is(err, ErrScope) || scoped.Assessment.State == nodeLeaseFresh {
+		t.Fatalf("ungranted project was not denied: %+v err=%v", scoped, err)
+	}
+	// Exercise the Lease endpoint directly: denial of the initial Node list
+	// alone cannot prove that the coordination Lease is inaccessible.
+	if _, err := reader.getNodeLease(ctx, nodeName+"-not-granted"); !errors.Is(err, ErrLeaseForbidden) {
+		t.Fatalf("ungranted Lease name not denied: %v", err)
+	}
+	blocked := makeReader(denied)
+	if _, err := blocked.getNodeLease(ctx, nodeName); !errors.Is(err, ErrLeaseForbidden) {
+		t.Fatalf("unprivileged account not denied at exact Lease endpoint: %v", err)
+	}
+	// Verify credential rotation on the same Lease client without changing
+	// the fixture's original ServiceAccount token files.
+	allowBytes, err := os.ReadFile(allowed)
+	if err != nil || len(allowBytes) == 0 {
+		t.Fatal("allowed Lease credential unavailable")
+	}
+	denyBytes, err := os.ReadFile(denied)
+	if err != nil || len(denyBytes) == 0 {
+		t.Fatal("denied Lease credential unavailable")
+	}
+	rotatingPath := filepath.Join(t.TempDir(), "rotating-lease-token")
+	writeToken := func(token []byte) {
+		t.Helper()
+		if err := os.WriteFile(rotatingPath, token, 0600); err != nil {
+			t.Fatal("could not write ephemeral Lease credential")
+		}
+	}
+	writeToken(allowBytes)
+	rotating := makeReader(rotatingPath)
+	if _, err := rotating.getNodeLease(ctx, nodeName); err != nil {
+		t.Fatalf("initial allowed Lease GET failed: %v", err)
+	}
+	writeToken(denyBytes)
+	if _, err := rotating.getNodeLease(ctx, nodeName); !errors.Is(err, ErrLeaseForbidden) {
+		t.Fatalf("rotated denied Lease credential was accepted: %v", err)
+	}
+	writeToken(allowBytes)
+	if _, err := rotating.getNodeLease(ctx, nodeName); err != nil {
+		t.Fatalf("restored Lease credential not accepted: %v", err)
+	}
+	writeToken(nil)
+	if _, err := rotating.getNodeLease(ctx, nodeName); !errors.Is(err, ErrCredentials) {
+		t.Fatalf("empty Lease credential was accepted: %v", err)
+	}
+	rejected, err := blocked.observeNodeLease(ctx, "tenant-kind", []string{"project-kind"}, nodeName, nodeUID, time.Minute)
+	if !errors.Is(err, ErrForbidden) || rejected.Assessment.State == nodeLeaseFresh {
+		t.Fatalf("unprivileged account read Node/Lease: %+v err=%v", rejected, err)
+	}
+}
