@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"database/sql"
 	"errors"
+	"net/url"
 	"testing"
 	"time"
 )
@@ -266,12 +267,20 @@ func TestRestrictedDRAJournalRechecksRevocationAfterWaitingForSourceLock(t *test
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	journal, db, err := OpenRestrictedDRAUnprepareReceiptJournal(ctx,
-		kueueBindingDSN(t, draReceiptIngestRole, draReceiptIngestCITestPassword, ""))
+	dsn, err := url.Parse(kueueBindingDSN(t, draReceiptIngestRole, draReceiptIngestCITestPassword, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	appName := kueueTestIdent(t, "ccp_dra_verifier_preflight_")
+	query := dsn.Query()
+	query.Set("application_name", appName)
+	dsn.RawQuery = query.Encode()
+	journal, db, err := OpenRestrictedDRAUnprepareReceiptJournal(ctx, dsn.String())
 	if err != nil {
 		t.Fatalf("restricted journal: %v", err)
 	}
 	defer db.Close()
+	db.SetMaxOpenConns(1)
 
 	verifier, receipt, _ := liveJournalReceiptFixture(t)
 	candidate := releaseCandidateFixture()
@@ -310,9 +319,9 @@ func TestRestrictedDRAJournalRechecksRevocationAfterWaitingForSourceLock(t *test
 		if err := admin.QueryRowContext(ctx, `
 			SELECT EXISTS (
 			  SELECT 1 FROM pg_catalog.pg_stat_activity
-			  WHERE usename=$1 AND wait_event_type='Lock'
+			  WHERE application_name=$1 AND wait_event_type='Lock'
 			    AND query ILIKE '%FROM public.dra_unprepare_source_keys%'
-			)`, draReceiptIngestRole).Scan(&waiting); err != nil {
+			)`, appName).Scan(&waiting); err != nil {
 			t.Fatalf("observe source-lock wait: %v", err)
 		}
 		if waiting {
