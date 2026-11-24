@@ -463,16 +463,40 @@ func TestHostSessionRestrictedWriterAndCatalogBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writerFirst, err := writerRepo.StartHostSession(ctx, HostSessionStartRequest{Binding: binding, ExpectedEpoch: 0, RequestID: "start-restricted-" + binding.HostID, TTL: 30 * time.Second})
-	if err != nil {
-		t.Fatalf("restricted writer could not invoke the session-start function: %v", err)
+	// Migration 0024 deliberately replaces raw tuple execution with the
+	// authenticated wrappers. Keep testing the actual restricted LOGIN.
+	tenant := "tenant-restricted-" + binding.HostID
+	provisionHostSessionSubjectGrant(t, admin, binding, tenant)
+	if _, err := writerRepo.StartHostSession(ctx, HostSessionStartRequest{
+		Binding: binding, ExpectedEpoch: 0, RequestID: "raw-restricted-" + binding.HostID, TTL: 30 * time.Second,
+	}); hostSessionSQLState(err) != "42501" {
+		t.Fatalf("restricted writer raw start should be denied: %v", err)
 	}
-	heartbeat := hostidentity.Heartbeat{
+	writerFirst, err := writerRepo.StartAuthenticatedHostSession(ctx, AuthenticatedHostSessionStartRequest{
+		TenantID: tenant, Service: "compute-host-agent", Subject: binding.Subject,
+		ExpectedEpoch: 0, RequestID: "start-restricted-" + binding.HostID, TTL: 30 * time.Second,
+	})
+	if err != nil || writerFirst.Binding != binding || writerFirst.Epoch != 1 {
+		t.Fatalf("restricted authenticated start: fence=%+v err=%v", writerFirst, err)
+	}
+	if _, _, err := writerRepo.RecordHostHeartbeat(ctx, hostidentity.Heartbeat{
 		Binding: binding, Epoch: writerFirst.Epoch, SessionID: writerFirst.SessionID,
 		Sequence: 1, Digest: "sha256:" + strings.Repeat("e", 64),
+	}); hostSessionSQLState(err) != "42501" {
+		t.Fatalf("restricted writer raw heartbeat should be denied: %v", err)
 	}
-	if disposition, _, err := writerRepo.RecordHostHeartbeat(ctx, heartbeat); err != nil || disposition != hostidentity.Accept {
-		t.Fatalf("restricted writer function call: disposition=%s err=%v", disposition, err)
+	heartbeat := AuthenticatedHostHeartbeatRequest{
+		TenantID: tenant, Service: "compute-host-agent", Subject: binding.Subject,
+		Epoch: writerFirst.Epoch, SessionID: writerFirst.SessionID,
+		Sequence: 1, Digest: "sha256:" + strings.Repeat("e", 64),
+	}
+	disposition, recordedAt, err := writerRepo.RecordAuthenticatedHostHeartbeat(ctx, heartbeat)
+	if err != nil || disposition != hostidentity.Accept || recordedAt.IsZero() {
+		t.Fatalf("restricted authenticated heartbeat: disposition=%s err=%v", disposition, err)
+	}
+	disposition, replayAt, err := writerRepo.RecordAuthenticatedHostHeartbeat(ctx, heartbeat)
+	if err != nil || disposition != hostidentity.Replay || !replayAt.Equal(recordedAt) {
+		t.Fatalf("restricted authenticated replay: disposition=%s err=%v", disposition, err)
 	}
 
 	for _, statement := range []string{
@@ -561,15 +585,14 @@ func TestHostSessionRestrictedWriterAndCatalogBoundary(t *testing.T) {
 				'public.compute_host_session_start(text,text,text,text,text,bigint,text,integer)'::pg_catalog.regprocedure,
 				'public.compute_host_session_heartbeat(text,text,text,text,text,bigint,text,bigint,text)'::pg_catalog.regprocedure
 			) AND (
-				a.grantee NOT IN (p.proowner, pg_catalog.to_regrole('ccp_host_session_writer'))
-				OR (a.grantee=pg_catalog.to_regrole('ccp_host_session_writer') AND a.grantor <> p.proowner)
+				a.grantee <> p.proowner
 			)
 		)
 	`).Scan(&unexpectedGrant); err != nil {
 		t.Fatal(err)
 	}
 	if unexpectedGrant {
-		t.Fatal("HostSession objects have unexpected grants beyond the owner and dedicated writer")
+		t.Fatal("raw HostSession objects have unexpected grants beyond the owner")
 	}
 
 	var alwaysTriggers int
