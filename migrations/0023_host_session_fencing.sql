@@ -45,6 +45,9 @@ BEGIN
            OR member=guard_owner_oid
            OR roleid=writer_oid
            OR member=writer_oid
+    ) OR EXISTS (
+        SELECT 1 FROM pg_catalog.pg_auth_members
+        WHERE roleid=guard_owner_oid AND member=current_user_oid AND NOT admin_option
     ) OR EXISTS (SELECT 1 FROM pg_catalog.pg_database WHERE datdba IN (guard_owner_oid, writer_oid))
        OR EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspowner IN (guard_owner_oid, writer_oid))
        OR EXISTS (SELECT 1 FROM pg_catalog.pg_class WHERE relowner IN (guard_owner_oid, writer_oid))
@@ -406,6 +409,11 @@ BEGIN
     IF NOT v_has_heartbeat THEN
         v_last_sequence := 0;
         v_last_digest := '';
+    END IF;
+
+    IF v_has_heartbeat AND v_now < v_last_recorded_at THEN
+        RAISE EXCEPTION 'HostSession database clock moved behind the last accepted receipt'
+            USING ERRCODE='23514';
     END IF;
 
     IF p_sequence < v_last_sequence THEN
