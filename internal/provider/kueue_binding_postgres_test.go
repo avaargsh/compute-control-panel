@@ -317,7 +317,7 @@ func TestPostgresKueueJobBindingSQLRejectsRewrite(t *testing.T) {
 	if postgresSQLState(err) != "55000" {
 		t.Fatalf("pin delete state=%s err=%v", postgresSQLState(err), err)
 	}
-	if _, err := db.ExecContext(ctx, `TRUNCATE public.kueue_job_create_pins`); postgresSQLState(err) != "55000" {
+	if _, err := db.ExecContext(ctx, `TRUNCATE public.kueue_job_create_pins, public.kueue_job_pre_delete_dra_snapshots`); postgresSQLState(err) != "55000" {
 		t.Fatalf("pin truncate state=%s err=%v", postgresSQLState(err), err)
 	}
 	var storedUID string

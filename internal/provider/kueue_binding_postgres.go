@@ -206,9 +206,11 @@ func (s *PostgresKueueJobBindingStore) GetDeleteTombstone(namespace string, req 
 // stays acknowledged. A different UID, name, or request fingerprint conflicts.
 func (s *PostgresKueueJobBindingStore) PutDeleteTombstone(namespace string, req Request, name, uid string, acknowledged bool) error {
 	if err := s.usable(); err != nil || !validKubeName(namespace) || !validKubeName(name) || !acceptableJobUID(uid) ||
-		req.Validate() != nil || req.Kind != operation.Delete ||
-		req.TargetResourceID != namespace+"/"+name || req.TargetResourceUID != uid {
+		req.Validate() != nil || req.Kind != operation.Delete {
 		return ErrInvalidKueueObservation
+	}
+	if req.TargetResourceID != namespace+"/"+name || req.TargetResourceUID != uid {
+		return ErrOperationConflict
 	}
 	generation, err := kueueBindingGeneration(req.DesiredGeneration)
 	if err != nil {
