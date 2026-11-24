@@ -3,7 +3,6 @@ package hostidentity
 import (
 	"bytes"
 	"context"
-	"crypto/x509"
 	"errors"
 	"net/http"
 	"net/url"
@@ -99,6 +98,9 @@ func validHostIdentityField(value string, maxBytes int) bool {
 // Authenticate accepts only a TLS peer certificate that net/http reports in a
 // verified chain. The exact verified leaf is checked again, then its one
 // canonical host-class SPIFFE URI is resolved to the immutable binding.
+//
+// The caller must configure tls.Config.ClientAuth as
+// tls.RequireAndVerifyClientCert with a narrowly scoped ClientCAs pool.
 func (a *HostSPIFFEAuthenticator) Authenticate(ctx context.Context, request *http.Request) (Binding, error) {
 	if a == nil || a.resolver == nil || a.now == nil || ctx == nil ||
 		request == nil || request.TLS == nil ||
