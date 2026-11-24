@@ -605,3 +605,47 @@ func TestHostSessionIngressMapsRepositoryFencesWithoutLeakingErrors(t *testing.T
 		t.Fatalf("repository outage must fail closed with 503, got %d", response.StatusCode)
 	}
 }
+
+func TestHostSessionIngressRequiresTLS13BeforeRepository(t *testing.T) {
+	authority := newHostCredentialAuthority(t)
+	clientCert := authority.issue(t, hostSessionIngressSubject, 91)
+	recordedAt := time.Now().UTC().Truncate(time.Microsecond)
+	binding := hostidentity.Binding{
+		HostID: "machine-001", ProviderID: "provider-001", ClusterScope: "cluster-001",
+		NodeUID: "node-uid-001", Subject: hostSessionIngressSubject,
+	}
+	repo := &hostSessionIngressRepositoryStub{
+		fence: hostidentity.SessionFence{
+			Binding: binding, Epoch: 1, SessionID: "hs_session_tls13",
+			IssuedAt: recordedAt, ExpiresAt: recordedAt.Add(time.Minute),
+		},
+		disposition: hostidentity.Accept, recordedAt: recordedAt,
+	}
+	handler := newHostSessionIngressHandler(t, authority, repo)
+
+	serve := func(version uint16) *httptest.ResponseRecorder {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, hostSessionStartPath,
+			strings.NewReader(`{"expected_epoch":0,"ttl_seconds":60}`))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Idempotency-Key", "host-tls-version")
+		request.TLS = &tls.ConnectionState{
+			Version:          version,
+			PeerCertificates: []*x509.Certificate{clientCert.Leaf, authority.ca},
+			VerifiedChains:   [][]*x509.Certificate{{clientCert.Leaf, authority.ca}},
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+
+	legacy := serve(tls.VersionTLS12)
+	if calls, _ := repo.observedStart(); legacy.Code != http.StatusUnauthorized || calls != 0 {
+		t.Fatalf("TLS 1.2 reached HostSession repository: HTTP %d calls=%d", legacy.Code, calls)
+	}
+
+	current := serve(tls.VersionTLS13)
+	if calls, _ := repo.observedStart(); current.Code != http.StatusCreated || calls != 1 {
+		t.Fatalf("TLS 1.3 was not accepted: HTTP %d calls=%d", current.Code, calls)
+	}
+}
