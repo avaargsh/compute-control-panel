@@ -217,7 +217,8 @@ func newHostSessionIngressHandlerWithPolicy(
 	t.Helper()
 	handler, err := NewHostSessionIngressHandler(HostSessionIngressDependencies{
 		HostTrustRoots: authority.roots, HostTrustDomain: "ccp.example",
-		HostRevocationCRLs: crls, HostRevocationIssuerCertificates: []*x509.Certificate{authority.ca},\n\t\tNow: now, Repository: repo,
+		HostRevocationCRLs: crls, HostRevocationIssuerCertificates: []*x509.Certificate{authority.ca},
+		Now: now, Repository: repo,
 	})
 	if err != nil {
 		t.Fatal(err)
