@@ -133,11 +133,7 @@ CCP_KIND_CA_FILE="$dir/ca.pem" \
 CCP_KIND_ALLOWED_TOKEN_FILE="$dir/allow.token" \
 CCP_KIND_DENIED_TOKEN_FILE="$dir/deny.token" \
 GOTOOLCHAIN=local \
-  go test -count=1 -timeout=3m -run '^TestKind(InventoryLeastPrivilege|LeaseGetLeastPrivilege)
+  go test -count=1 -timeout=3m -run 'TestKind(InventoryLeastPrivilege|LeaseGetLeastPrivilege)' -v ./internal/kubeinventory
 
-echo "L2 Kubernetes node inventory read and denial accepted for $source_commit"
-echo "No GPU device plugin, device allocation or L3 hardware evidence was tested"
- -v ./internal/kubeinventory
-
-echo "L2 Kubernetes node inventory read and denial accepted for $source_commit"
-echo "No GPU device plugin, device allocation or L3 hardware evidence was tested"
+echo "L2 real Node inventory and exact Node Lease source acceptance for $source_commit"
+echo "No device plugin, GPU allocation or L3 hardware evidence tested"
