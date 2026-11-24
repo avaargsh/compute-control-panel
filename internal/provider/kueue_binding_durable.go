@@ -139,7 +139,7 @@ func verifyKueueBindingSchema(ctx context.Context, db *sql.DB) error {
 		    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
 		    JOIN pg_catalog.pg_trigger t
 		      ON t.tgrelid = c.oid AND t.tgname = required.tgname AND t.tgenabled = 'A'
-		  ) = 6
+		  ) = 8
 	`).Scan(&ready)
 	if err != nil {
 		return fmt.Errorf("%w: cannot read kueue binding schema: %v", ErrKueueBindingSchema, err)
