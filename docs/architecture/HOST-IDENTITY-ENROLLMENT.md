@@ -50,7 +50,8 @@ The migration fails closed if either role has unrelated ownership, memberships, 
 
 The dedicated session writer receives schema USAGE and EXECUTE on `compute_host_session_start` and `compute_host_session_heartbeat` only. It receives no direct Provider, binding, session-table or heartbeat-table privileges. Do not grant this role to a host or tenant principal; it is an internal service identity.
 
-Session start is one database statement:
+Session start is one database statement. The caller supplies a stable `RequestID` and must persist it before the first attempt, then reuse it for every retry of that same intent. PostgreSQL serializes the global request key with a transaction-scoped advisory lock and a unique constraint. An exact request replay returns the original server-issued session ID and timestamps (including after a later Provider Drain); reusing the key with a changed binding, expected epoch or TTL is rejected. A different request ID still goes through Epoch CAS and cannot replace an active predecessor.
+
 1. Lock the Provider row `FOR SHARE` and require exact `REGISTERED` state/scope.
 2. Lock the immutable HostIdentity binding row `FOR UPDATE` and require exact Host/Provider/cluster/Node UID/subject.
 3. Lock the latest durable session epoch, require the caller's expected epoch, and reject replacement while its predecessor remains unexpired.
