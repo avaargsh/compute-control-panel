@@ -78,7 +78,8 @@ const insertKueuePreDeleteSnapshotSQL = `
 // Any database error is returned so the adapter fails closed instead of
 // treating the read as absent, OPERATION_NOT_APPLIED_FINAL, or TARGET_ABSENT.
 //
-// The tables are migration 0014. They are not
+// CREATE pins and DELETE tombstones are migration 0014; immutable pre-delete
+// DRA snapshots are migration 0025. They are not
 // compute_operations.provider_resource_uid, Allocation RELEASED, or Kueue
 // quota release. desired_generation is a BIGINT, matching the operation
 // schema; a value above math.MaxInt64 is returned as an error.
@@ -519,6 +520,7 @@ func scanKueuePreDeleteSnapshot(row rowScanner) (KueuePreDeleteDRASnapshot, erro
 	}
 	snapshot.CreateGeneration = uint64(createGeneration)
 	snapshot.DeleteGeneration = uint64(deleteGeneration)
+	snapshot.ObservedAt = snapshot.ObservedAt.UTC().Truncate(time.Microsecond)
 	snapshot.Job.Namespace = snapshot.Namespace
 	snapshot.KueueWorkload.Namespace = snapshot.Namespace
 	snapshot.Pod.Namespace = snapshot.Namespace
