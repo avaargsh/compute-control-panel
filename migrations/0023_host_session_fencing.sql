@@ -101,6 +101,12 @@ CREATE TABLE public.compute_host_sessions (
         CHECK (pg_catalog.octet_length(session_id) BETWEEN 1 AND 256
                AND pg_catalog.btrim(session_id)=session_id
                AND session_id !~ '[[:cntrl:]]'),
+    start_request_id TEXT NOT NULL
+        CHECK (pg_catalog.octet_length(start_request_id) BETWEEN 1 AND 256
+               AND pg_catalog.btrim(start_request_id)=start_request_id
+               AND start_request_id !~ '[[:cntrl:]]'),
+    expected_epoch BIGINT NOT NULL CHECK (expected_epoch >= 0),
+    ttl_seconds INTEGER NOT NULL CHECK (ttl_seconds BETWEEN 1 AND 86400),
     provider_id TEXT NOT NULL REFERENCES public.compute_providers(provider_id),
     cluster_scope TEXT NOT NULL
         CHECK (pg_catalog.octet_length(cluster_scope) BETWEEN 1 AND 1024
@@ -117,6 +123,7 @@ CREATE TABLE public.compute_host_sessions (
     issued_at TIMESTAMPTZ NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (host_id, epoch),
+    UNIQUE (host_id, start_request_id),
     CHECK (issued_at < expires_at)
 );
 
@@ -178,6 +185,7 @@ CREATE FUNCTION public.compute_host_session_start(
     p_node_uid TEXT,
     p_subject TEXT,
     p_expected_epoch BIGINT,
+    p_start_request_id TEXT,
     p_ttl_seconds INTEGER
 ) RETURNS TABLE (
     host_id TEXT,
@@ -207,6 +215,16 @@ DECLARE
     v_previous_node_uid TEXT;
     v_previous_subject TEXT;
     v_previous_expires_at TIMESTAMPTZ;
+    v_existing_epoch BIGINT;
+    v_existing_session_id TEXT;
+    v_existing_provider TEXT;
+    v_existing_scope TEXT;
+    v_existing_node_uid TEXT;
+    v_existing_subject TEXT;
+    v_existing_expected_epoch BIGINT;
+    v_existing_ttl_seconds INTEGER;
+    v_existing_issued_at TIMESTAMPTZ;
+    v_existing_expires_at TIMESTAMPTZ;
     v_has_previous BOOLEAN := false;
     v_now TIMESTAMPTZ;
 BEGIN
@@ -222,6 +240,8 @@ BEGIN
        OR pg_catalog.btrim(p_subject) <> p_subject OR p_subject ~ '[[:cntrl:]]'
        OR p_expected_epoch IS NULL OR p_expected_epoch < 0
        OR p_expected_epoch = 9223372036854775807
+       OR p_start_request_id IS NULL OR pg_catalog.octet_length(p_start_request_id) NOT BETWEEN 1 AND 256
+       OR pg_catalog.btrim(p_start_request_id) <> p_start_request_id OR p_start_request_id ~ '[[:cntrl:]]'
        OR p_ttl_seconds IS NULL OR p_ttl_seconds < 1 OR p_ttl_seconds > 86400 THEN
         RAISE EXCEPTION 'invalid HostSession start request' USING ERRCODE='22023';
     END IF;
@@ -248,6 +268,33 @@ BEGIN
        OR v_binding_subject IS DISTINCT FROM p_subject THEN
         RAISE EXCEPTION 'HostSession start does not match the immutable HostIdentity binding'
             USING ERRCODE='23514';
+    END IF;
+
+    -- A stable request ID makes a lost-ACK retry return the original
+    -- server-issued session. Reusing it with a different payload is a conflict.
+    SELECT s.epoch, s.session_id, s.provider_id, s.cluster_scope, s.node_uid,
+           s.subject, s.expected_epoch, s.ttl_seconds, s.issued_at, s.expires_at
+      INTO v_existing_epoch, v_existing_session_id, v_existing_provider,
+           v_existing_scope, v_existing_node_uid, v_existing_subject,
+           v_existing_expected_epoch, v_existing_ttl_seconds,
+           v_existing_issued_at, v_existing_expires_at
+      FROM public.compute_host_sessions AS s
+     WHERE s.host_id=p_host_id AND s.start_request_id=p_start_request_id
+     FOR UPDATE;
+    IF FOUND THEN
+        IF v_existing_provider IS DISTINCT FROM p_provider_id
+           OR v_existing_scope IS DISTINCT FROM p_cluster_scope
+           OR v_existing_node_uid IS DISTINCT FROM p_node_uid
+           OR v_existing_subject IS DISTINCT FROM p_subject
+           OR v_existing_expected_epoch IS DISTINCT FROM p_expected_epoch
+           OR v_existing_ttl_seconds IS DISTINCT FROM p_ttl_seconds THEN
+            RAISE EXCEPTION 'HostSession start request ID was reused with a different payload'
+                USING ERRCODE='23514';
+        END IF;
+        RETURN QUERY SELECT p_host_id, v_existing_epoch, v_existing_session_id,
+                            v_existing_provider, v_existing_scope, v_existing_node_uid,
+                            v_existing_subject, v_existing_issued_at, v_existing_expires_at;
+        RETURN;
     END IF;
 
     SELECT s.epoch, s.provider_id, s.cluster_scope, s.node_uid, s.subject, s.expires_at
@@ -281,11 +328,12 @@ BEGIN
 
     RETURN QUERY
     INSERT INTO public.compute_host_sessions AS inserted (
-        host_id, epoch, session_id, provider_id, cluster_scope, node_uid,
-        subject, issued_at, expires_at
+        host_id, epoch, session_id, start_request_id, expected_epoch, ttl_seconds,
+        provider_id, cluster_scope, node_uid, subject, issued_at, expires_at
     ) VALUES (
         p_host_id, v_previous_epoch + 1,
         'hs_' || pg_catalog.gen_random_uuid()::TEXT,
+        p_start_request_id, p_expected_epoch, p_ttl_seconds,
         p_provider_id, p_cluster_scope, p_node_uid, p_subject,
         v_now, v_now + pg_catalog.make_interval(secs => p_ttl_seconds::DOUBLE PRECISION)
     )
@@ -445,7 +493,7 @@ COMMENT ON TABLE public.compute_host_sessions IS
     'Append-only durable HostIdentity session epochs; server-issued IDs and DB-clock expiry; not host attestation or GPU readiness.';
 COMMENT ON TABLE public.compute_host_session_heartbeats IS
     'Append-only per-epoch heartbeat receipts; exact replay is idempotent and does not extend session expiry.';
-COMMENT ON FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,INTEGER) IS
+COMMENT ON FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,INTEGER) IS
     'Unmounted internal CAS entrypoint; caller must authenticate/revoke principal before invoking; locks Provider and immutable HostIdentity binding.';
 COMMENT ON FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT) IS
     'Unmounted internal heartbeat entrypoint; enforces active latest epoch, DB clock, monotonic sequence and exact replay without expiry extension.';
@@ -453,7 +501,7 @@ COMMENT ON FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TE
 REVOKE ALL ON TABLE public.compute_host_sessions FROM PUBLIC;
 REVOKE ALL ON TABLE public.compute_host_session_heartbeats FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.compute_host_session_immutable_guard() FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,INTEGER) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,INTEGER) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT) FROM PUBLIC;
 ALTER TABLE public.compute_host_sessions
     ENABLE ALWAYS TRIGGER compute_host_sessions_no_update_delete;
@@ -472,7 +520,7 @@ GRANT CREATE ON SCHEMA public TO ccp_host_session_guard_owner;
 ALTER TABLE public.compute_host_sessions OWNER TO ccp_host_session_guard_owner;
 ALTER TABLE public.compute_host_session_heartbeats OWNER TO ccp_host_session_guard_owner;
 ALTER FUNCTION public.compute_host_session_immutable_guard() OWNER TO ccp_host_session_guard_owner;
-ALTER FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,INTEGER)
+ALTER FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,INTEGER)
     OWNER TO ccp_host_session_guard_owner;
 ALTER FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT)
     OWNER TO ccp_host_session_guard_owner;
@@ -480,7 +528,7 @@ ALTER FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,BI
 -- Use the dedicated owner as grantor so the migration principal does
 -- not retain a grantor path after the temporary membership is revoked.
 SET ROLE ccp_host_session_guard_owner;
-GRANT EXECUTE ON FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,INTEGER)
+GRANT EXECUTE ON FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,INTEGER)
     TO ccp_host_session_writer;
 GRANT EXECUTE ON FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT)
     TO ccp_host_session_writer;
@@ -518,7 +566,7 @@ BEGIN
         CROSS JOIN LATERAL pg_catalog.aclexplode(p.proacl) a
         WHERE p.oid IN (
             'public.compute_host_session_immutable_guard()'::pg_catalog.regprocedure,
-            'public.compute_host_session_start(text,text,text,text,text,bigint,integer)'::pg_catalog.regprocedure,
+            'public.compute_host_session_start(text,text,text,text,text,bigint,text,integer)'::pg_catalog.regprocedure,
             'public.compute_host_session_heartbeat(text,text,text,text,text,bigint,text,bigint,text)'::pg_catalog.regprocedure
         )
           AND a.grantee NOT IN (
