@@ -93,7 +93,7 @@ func TestNewHostSessionIngressHandlerRequiresSPIFFEAuthenticatorAndRepository(t 
 		Authenticator: hostSessionIngressFakeAuthenticator{principal: WorkloadPrincipal{
 			TenantID: "tenant-host-ingress", Subject: hostSessionIngressSubject, Service: "compute-host-agent",
 		}},
-		Repository:    repo,
+		Repository: repo,
 	}); err == nil {
 		t.Fatal("arbitrary authenticator was allowed to impersonate the TLS peer")
 	}
