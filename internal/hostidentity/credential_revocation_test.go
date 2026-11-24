@@ -239,8 +239,8 @@ func TestVerifyHostCredentialRequiresCRLForEveryNonRootCertificate(t *testing.T)
 		t.Fatal(err)
 	}
 	leafTemplate := &x509.Certificate{
-		SerialNumber:   big.NewInt(77),
-		NotBefore:      f.now.Add(-time.Minute), NotAfter: f.now.Add(time.Hour),
+		SerialNumber: big.NewInt(77),
+		NotBefore:    f.now.Add(-time.Minute), NotAfter: f.now.Add(time.Hour),
 		KeyUsage:       x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:    []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 		URIs:           []*url.URL{uri},
