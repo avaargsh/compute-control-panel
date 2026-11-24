@@ -90,6 +90,16 @@ func TestDRAPoolInventoryRequiresCompleteCurrentGeneration(t *testing.T) {
 			s["devices"] = append(s["devices"].([]any), map[string]any{"name": "device-a"})
 		}},
 		{name: "incomplete slice list pagination", first: func(v map[string]any) { v["metadata"].(map[string]any)["continue"] = "next-page" }},
+		{name: "terminating selected slice is not current inventory", first: func(v map[string]any) {
+			draFirstSlice(v)["metadata"].(map[string]any)["deletionTimestamp"] = "2026-11-24T00:00:00Z"
+		}},
+		{name: "terminating sibling invalidates complete pool", first: func(v map[string]any) {
+			appendCompleteSecondSlice(v)
+			v["items"].([]any)[1].(map[string]any)["metadata"].(map[string]any)["deletionTimestamp"] = "2026-11-24T00:00:00Z"
+		}},
+		{name: "slice enters termination between reads", second: func(v map[string]any) {
+			draFirstSlice(v)["metadata"].(map[string]any)["deletionTimestamp"] = "2026-11-24T00:00:00Z"
+		}},
 		{name: "missing slice UID", first: func(v map[string]any) { draFirstSlice(v)["metadata"].(map[string]any)["uid"] = "" }},
 		{name: "missing resourceVersion", first: func(v map[string]any) { draFirstSlice(v)["metadata"].(map[string]any)["resourceVersion"] = "" }},
 		{name: "driver differs from allocated Claim", first: func(v map[string]any) { draSliceSpec(v)["driver"] = "different.example.com" }},
