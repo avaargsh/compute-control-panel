@@ -208,26 +208,26 @@ func TestRestrictedDRAJournalResolvesRegisteredVerifierBeforeHistoricalCandidate
 
 	verifier, receipt, _ := liveJournalReceiptFixture(t)
 	candidate := releaseCandidateFixture()
-	if resolved, databaseNow, err := journal.ResolveRegisteredDRAUnprepareVerifier(
+	if providerID, resolved, databaseNow, err := journal.ResolveRegisteredDRAUnprepareVerifier(
 		ctx, candidate.Delete.TenantID, receipt.Event,
-	); !errors.Is(err, ErrDRAReceiptSourceUntrusted) || resolved != nil || !databaseNow.IsZero() {
+	); !errors.Is(err, ErrDRAReceiptSourceUntrusted) || providerID != "" || resolved != nil || !databaseNow.IsZero() {
 		t.Fatalf("unregistered source resolved: verifier=%v databaseNow=%v err=%v", resolved, databaseNow, err)
 	}
 
 	seedTrustedDRAReceiptSource(t, admin, verifier, receipt, candidate)
-	resolved, databaseNow, err := journal.ResolveRegisteredDRAUnprepareVerifier(
+	providerID, resolved, databaseNow, err := journal.ResolveRegisteredDRAUnprepareVerifier(
 		ctx, candidate.Delete.TenantID, receipt.Event,
 	)
-	if err != nil || resolved == nil || databaseNow.IsZero() {
+	if err != nil || providerID != candidate.Create.ProviderID || resolved == nil || databaseNow.IsZero() {
 		t.Fatalf("DBA-registered source did not resolve: verifier=%v databaseNow=%v err=%v", resolved, databaseNow, err)
 	}
 	if err := resolved.VerifySignedEnvelope(receipt, databaseNow); err != nil {
 		t.Fatalf("resolved verifier rejected current signed event against PostgreSQL time: %v", err)
 	}
 
-	if resolved, databaseNow, err := journal.ResolveRegisteredDRAUnprepareVerifier(
+	if providerID, resolved, databaseNow, err := journal.ResolveRegisteredDRAUnprepareVerifier(
 		ctx, "tenant-foreign", receipt.Event,
-	); !errors.Is(err, ErrDRAReceiptSourceUntrusted) || resolved != nil || !databaseNow.IsZero() {
+	); !errors.Is(err, ErrDRAReceiptSourceUntrusted) || providerID != "" || resolved != nil || !databaseNow.IsZero() {
 		t.Fatalf("cross-tenant source resolved: verifier=%v databaseNow=%v err=%v", resolved, databaseNow, err)
 	}
 
@@ -236,9 +236,9 @@ func TestRestrictedDRAJournalResolvesRegisteredVerifierBeforeHistoricalCandidate
 		receipt.Event.ClusterID, receipt.Event.SourceID, receipt.Event.KeyID); err != nil {
 		t.Fatalf("DBA source revocation: %v", err)
 	}
-	if resolved, databaseNow, err := journal.ResolveRegisteredDRAUnprepareVerifier(
+	if providerID, resolved, databaseNow, err := journal.ResolveRegisteredDRAUnprepareVerifier(
 		ctx, candidate.Delete.TenantID, receipt.Event,
-	); !errors.Is(err, ErrDRAReceiptSourceUntrusted) || resolved != nil || !databaseNow.IsZero() {
+	); !errors.Is(err, ErrDRAReceiptSourceUntrusted) || providerID != "" || resolved != nil || !databaseNow.IsZero() {
 		t.Fatalf("revoked source resolved: verifier=%v databaseNow=%v err=%v", resolved, databaseNow, err)
 	}
 }
@@ -249,7 +249,7 @@ func TestUncheckedDRAJournalCannotResolveRegisteredVerifier(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, databaseNow, err := journal.ResolveRegisteredDRAUnprepareVerifier(
+	_, _, databaseNow, err := journal.ResolveRegisteredDRAUnprepareVerifier(
 		context.Background(), "tenant-a", DRAUnprepareEvent{
 			ClusterID: "cluster-a", SourceID: "source-a", KeyID: "key-a",
 			Driver: "gpu.example.com", CompletedAt: time.Now().UTC(),
@@ -301,16 +301,17 @@ func TestRestrictedDRAJournalRechecksRevocationAfterWaitingForSourceLock(t *test
 	}
 
 	type resolution struct {
-		verifier *DRAUnprepareVerifier
+		providerID string
+		verifier   *DRAUnprepareVerifier
 		database time.Time
 		err      error
 	}
 	resolved := make(chan resolution, 1)
 	go func() {
-		v, databaseNow, err := journal.ResolveRegisteredDRAUnprepareVerifier(
+		providerID, v, databaseNow, err := journal.ResolveRegisteredDRAUnprepareVerifier(
 			ctx, candidate.Delete.TenantID, receipt.Event,
 		)
-		resolved <- resolution{verifier: v, database: databaseNow, err: err}
+		resolved <- resolution{providerID: providerID, verifier: v, database: databaseNow, err: err}
 	}()
 
 	deadline := time.Now().Add(3 * time.Second)
@@ -342,7 +343,7 @@ func TestRestrictedDRAJournalRechecksRevocationAfterWaitingForSourceLock(t *test
 		t.Fatalf("commit concurrent revocation: %v", err)
 	}
 	got := <-resolved
-	if !errors.Is(got.err, ErrDRAReceiptSourceUntrusted) || got.verifier != nil || !got.database.IsZero() {
+	if !errors.Is(got.err, ErrDRAReceiptSourceUntrusted) || got.providerID != "" || got.verifier != nil || !got.database.IsZero() {
 		t.Fatalf("resolver accepted source revoked while acquiring lock: verifier=%v databaseNow=%v err=%v", got.verifier, got.database, got.err)
 	}
 }
