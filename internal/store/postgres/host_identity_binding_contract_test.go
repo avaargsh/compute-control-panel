@@ -138,8 +138,15 @@ func TestHostIdentityBindingDatabaseContract(t *testing.T) {
 	_, truncateErr := tx.ExecContext(ctx, "TRUNCATE public.compute_host_identity_bindings")
 	rollbackErr := tx.Rollback()
 	var truncateState interface{ SQLState() string }
-	if rollbackErr != nil || !errors.As(truncateErr, &truncateState) || truncateState.SQLState() != "23514" {
-		t.Fatalf("TRUNCATE must fail with SQLSTATE 23514: truncate=%v rollback=%v", truncateErr, rollbackErr)
+	truncateSQLState := ""
+	if errors.As(truncateErr, &truncateState) {
+		truncateSQLState = truncateState.SQLState()
+	}
+	// The new subject-grant FK may reject TRUNCATE before statement triggers
+	// with 0A000; without that FK the immutable guard returns 23514.
+	if rollbackErr != nil || (truncateSQLState != "23514" && truncateSQLState != "0A000") {
+		t.Fatalf("TRUNCATE must be rejected by the FK or immutable guard: SQLSTATE=%s truncate=%v rollback=%v",
+			truncateSQLState, truncateErr, rollbackErr)
 	}
 	var provider, cluster, uid, persistedSubject string
 	var persistedAt time.Time
