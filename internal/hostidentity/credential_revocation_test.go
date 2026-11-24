@@ -258,7 +258,7 @@ func TestHostCredentialRevocationListStoreKeepsLastGoodSnapshotOnRejectedUpdate(
 		t.Fatal(err)
 	}
 	wrongSigner := f.crlNumber(t, wrongIssuer, wrongKey, 3, f.now.Add(-time.Minute), f.now.Add(time.Hour))
-	store, err := NewHostCredentialRevocationListStore([][]byte{initial}, f.now)
+	store, err := NewHostCredentialRevocationListStore([][]byte{initial}, []*x509.Certificate{f.issuer}, f.now)
 	if err != nil {
 		t.Fatalf("create revocation store: %v", err)
 	}
@@ -290,7 +290,7 @@ func TestHostCredentialRevocationListStoreConcurrentReplacementCannotRollBack(t 
 	initial := f.crlNumber(t, f.issuer, f.key, 1, f.now.Add(-time.Minute), f.now.Add(time.Hour))
 	intermediate := f.crlNumber(t, f.issuer, f.key, 2, f.now.Add(-time.Minute), f.now.Add(time.Hour))
 	latestRevoked := f.crlNumber(t, f.issuer, f.key, 3, f.now.Add(-time.Minute), f.now.Add(time.Hour), 42)
-	store, err := NewHostCredentialRevocationListStore([][]byte{initial}, f.now)
+	store, err := NewHostCredentialRevocationListStore([][]byte{initial}, []*x509.Certificate{f.issuer}, f.now)
 	if err != nil {
 		t.Fatalf("create revocation store: %v", err)
 	}
@@ -320,7 +320,7 @@ func TestHostCredentialRevocationListStoreConcurrentReplacementCannotRollBack(t 
 func TestHostCredentialRevocationListStoreRejectsExpiredSnapshot(t *testing.T) {
 	f := newHostCredentialRevocationFixture(t)
 	initial := f.crlNumber(t, f.issuer, f.key, 1, f.now.Add(-time.Minute), f.now.Add(time.Hour))
-	store, err := NewHostCredentialRevocationListStore([][]byte{initial}, f.now)
+	store, err := NewHostCredentialRevocationListStore([][]byte{initial}, []*x509.Certificate{f.issuer}, f.now)
 	if err != nil {
 		t.Fatalf("create revocation store: %v", err)
 	}
