@@ -182,6 +182,37 @@ ALTER TABLE public.compute_host_identity_bindings
 
 REVOKE ALL ON TABLE public.compute_host_identity_bindings FROM PUBLIC;
 
+-- CREATE TABLE / CREATE FUNCTION inherit the migrator's default ACLs.
+-- Do not let a deployment's default privileges silently expose this new
+-- immutable binding table or SECURITY DEFINER trigger to an application role.
+DO $host_identity_object_acl_attestation$
+DECLARE
+    binding_oid pg_catalog.oid := 'public.compute_host_identity_bindings'::pg_catalog.regclass;
+    guard_function_oid pg_catalog.oid := 'public.compute_host_identity_enrollment_guard()'::pg_catalog.regprocedure;
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_catalog.pg_class c
+        CROSS JOIN LATERAL pg_catalog.aclexplode(c.relacl) a
+        WHERE c.oid=binding_oid AND a.grantee <> c.relowner
+    ) OR EXISTS (
+        SELECT 1 FROM pg_catalog.pg_attribute col
+        CROSS JOIN LATERAL pg_catalog.aclexplode(col.attacl) a
+        WHERE col.attrelid=binding_oid
+          AND a.grantee <> (SELECT c.relowner FROM pg_catalog.pg_class c WHERE c.oid=binding_oid)
+    ) THEN
+        RAISE EXCEPTION 'HostIdentity binding table has unexpected default or direct grants';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM pg_catalog.pg_proc p
+        CROSS JOIN LATERAL pg_catalog.aclexplode(p.proacl) a
+        WHERE p.oid=guard_function_oid AND a.grantee <> p.proowner
+    ) THEN
+        RAISE EXCEPTION 'HostIdentity SECURITY DEFINER guard has unexpected EXECUTE grants';
+    END IF;
+END;
+$host_identity_object_acl_attestation$;
+
 COMMENT ON TABLE public.compute_host_identity_bindings IS
     'Immutable CCP host enrollment binding; not independently attested physical host identity or GPU availability.';
 COMMENT ON FUNCTION public.compute_host_identity_enrollment_guard() IS
