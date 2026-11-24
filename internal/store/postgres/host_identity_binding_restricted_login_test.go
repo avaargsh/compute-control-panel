@@ -209,26 +209,39 @@ func TestHostIdentityGuardOwnerCatalogBoundary(t *testing.T) {
 
 	var unexpectedBindingGrant bool
 	if err := db.QueryRowContext(ctx, `
+		WITH owners AS (
+			SELECT c.relowner AS table_owner,
+			       (SELECT oid FROM pg_catalog.pg_roles WHERE rolname='ccp_host_session_guard_owner') AS session_guard_owner
+			FROM pg_catalog.pg_class c
+			WHERE c.oid='public.compute_host_identity_bindings'::pg_catalog.regclass
+		)
 		SELECT EXISTS (
 			SELECT 1
 			FROM pg_catalog.pg_class c
 			CROSS JOIN LATERAL pg_catalog.aclexplode(c.relacl) a
+			CROSS JOIN owners o
 			WHERE c.oid='public.compute_host_identity_bindings'::pg_catalog.regclass
-			  AND a.grantee <> c.relowner
+			  AND a.grantee <> o.table_owner
 		) OR EXISTS (
 			SELECT 1
 			FROM pg_catalog.pg_attribute col
 			CROSS JOIN LATERAL pg_catalog.aclexplode(col.attacl) a
+			CROSS JOIN owners o
 			WHERE col.attrelid='public.compute_host_identity_bindings'::pg_catalog.regclass
-			  AND a.grantee <> (
-			    SELECT c.relowner FROM pg_catalog.pg_class c
-			    WHERE c.oid='public.compute_host_identity_bindings'::pg_catalog.regclass
+			  AND (
+			    a.grantee NOT IN (o.table_owner, o.session_guard_owner)
+			    OR a.is_grantable
+			    OR (a.grantee=o.session_guard_owner AND NOT (
+			        (a.privilege_type='SELECT' AND col.attname IN
+			            ('host_id','provider_id','cluster_scope','node_uid','subject'))
+			        OR (a.privilege_type='UPDATE' AND col.attname='host_id')
+			    ))
 			  )
 		)
 	`).Scan(&unexpectedBindingGrant); err != nil {
 		t.Fatal(err)
 	}
 	if unexpectedBindingGrant {
-		t.Fatal("HostIdentity binding table has grants beyond its owner")
+		t.Fatal("HostIdentity binding table has grants beyond its owner and the exact HostSession lock columns")
 	}
 }
