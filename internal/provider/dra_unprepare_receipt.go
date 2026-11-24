@@ -109,22 +109,16 @@ func NewDRAUnprepareVerifier(
 // authenticated, provisioned driver key and clock. This method does not connect
 // to a driver, verify RPC execution, prevent durable replay, or prove physical
 // GPU deallocation. It authorizes NO Allocation/cost state transition.
-func (v *DRAUnprepareVerifier) Correlate(
-	candidate ReleaseEvidenceCandidate, signed SignedDRAUnprepare, asOf time.Time,
-) (DRAUnprepareCorrelation, error) {
-	reject := func() (DRAUnprepareCorrelation, error) {
-		return DRAUnprepareCorrelation{}, ErrUncorrelatedDRAUnprepare
-	}
+// VerifySignedEnvelope checks the source scope, canonical event contract,
+// freshness and Ed25519 signature without requiring historical Kueue/Pod/Claim
+// evidence. Ingress must call this after resolving only the DBA-provisioned
+// signer and BEFORE performing expensive historical evidence lookups.
+func (v *DRAUnprepareVerifier) VerifySignedEnvelope(signed SignedDRAUnprepare, asOf time.Time) error {
 	if v == nil || asOf.IsZero() || len(v.authority.PublicKey) != ed25519.PublicKeySize ||
 		len(signed.Signature) != ed25519.SignatureSize {
-		return reject()
-	}
-	release, err := CorrelateReleaseEvidence(candidate)
-	if err != nil {
-		return reject()
+		return ErrUncorrelatedDRAUnprepare
 	}
 	event := signed.Event
-	prior := candidate.PriorPodClaim
 	if event.Version != "ccp.dra.node-unprepare.v1" ||
 		event.RPC != "NodeUnprepareResources" || event.Result != "SUCCESS" ||
 		event.ClusterID != v.authority.ClusterID ||
@@ -133,28 +127,59 @@ func (v *DRAUnprepareVerifier) Correlate(
 		event.Driver != v.authority.Driver ||
 		!validDRAIdentity(event.EventID) ||
 		!validKubeName(event.ClaimNamespace) || !validKubeName(event.ClaimName) ||
-		!validDRAIdentity(event.ClaimUID) ||
-		event.ClaimNamespace != prior.Claim.Claim.Namespace ||
-		event.ClaimName != prior.Claim.Claim.Name ||
-		event.ClaimUID != prior.Claim.Claim.UID ||
-		!validDRAIdentity(event.PodUID) ||
-		event.PodUID != prior.Pod.UID ||
-		event.PodUID != prior.Claim.PodUID ||
+		!validDRAIdentity(event.ClaimUID) || !validDRAIdentity(event.PodUID) ||
 		!validDRAIdentity(event.AllocatedClaimResourceVersion) ||
-		event.AllocatedClaimResourceVersion != prior.Claim.Claim.ResourceVersion ||
-		event.AllocatedDevice != prior.Claim.Device ||
-		event.Driver != prior.Claim.Device.Driver ||
-		event.NodeName != prior.NodeName ||
 		!validDRAIdentity(event.NodeName) ||
+		!validDRAIdentity(event.AllocatedDevice.Request) ||
+		!validDRAIdentity(event.AllocatedDevice.Driver) ||
+		!validDRAIdentity(event.AllocatedDevice.Pool) ||
+		!validDRAIdentity(event.AllocatedDevice.Device) ||
+		(event.AllocatedDevice.ShareID != "" && !validDRAIdentity(event.AllocatedDevice.ShareID)) ||
+		event.AllocatedDevice.Driver != event.Driver ||
 		event.CompletedAt.IsZero() ||
 		event.CompletedAt.Before(asOf.Add(-v.maximumAge)) ||
 		event.CompletedAt.After(asOf.Add(v.futureSkew)) {
-		return reject()
+		return ErrUncorrelatedDRAUnprepare
 	}
 	payload := draUnprepareSigningBytes(event)
 	if len(payload) == 0 || !ed25519.Verify(v.authority.PublicKey, payload, signed.Signature) {
+		return ErrUncorrelatedDRAUnprepare
+	}
+	return nil
+}
+
+// Correlate cross-checks a previously authenticated signed driver event against
+// the historical durable CREATE/DELETE, Provider absence, Pod absence, Kueue
+// and ResourceClaim observations. It re-verifies the envelope defensively.
+// This does not connect to a driver, verify RPC execution, prevent durable
+// replay, or prove physical GPU deallocation. It authorizes NO state transition.
+func (v *DRAUnprepareVerifier) Correlate(
+	candidate ReleaseEvidenceCandidate, signed SignedDRAUnprepare, asOf time.Time,
+) (DRAUnprepareCorrelation, error) {
+	reject := func() (DRAUnprepareCorrelation, error) {
+		return DRAUnprepareCorrelation{}, ErrUncorrelatedDRAUnprepare
+	}
+	if err := v.VerifySignedEnvelope(signed, asOf); err != nil {
 		return reject()
 	}
+	release, err := CorrelateReleaseEvidence(candidate)
+	if err != nil {
+		return reject()
+	}
+	event := signed.Event
+	prior := candidate.PriorPodClaim
+	if event.ClaimNamespace != prior.Claim.Claim.Namespace ||
+		event.ClaimName != prior.Claim.Claim.Name ||
+		event.ClaimUID != prior.Claim.Claim.UID ||
+		event.PodUID != prior.Pod.UID ||
+		event.PodUID != prior.Claim.PodUID ||
+		event.AllocatedClaimResourceVersion != prior.Claim.Claim.ResourceVersion ||
+		event.AllocatedDevice != prior.Claim.Device ||
+		event.Driver != prior.Claim.Device.Driver ||
+		event.NodeName != prior.NodeName {
+		return reject()
+	}
+	payload := draUnprepareSigningBytes(event)
 	digest := sha256.Sum256(payload)
 	keyDigest := sha256.Sum256(v.authority.PublicKey)
 	var signature [ed25519.SignatureSize]byte

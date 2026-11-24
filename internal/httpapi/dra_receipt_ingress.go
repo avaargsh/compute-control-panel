@@ -95,12 +95,21 @@ func (p *ExactDRAReceiptIngestAuthorizer) AuthorizeDRAReceipt(_ context.Context,
 	return nil
 }
 
-// DRAReceiptEvidenceResolver MUST obtain a historical release candidate and
-// signer verifier from authenticated, server-controlled stores/collectors.
-// The signed event is only an index hint. Neither candidate, signer keys,
-// tenant binding nor authorization may be supplied by the HTTP caller.
+// DRAReceiptVerifierResolver resolves ONLY the DBA-provisioned signer key
+// and freshness policy for the authenticated principal/event scope. It must
+// not query historical Kubernetes/Allocation evidence. The handler verifies
+// the envelope before invoking DRAReceiptEvidenceResolver.
+type DRAReceiptVerifierResolver interface {
+	ResolveDRAReceiptVerifier(context.Context, WorkloadPrincipal, provider.DRAUnprepareEvent) (*provider.DRAUnprepareVerifier, error)
+}
+
+// DRAReceiptEvidenceResolver resolves historical CREATE/DELETE, Provider
+// absence, Kueue/Pod and ResourceClaim evidence from authenticated,
+// server-controlled stores/collectors. It is called only after the signature,
+// source scope and freshness have been verified. Event fields are index hints,
+// never authority or evidence supplied by the HTTP caller.
 type DRAReceiptEvidenceResolver interface {
-	ResolveDRAReceiptEvidence(context.Context, WorkloadPrincipal, provider.DRAUnprepareEvent) (provider.ReleaseEvidenceCandidate, *provider.DRAUnprepareVerifier, error)
+	ResolveDRAReceiptEvidence(context.Context, WorkloadPrincipal, provider.DRAUnprepareEvent) (provider.ReleaseEvidenceCandidate, error)
 }
 
 // DRAReceiptRestrictedJournal is only implemented by the production journal
@@ -111,10 +120,11 @@ type DRAReceiptRestrictedJournal interface {
 }
 
 type DRAReceiptIngestDependencies struct {
-	Authenticator WorkloadAuthenticator
-	Authorizer    DRAReceiptIngestAuthorizer
-	Resolver      DRAReceiptEvidenceResolver
-	Journal       DRAReceiptRestrictedJournal
+	Authenticator   WorkloadAuthenticator
+	Authorizer      DRAReceiptIngestAuthorizer
+	VerifierResolver DRAReceiptVerifierResolver
+	Resolver        DRAReceiptEvidenceResolver
+	Journal         DRAReceiptRestrictedJournal
 }
 
 type draReceiptIngestHandler struct {
@@ -138,9 +148,10 @@ func NewDRAReceiptIngestHandler(deps DRAReceiptIngestDependencies) (http.Handler
 	}
 	if missingProviderManagementDependency(deps.Authenticator) ||
 		missingProviderManagementDependency(deps.Authorizer) ||
+		missingProviderManagementDependency(deps.VerifierResolver) ||
 		missingProviderManagementDependency(deps.Resolver) ||
 		missingProviderManagementDependency(deps.Journal) {
-		return nil, errors.New("DRA receipt ingress requires verified authentication, source authorization, trusted evidence resolver and restricted journal")
+		return nil, errors.New("DRA receipt ingress requires verified authentication, source authorization, signer resolver, historical evidence resolver and restricted journal")
 	}
 	h := &draReceiptIngestHandler{deps: deps}
 	mux := http.NewServeMux()
@@ -250,12 +261,30 @@ func (h *draReceiptIngestHandler) ingest(w http.ResponseWriter, r *http.Request)
 		writeWorkloadAPIError(w, http.StatusForbidden, "DRA_SOURCE_DENIED", "Driver identity is not authorized for this source")
 		return
 	}
-	candidate, verifier, err := h.deps.Resolver.ResolveDRAReceiptEvidence(r.Context(), principal, signed.Event)
+	asOf := time.Now().UTC()
+	verifier, err := h.deps.VerifierResolver.ResolveDRAReceiptVerifier(r.Context(), principal, signed.Event)
 	if err != nil || verifier == nil {
-		writeWorkloadAPIError(w, http.StatusServiceUnavailable, "DRA_EVIDENCE_UNAVAILABLE", "Independently resolved evidence is unavailable")
+		if errors.Is(err, provider.ErrDRAReceiptSourceUntrusted) {
+			writeWorkloadAPIError(w, http.StatusForbidden, "DRA_RECEIPT_UNTRUSTED", "Signed receipt source is not registered")
+		} else {
+			writeWorkloadAPIError(w, http.StatusServiceUnavailable, "DRA_VERIFIER_UNAVAILABLE", "Independently registered receipt signer is unavailable")
+		}
 		return
 	}
-	created, err := h.deps.Journal.VerifyAndRecordRestricted(r.Context(), verifier, candidate, signed, time.Now().UTC())
+	if err := verifier.VerifySignedEnvelope(signed, asOf); err != nil {
+		writeWorkloadAPIError(w, http.StatusForbidden, "DRA_RECEIPT_UNTRUSTED", "Signed receipt is invalid, stale or outside the registered source scope")
+		return
+	}
+	candidate, err := h.deps.Resolver.ResolveDRAReceiptEvidence(r.Context(), principal, signed.Event)
+	if err != nil {
+		if errors.Is(err, provider.ErrDRAReceiptSourceUntrusted) {
+			writeWorkloadAPIError(w, http.StatusForbidden, "DRA_RECEIPT_UNTRUSTED", "Signed receipt source is not registered")
+		} else {
+			writeWorkloadAPIError(w, http.StatusServiceUnavailable, "DRA_EVIDENCE_UNAVAILABLE", "Independently resolved historical evidence is unavailable")
+		}
+		return
+	}
+	created, err := h.deps.Journal.VerifyAndRecordRestricted(r.Context(), verifier, candidate, signed, asOf)
 	if err != nil {
 		switch {
 		case errors.Is(err, provider.ErrDRAReceiptReplayConflict):
