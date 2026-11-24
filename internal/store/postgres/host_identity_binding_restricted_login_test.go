@@ -133,3 +133,73 @@ func TestHostIdentityBindingRestrictedLoginDoesNotNeedProviderPrivileges(t *test
 		})
 	}
 }
+
+
+func TestHostIdentityGuardOwnerCatalogBoundary(t *testing.T) {
+	db := openIntegrationDB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var securityDefiner, publicExecute bool
+	var owner, config string
+	err := db.QueryRowContext(ctx, `
+		SELECT p.prosecdef,
+		       pg_catalog.pg_get_userbyid(p.proowner),
+		       pg_catalog.array_to_string(p.proconfig, ','),
+		       EXISTS (
+		         SELECT 1
+		         FROM pg_catalog.aclexplode(
+		           COALESCE(p.proacl, pg_catalog.acldefault('f', p.proowner))
+		         ) a
+		         WHERE a.grantee=0 AND a.privilege_type='EXECUTE'
+		       )
+		FROM pg_catalog.pg_proc p
+		WHERE p.oid='public.compute_host_identity_enrollment_guard()'::pg_catalog.regprocedure
+	`).Scan(&securityDefiner, &owner, &config, &publicExecute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !securityDefiner || owner != "ccp_host_identity_guard_owner" ||
+		config != "search_path=pg_catalog, pg_temp" || publicExecute {
+		t.Fatalf("unsafe HostIdentity guard: security_definer=%t owner=%q search_path=%q public_execute=%t",
+			securityDefiner, owner, config, publicExecute)
+	}
+
+	var canLogin, inherit, superuser bool
+	var selectProviderID, selectCluster, selectState bool
+	var updateProviderID, updateState bool
+	err = db.QueryRowContext(ctx, `
+		SELECT r.rolcanlogin, r.rolinherit, r.rolsuper,
+		       pg_catalog.has_column_privilege(r.oid, 'public.compute_providers', 'provider_id', 'SELECT'),
+		       pg_catalog.has_column_privilege(r.oid, 'public.compute_providers', 'cluster_scope', 'SELECT'),
+		       pg_catalog.has_column_privilege(r.oid, 'public.compute_providers', 'state', 'SELECT'),
+		       pg_catalog.has_column_privilege(r.oid, 'public.compute_providers', 'provider_id', 'UPDATE'),
+		       pg_catalog.has_column_privilege(r.oid, 'public.compute_providers', 'state', 'UPDATE')
+		FROM pg_catalog.pg_roles r
+		WHERE r.rolname='ccp_host_identity_guard_owner'
+	`).Scan(&canLogin, &inherit, &superuser, &selectProviderID, &selectCluster,
+		&selectState, &updateProviderID, &updateState)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if canLogin || inherit || superuser || !selectProviderID || !selectCluster ||
+		!selectState || !updateProviderID || updateState {
+		t.Fatalf("unsafe HostIdentity guard owner: login=%t inherit=%t superuser=%t SELECT(provider_id,cluster,state)=%t/%t/%t UPDATE(provider_id,state)=%t/%t",
+			canLogin, inherit, superuser, selectProviderID, selectCluster, selectState,
+			updateProviderID, updateState)
+	}
+
+	var alwaysTriggers int
+	if err := db.QueryRowContext(ctx, `
+		SELECT count(*)::integer
+		FROM pg_catalog.pg_trigger t
+		WHERE t.tgrelid='public.compute_host_identity_bindings'::pg_catalog.regclass
+		  AND t.tgfoid='public.compute_host_identity_enrollment_guard()'::pg_catalog.regprocedure
+		  AND t.tgenabled='A'
+	`).Scan(&alwaysTriggers); err != nil {
+		t.Fatal(err)
+	}
+	if alwaysTriggers != 3 {
+		t.Fatalf("HostIdentity ALWAYS guard trigger count=%d, want 3", alwaysTriggers)
+	}
+}
