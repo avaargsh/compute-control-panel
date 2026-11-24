@@ -89,6 +89,9 @@ node_name="$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')"
 node_uid="$(kubectl get node "$node_name" -o jsonpath='{.metadata.uid}')"
 [[ -n "$node_uid" ]] || { echo "kind Node UID missing" >&2; exit 1; }
 kubectl -n "$namespace" create serviceaccount inventory-lease-allowed
+lease_sa="system:serviceaccount:$namespace:inventory-lease-allowed"
+# Check the actual authorizer before adding the named Lease GET grant.
+[[ "$(kubectl auth can-i get leases.coordination.k8s.io/"$node_name" --as="$lease_sa" -n kube-node-lease)" == "no" ]] || { echo "Lease GET was granted before fixture Role" >&2; exit 1; }
 kubectl apply -f - <<YAML
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -138,14 +141,24 @@ subjects:
   namespace: $namespace
 YAML
 
-lease_sa="system:serviceaccount:$namespace:inventory-lease-allowed"
+# The only positive resource grants are Node LIST and one exact Lease GET.
 [[ "$(kubectl auth can-i list nodes --as="$lease_sa")" == "yes" ]] || { echo "Node list grant missing" >&2; exit 1; }
 [[ "$(kubectl auth can-i get leases/"$node_name" --as="$lease_sa" -n kube-node-lease)" == "yes" ]] || { echo "Lease GET grant missing" >&2; exit 1; }
 [[ "$(kubectl auth can-i get nodes/"$node_name" --as="$lease_sa")" == "no" ]] || { echo "Lease SA unexpectedly allowed to GET nodes" >&2; exit 1; }
 [[ "$(kubectl auth can-i list leases --as="$lease_sa" -n kube-node-lease)" == "no" ]] || { echo "Lease SA unexpectedly allowed to list leases" >&2; exit 1; }
-for verb in create update patch delete; do
-  [[ "$(kubectl auth can-i "$verb" nodes --as="$lease_sa")" == "no" ]] || { echo "Lease SA may mutate Node" >&2; exit 1; }
-  [[ "$(kubectl auth can-i "$verb" leases --as="$lease_sa" -n kube-node-lease)" == "no" ]] || { echo "Lease SA may mutate Lease" >&2; exit 1; }
+[[ "$(kubectl auth can-i get leases.coordination.k8s.io/"$node_name" --as="$lease_sa" -n default)" == "no" ]] || { echo "Lease GET escaped namespace fence" >&2; exit 1; }
+[[ "$(kubectl auth can-i get leases.coordination.k8s.io/"$node_name-not-granted" --as="$lease_sa" -n kube-node-lease)" == "no" ]] || { echo "Lease GET escaped resourceName fence" >&2; exit 1; }
+[[ "$(kubectl auth can-i get leases.coordination.k8s.io/"$node_name" --as="system:serviceaccount:$namespace:inventory-allowed" -n kube-node-lease)" == "no" ]] || { echo "list-only identity gained Lease GET" >&2; exit 1; }
+[[ "$(kubectl auth can-i get leases.coordination.k8s.io/"$node_name" --as="system:serviceaccount:$namespace:inventory-denied" -n kube-node-lease)" == "no" ]] || { echo "denied identity gained Lease GET" >&2; exit 1; }
+for verb in watch create update patch delete; do
+  [[ "$(kubectl auth can-i "$verb" nodes --as="$lease_sa")" == "no" ]] || { echo "Lease SA has unexpected Node privilege: $verb" >&2; exit 1; }
+  [[ "$(kubectl auth can-i "$verb" leases.coordination.k8s.io --as="$lease_sa" -n kube-node-lease)" == "no" ]] || { echo "Lease SA has unexpected broad Lease privilege: $verb" >&2; exit 1; }
+done
+# Broad permission denial alone does not exclude a resourceName-restricted
+# mutation grant. Explicitly test the exact observed object as well.
+for verb in watch update patch delete; do
+  [[ "$(kubectl auth can-i "$verb" nodes/"$node_name" --as="$lease_sa")" == "no" ]] || { echo "Lease SA has named Node privilege: $verb" >&2; exit 1; }
+  [[ "$(kubectl auth can-i "$verb" leases.coordination.k8s.io/"$node_name" --as="$lease_sa" -n kube-node-lease)" == "no" ]] || { echo "Lease SA has named Lease privilege: $verb" >&2; exit 1; }
 done
 
 allow="system:serviceaccount:$namespace:inventory-allowed"
