@@ -294,7 +294,7 @@ jobs:
             echo 'pre-delete DRA snapshot PostgreSQL acceptance was skipped' >&2
             exit 1
           fi
-          printf 'verified_kueue_predelete_dra_snapshot_source_sha=%s\\n' "$(git rev-parse --verify HEAD)"
+          printf 'verified_kueue_predelete_dra_snapshot_source_sha=%s\n' "$(git rev-parse --verify HEAD)"
       - name: Require real PostgreSQL correlated release bridge acceptance (no skip)
         shell: bash
         env:
@@ -307,7 +307,7 @@ jobs:
             echo 'real PostgreSQL release bridge test skipped: no evidence' >&2
             exit 1
           fi
-          printf 'verified_release_bridge_source_sha=%s\\n' "$(git rev-parse --verify HEAD)"
+          printf 'verified_release_bridge_source_sha=%s\n' "$(git rev-parse --verify HEAD)"
       - name: Require real PostgreSQL recorded DRA receipt acceptance (no skip)
         shell: bash
         env:
