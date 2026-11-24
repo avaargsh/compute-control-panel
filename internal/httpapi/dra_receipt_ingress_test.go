@@ -85,15 +85,15 @@ func draReceiptTestPrivateKey() ed25519.PrivateKey {
 
 func draReceiptTestSigned() provider.SignedDRAUnprepare {
 	event := provider.DRAUnprepareEvent{
-			Version: "ccp.dra.node-unprepare.v1", ClusterID: "cluster-a",
-			SourceID: "source-a", KeyID: "key-a", EventID: "event-a",
-			RPC: "NodeUnprepareResources", Result: "SUCCESS",
-			Driver: "gpu.example.com", NodeName: "node-a",
-			ClaimNamespace: "tenant-a", ClaimName: "claim-a", ClaimUID: "claim-uid-a",
-			PodUID: "pod-uid-a", AllocatedClaimResourceVersion: "11",
-			AllocatedDevice: provider.DRAAllocatedDevice{
-				Request: "gpu", Driver: "gpu.example.com", Pool: "pool-a", Device: "gpu-a",
-			},
+		Version: "ccp.dra.node-unprepare.v1", ClusterID: "cluster-a",
+		SourceID: "source-a", KeyID: "key-a", EventID: "event-a",
+		RPC: "NodeUnprepareResources", Result: "SUCCESS",
+		Driver: "gpu.example.com", NodeName: "node-a",
+		ClaimNamespace: "tenant-a", ClaimName: "claim-a", ClaimUID: "claim-uid-a",
+		PodUID: "pod-uid-a", AllocatedClaimResourceVersion: "11",
+		AllocatedDevice: provider.DRAAllocatedDevice{
+			Request: "gpu", Driver: "gpu.example.com", Pool: "pool-a", Device: "gpu-a",
+		},
 		CompletedAt: time.Now().UTC(),
 	}
 	payload, err := json.Marshal(event)
@@ -218,7 +218,6 @@ func TestDRAReceiptIngestRequiresVerifiedSPIFFEIdentityAndExactSource(t *testing
 		t.Fatalf("cross-source principal bypassed policy: HTTP %d calls %d/%d", rec.Code, resolver.calls, journal.calls)
 	}
 }
-
 
 func TestDRAReceiptIngestRejectsInvalidSignatureBeforeHistoricalEvidenceResolution(t *testing.T) {
 	h, resolver, journal := draReceiptTestHandler(t, draReceiptSPIFFEAuthenticator(t))
