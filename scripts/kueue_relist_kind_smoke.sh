@@ -119,6 +119,12 @@ recorded_workload_rv="$(jq -r '.workload_resource_version' "$dir/relist-record.j
   echo "recorded job uid did not match the live job" >&2
   exit 1
 }
+# This restart/relist fixture is CPU-only, independent of the preceding DRA fixture.
+kubectl -n "$ns" get job "$job_name" -o json | jq -e '
+  ((.spec.template.spec.resourceClaims // []) | length) == 0 and
+  all(.spec.template.spec.containers[]; ((.resources.claims // []) | length) == 0)' >/dev/null || {
+  echo "relist fixture unexpectedly requests DRA devices" >&2; exit 1
+}
 pin_uid="$(docker exec -e PGPASSWORD=compute-ci "$pg_name" psql -U postgres -d postgres -tA -v ON_ERROR_STOP=1 -c \
   "SELECT job_uid FROM public.kueue_job_create_pins WHERE namespace='ccp-kueue-smoke' AND operation_id='ccp-kind-relist-create'")"
 [[ "$pin_uid" == "$job_uid" ]] || { echo "restricted binding pin was not the recorded job" >&2; exit 1; }
