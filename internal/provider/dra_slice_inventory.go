@@ -29,7 +29,7 @@ type DRAPoolInventoryObservation struct {
 type draResourceSlice struct {
 	APIVersion string   `json:"apiVersion"`
 	Kind       string   `json:"kind"`
-	Metadata   kubeMeta `json:"metadata"`
+	Metadata   draDeviceReadMeta `json:"metadata"`
 	Spec       struct {
 		Driver                 string          `json:"driver"`
 		NodeName               string          `json:"nodeName"`
@@ -133,7 +133,12 @@ func currentDRAPool(
 			item.Spec.Pool.Generation != newest {
 			continue
 		}
-		ref := refFromKube(item.Metadata)
+		// A terminating selected or sibling slice is not authoritative current
+		// inventory, even if its generation/count and both reads agree.
+		if item.Metadata.DeletionTimestamp != nil {
+			return reject("terminating ResourceSlice in latest pool generation")
+		}
+		ref := refFromKube(item.Metadata.kubeMeta)
 		// The typed ResourceSliceList returned by this fixed API endpoint
 		// determines each item's resource kind. Kubernetes list items may omit
 		// optional TypeMeta; explicit contradictory GVK remains invalid.
