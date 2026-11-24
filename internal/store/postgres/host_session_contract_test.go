@@ -80,6 +80,13 @@ func TestHostSessionStartAndHeartbeatDatabaseContract(t *testing.T) {
 			functionOwner, tableOwner, securityDefiner, canSelect, canInsert, schemaUsage, rowSecurity)
 	}
 
+	foreignBinding := binding
+	foreignBinding.NodeUID = binding.NodeUID + "-foreign"
+	if _, err := repo.StartHostSession(ctx, foreignBinding, 0, 60*time.Second); !errors.Is(err, ErrHostSessionRejected) ||
+		hostSessionSQLState(err) != "23514" {
+		t.Fatalf("foreign Node UID created a HostSession: %v", err)
+	}
+
 	var before, after time.Time
 	if err := db.QueryRowContext(ctx, `SELECT pg_catalog.clock_timestamp()`).Scan(&before); err != nil {
 		t.Fatal(err)
@@ -114,6 +121,13 @@ func TestHostSessionStartAndHeartbeatDatabaseContract(t *testing.T) {
 		Binding: binding, Epoch: first.Epoch, SessionID: first.SessionID,
 		Sequence: 1, Digest: digest,
 	}
+	foreignHeartbeat := heartbeat
+	foreignHeartbeat.Binding.Subject = "spiffe://ccp.example/host/foreign"
+	if _, _, err := repo.RecordHostHeartbeat(ctx, foreignHeartbeat); !errors.Is(err, ErrHostSessionRejected) ||
+		hostSessionSQLState(err) != "23514" {
+		t.Fatalf("foreign subject wrote a HostSession heartbeat: %v", err)
+	}
+
 	disposition, recordedAt, err := repo.RecordHostHeartbeat(ctx, heartbeat)
 	if err != nil || disposition != hostidentity.Accept || recordedAt.IsZero() {
 		t.Fatalf("first heartbeat: disposition=%s recorded_at=%v err=%v", disposition, recordedAt, err)
