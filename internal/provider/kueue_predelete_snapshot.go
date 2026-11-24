@@ -175,6 +175,24 @@ func (a *KueueJobAdapter) RecordPreDeleteDRASnapshot(
 	return a.bindings.PutPreDeleteDRASnapshot(a.namespace, req, snapshot)
 }
 
+
+func (a *KueueJobAdapter) requirePreDeleteDRASnapshot(req Request) error {
+	if a == nil || a.bindings == nil {
+		return ErrInvalidKueueObservation
+	}
+	if a.resourceClaimTemplateName == "" {
+		return nil
+	}
+	snapshot, ok, err := a.bindings.GetPreDeleteDRASnapshot(a.namespace, req)
+	if err != nil {
+		return err
+	}
+	if !ok || !preDeleteSnapshotMatchesDelete(snapshot, a.namespace, req, a.resourceClaimTemplateName) {
+		return ErrPreDeleteDRASnapshotRequired
+	}
+	return nil
+}
+
 func preDeleteSnapshotMatchesDelete(snapshot KueuePreDeleteDRASnapshot, namespace string, req Request, templateName string) bool {
 	if len(snapshot.Devices) == 0 {
 		return false
