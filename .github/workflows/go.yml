@@ -279,7 +279,7 @@ jobs:
             echo 'database-derived PostgreSQL release fence resolver test skipped: no acceptance evidence' >&2
             exit 1
           fi
-          printf 'verified_release_fence_resolver_source_sha=%s\\n' "$(git rev-parse --verify HEAD)"
+          printf 'verified_release_fence_resolver_source_sha=%s\n' "$(git rev-parse --verify HEAD)"
       - name: Require real PostgreSQL correlated release bridge acceptance (no skip)
         shell: bash
         env:
