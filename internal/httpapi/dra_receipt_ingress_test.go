@@ -184,7 +184,7 @@ func TestDRAReceiptIngestRequiresVerifiedSPIFFEIdentityAndExactSource(t *testing
 		t.Fatal(err)
 	}
 	leaf := &x509.Certificate{Raw: []byte("verified-client-cert"), URIs: []*url.URL{spiffeURI}}
-	peer := &tls.ConnectionState{PeerCertificates: []*x509.Certificate{leaf}, VerifiedChains: [][]*x509.Certificate{{leaf}}}
+	peer := &tls.ConnectionState{Version: tls.VersionTLS13, PeerCertificates: []*x509.Certificate{leaf}, VerifiedChains: [][]*x509.Certificate{{leaf}}}
 	req = httptest.NewRequest(http.MethodPost, "/internal/v1/dra/node-unprepare-receipts", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.TLS = peer
