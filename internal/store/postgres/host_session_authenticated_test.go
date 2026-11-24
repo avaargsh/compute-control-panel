@@ -422,3 +422,205 @@ func TestAuthenticatedHostSessionGrantExpiresWhileWaitingForProvider(t *testing.
 		t.Fatalf("post-lock authorization rejection left %d durable sessions", count)
 	}
 }
+
+// Revocation must serialize with Session Start as well as heartbeat writes.
+func TestHostSessionSubjectGrantRevocationFencesConcurrentStart(t *testing.T) {
+	admin := openIntegrationDB(t)
+	_, binding := hostSessionFixture(t, admin)
+	writer, err := hostSessionWriterDB(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer.SetMaxOpenConns(1)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	provisionHostSessionSubjectGrant(t, admin, binding, "tenant-host-start-revoke-"+randomSuffix(t))
+	repo, err := NewRepository(writer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := admin.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	var revokerPID int
+	if err := tx.QueryRowContext(ctx, "SELECT pg_catalog.pg_backend_pid()").Scan(&revokerPID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE public.compute_host_identity_subject_grants
+		SET revoked_at=pg_catalog.clock_timestamp(), revocation_reason='START_RACE_REVOKED'
+		WHERE subject=$1
+	`, binding.Subject); err != nil {
+		t.Fatal(err)
+	}
+	var writerPID int
+	if err := writer.QueryRowContext(ctx, "SELECT pg_catalog.pg_backend_pid()").Scan(&writerPID); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := repo.StartAuthenticatedHostSession(ctx, AuthenticatedHostSessionStartRequest{
+			Subject: binding.Subject, ExpectedEpoch: 0,
+			RequestID: "start-revoke-race-" + randomSuffix(t), TTL: 30 * time.Second,
+		})
+		done <- err
+	}()
+
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	waiting := false
+	for !waiting {
+		select {
+		case err := <-done:
+			t.Fatalf("session start completed before revocation committed: %v", err)
+		case <-deadline.C:
+			t.Fatal("session start did not wait for in-flight subject-grant revocation")
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-ticker.C:
+			if err := admin.QueryRowContext(ctx, `
+				SELECT $1 = ANY(pg_catalog.pg_blocking_pids($2))
+			`, revokerPID, writerPID).Scan(&waiting); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrHostSessionUnauthorized) {
+			t.Fatalf("session start after committed revocation must be denied, got %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	var count int
+	if err := admin.QueryRowContext(ctx, `
+		SELECT count(*) FROM public.compute_host_sessions WHERE host_id=$1
+	`, binding.HostID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("revocation race persisted %d HostSession rows", count)
+	}
+}
+
+// Authorization expiry is checked after the raw heartbeat has waited on the
+// Provider lock; a preflight check alone must never authorize a late receipt.
+func TestAuthenticatedHostHeartbeatGrantExpiresWhileWaitingForProvider(t *testing.T) {
+	admin := openIntegrationDB(t)
+	_, binding := hostSessionFixture(t, admin)
+	writer, err := hostSessionWriterDB(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer.SetMaxOpenConns(1)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	repo, err := NewRepository(writer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenant := "tenant-heartbeat-lock-expiry-" + randomSuffix(t)
+	var expiresAt time.Time
+	err = admin.QueryRowContext(ctx, `
+		INSERT INTO public.compute_host_identity_subject_grants
+			(subject, tenant_id, service_name, host_id, provider_id, cluster_scope, node_uid, expires_at)
+		VALUES ($1,$2,'compute-host-agent',$3,$4,$5,$6,pg_catalog.clock_timestamp()+interval '5 seconds')
+		RETURNING expires_at
+	`, binding.Subject, tenant, binding.HostID, binding.ProviderID, binding.ClusterScope, binding.NodeUID).Scan(&expiresAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := repo.StartAuthenticatedHostSession(ctx, AuthenticatedHostSessionStartRequest{
+		Subject: binding.Subject, ExpectedEpoch: 0,
+		RequestID: "heartbeat-expiry-start-" + randomSuffix(t), TTL: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := admin.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	var blockerPID, writerPID int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT pg_catalog.pg_backend_pid()
+		FROM public.compute_providers WHERE provider_id=$1 FOR UPDATE
+	`, binding.ProviderID).Scan(&blockerPID); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.QueryRowContext(ctx, "SELECT pg_catalog.pg_backend_pid()").Scan(&writerPID); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := repo.RecordAuthenticatedHostHeartbeat(ctx, AuthenticatedHostHeartbeatRequest{
+			Subject: binding.Subject, Epoch: first.Epoch, SessionID: first.SessionID,
+			Sequence: 1, Digest: "sha256:" + strings.Repeat("e", 64),
+		})
+		done <- err
+	}()
+
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	waiting := false
+	for !waiting {
+		select {
+		case err := <-done:
+			t.Fatalf("heartbeat completed before Provider lock was released: %v", err)
+		case <-deadline.C:
+			t.Fatal("heartbeat did not wait behind Provider lock")
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-ticker.C:
+			var active bool
+			if err := admin.QueryRowContext(ctx, `
+				SELECT $1 = ANY(pg_catalog.pg_blocking_pids($2)),
+				       pg_catalog.clock_timestamp() < $3
+			`, blockerPID, writerPID, expiresAt).Scan(&waiting, &active); err != nil {
+				t.Fatal(err)
+			}
+			if !active {
+				t.Fatal("grant expired before heartbeat reached the Provider lock")
+			}
+		}
+	}
+	if _, err := admin.ExecContext(ctx, `
+		SELECT pg_catalog.pg_sleep(GREATEST(0, EXTRACT(EPOCH FROM ($1::timestamptz - pg_catalog.clock_timestamp())))::double precision + 0.05)
+	`, expiresAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrHostSessionUnauthorized) || hostSessionSQLState(err) != "28000" {
+			t.Fatalf("heartbeat after grant expiry must reject, got %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	var count int
+	if err := admin.QueryRowContext(ctx, `
+		SELECT count(*) FROM public.compute_host_session_heartbeats
+		WHERE host_id=$1 AND epoch=$2
+	`, binding.HostID, first.Epoch).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("post-expiry heartbeat left %d durable receipts", count)
+	}
+}
+
