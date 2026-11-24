@@ -228,7 +228,6 @@ func TestDRAReceiptIngestRejectsClientEvidenceAndAmbiguousJSON(t *testing.T) {
 	}
 }
 
-
 func TestDRAReceiptIngestRejectsLegacyTLSAndAmbiguousContentType(t *testing.T) {
 	h, resolver, journal := draReceiptTestHandler(t, draReceiptSPIFFEAuthenticator(t))
 	body := draReceiptTestBody(t, draReceiptTestSigned())
