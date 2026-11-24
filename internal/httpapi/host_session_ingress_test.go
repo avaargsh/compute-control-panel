@@ -401,7 +401,7 @@ func TestHostSessionIngressUsesInjectedClockForCertificateExpiry(t *testing.T) {
 func TestHostSessionIngressRejectsMissingOrNonHostCredentials(t *testing.T) {
 	authority := newHostCredentialAuthority(t)
 	repo := &hostSessionIngressRepositoryStub{}
-	handler := newHostSessionIngressHandler(t, authority.roots, repo)
+	handler := newHostSessionIngressHandler(t, authority, repo)
 	server, noCredentialClient := startHostSessionIngressTLSServer(t, handler, authority.roots, nil)
 
 	request, err := http.NewRequest(http.MethodPost, server.URL+hostSessionStartPath,
@@ -441,7 +441,7 @@ func TestHostSessionIngressRejectsAmbiguousJSONAndInvalidSessionFields(t *testin
 	authority := newHostCredentialAuthority(t)
 	clientCert := authority.issue(t, hostSessionIngressSubject, 4)
 	repo := &hostSessionIngressRepositoryStub{}
-	handler := newHostSessionIngressHandler(t, authority.roots, repo)
+	handler := newHostSessionIngressHandler(t, authority, repo)
 	server, client := startHostSessionIngressTLSServer(t, handler, authority.roots, &clientCert)
 
 	for _, body := range []string{
@@ -472,7 +472,7 @@ func TestHostSessionIngressMapsRepositoryFencesWithoutLeakingErrors(t *testing.T
 	authority := newHostCredentialAuthority(t)
 	clientCert := authority.issue(t, hostSessionIngressSubject, 5)
 	repo := &hostSessionIngressRepositoryStub{startErr: postgres.ErrHostSessionUnauthorized}
-	handler := newHostSessionIngressHandler(t, authority.roots, repo)
+	handler := newHostSessionIngressHandler(t, authority, repo)
 	server, client := startHostSessionIngressTLSServer(t, handler, authority.roots, &clientCert)
 
 	request, err := http.NewRequest(http.MethodPost, server.URL+hostSessionStartPath,
