@@ -69,7 +69,7 @@ func TestHostSessionStartAndHeartbeatDatabaseContract(t *testing.T) {
 		       c.relrowsecurity
 		FROM pg_catalog.pg_proc p
 		CROSS JOIN pg_catalog.pg_class c
-		WHERE p.oid='public.compute_host_session_start(text,text,text,text,text,bigint,integer)'::pg_catalog.regprocedure
+		WHERE p.oid='public.compute_host_session_start(text,text,text,text,text,bigint,text,integer)'::pg_catalog.regprocedure
 		  AND c.oid='public.compute_host_sessions'::pg_catalog.regclass
 	`).Scan(&functionOwner, &tableOwner, &securityDefiner, &canSelect, &canInsert, &schemaUsage, &rowSecurity); err != nil {
 		t.Fatal(err)
@@ -355,7 +355,7 @@ func TestHostSessionRestrictedWriterAndCatalogBoundary(t *testing.T) {
 		       pg_catalog.array_to_string(h.proconfig, ',')
 		FROM pg_catalog.pg_proc s
 		CROSS JOIN pg_catalog.pg_proc h
-		WHERE s.oid='public.compute_host_session_start(text,text,text,text,text,bigint,integer)'::pg_catalog.regprocedure
+		WHERE s.oid='public.compute_host_session_start(text,text,text,text,text,bigint,text,integer)'::pg_catalog.regprocedure
 		  AND h.oid='public.compute_host_session_heartbeat(text,text,text,text,text,bigint,text,bigint,text)'::pg_catalog.regprocedure
 	`).Scan(&ownerStart, &startSecurityDefiner, &startConfig,
 		&ownerHeartbeat, &heartbeatSecurityDefiner, &heartbeatConfig); err != nil {
@@ -408,7 +408,7 @@ func TestHostSessionRestrictedWriterAndCatalogBoundary(t *testing.T) {
 			SELECT 1 FROM pg_catalog.pg_proc p
 			CROSS JOIN LATERAL pg_catalog.aclexplode(p.proacl) a
 			WHERE p.oid IN (
-				'public.compute_host_session_start(text,text,text,text,text,bigint,integer)'::pg_catalog.regprocedure,
+				'public.compute_host_session_start(text,text,text,text,text,bigint,text,integer)'::pg_catalog.regprocedure,
 				'public.compute_host_session_heartbeat(text,text,text,text,text,bigint,text,bigint,text)'::pg_catalog.regprocedure
 			) AND (
 				a.grantee NOT IN (p.proowner, pg_catalog.to_regrole('ccp_host_session_writer'))
