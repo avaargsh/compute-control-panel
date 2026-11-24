@@ -263,6 +263,7 @@ func nodeCondition(n node) (observation.Condition, string) {
 func (r *Reader) listNodes(ctx context.Context) ([]node, error) {
 	var nodes []node
 	seen := make(map[string]bool)
+	seenUIDs := make(map[string]bool)
 	seenTokens := make(map[string]bool)
 	continuation := ""
 	resourceVersion := ""
@@ -281,10 +282,11 @@ func (r *Reader) listNodes(ctx context.Context) ([]node, error) {
 		}
 		for _, n := range result.Items {
 			if n.Metadata.Name == "" || n.Metadata.UID == "" || n.Metadata.ResourceVersion == "" ||
-				seen[n.Metadata.Name] || len(nodes) == maxNodes {
+				seen[n.Metadata.Name] || seenUIDs[n.Metadata.UID] || len(nodes) == maxNodes {
 				return nil, ErrInvalidResponse
 			}
 			seen[n.Metadata.Name] = true
+			seenUIDs[n.Metadata.UID] = true
 			nodes = append(nodes, n)
 		}
 		continuation = result.Metadata.Continue
