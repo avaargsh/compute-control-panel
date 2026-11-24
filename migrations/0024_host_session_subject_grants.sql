@@ -34,6 +34,7 @@ BEGIN
     END IF;
 
     IF EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members WHERE member=guard_owner_oid)
+       OR EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members WHERE roleid=guard_owner_oid)
        OR EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members WHERE member=writer_oid)
        OR EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members WHERE roleid=writer_oid) THEN
         RAISE EXCEPTION 'HostSession owner/writer roles have unexpected memberships';
@@ -418,6 +419,11 @@ DECLARE
 BEGIN
     SELECT oid INTO guard_owner_oid FROM pg_catalog.pg_roles WHERE rolname='ccp_host_session_guard_owner';
     SELECT oid INTO writer_oid FROM pg_catalog.pg_roles WHERE rolname='ccp_host_session_writer';
+
+    IF pg_catalog.has_schema_privilege(guard_owner_oid,'public','CREATE')
+       OR pg_catalog.has_schema_privilege(writer_oid,'public','CREATE') THEN
+        RAISE EXCEPTION 'HostSession owner/writer roles must not retain schema CREATE';
+    END IF;
 
     IF EXISTS (
         SELECT 1 FROM pg_catalog.pg_class c
