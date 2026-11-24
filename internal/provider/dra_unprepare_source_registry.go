@@ -80,10 +80,12 @@ func verifyRegisteredDRAUnprepareSource(
 	return nil
 }
 
-// ResolveRegisteredDRAUnprepareVerifier resolves a signer exclusively from
-// the independently DBA-provisioned source registry. It is deliberately
-// candidate-free: no Provider Operation, Kueue, Pod or ResourceClaim history
-// is queried before the HTTP ingress verifies the signed envelope.
+// ResolveRegisteredDRAUnprepareVerifier resolves the exact Provider scope
+// and signer exclusively from the independently DBA-provisioned source
+// registry. It is deliberately candidate-free: no Provider Operation, Kueue,
+// Pod or ResourceClaim history is queried before the HTTP ingress verifies
+// the signed envelope. The returned Provider ID must fence every later
+// historical evidence query and the candidate's CREATE/DELETE/absence rows.
 //
 // The restricted journal login is required because it is the only existing
 // runtime role granted read access to source keys/revocations. The lookup
