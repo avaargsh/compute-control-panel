@@ -190,3 +190,55 @@ func TestRestrictedDRAJournalRequiresExactSourceScopeAndFreshness(t *testing.T) 
 		})
 	}
 }
+
+
+func TestRestrictedDRAJournalResolvesRegisteredVerifierBeforeHistoricalCandidate(t *testing.T) {
+	admin := openProviderPostgresDB(t)
+	if !postgresCurrentUserIsSuperuser(t, admin) {
+		t.Skip("disposable PostgreSQL superuser required to seed independently authorized key")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	journal, db, err := OpenRestrictedDRAUnprepareReceiptJournal(ctx,
+		kueueBindingDSN(t, draReceiptIngestRole, draReceiptIngestCITestPassword, ""))
+	if err != nil {
+		t.Fatalf("restricted journal: %v", err)
+	}
+	defer db.Close()
+
+	verifier, receipt, _ := liveJournalReceiptFixture(t)
+	candidate := releaseCandidateFixture()
+	if resolved, databaseNow, err := journal.ResolveRegisteredDRAUnprepareVerifier(
+		ctx, candidate.Delete.TenantID, receipt.Event,
+	); !errors.Is(err, ErrDRAReceiptSourceUntrusted) || resolved != nil || !databaseNow.IsZero() {
+		t.Fatalf("unregistered source resolved: verifier=%v databaseNow=%v err=%v", resolved, databaseNow, err)
+	}
+
+	seedTrustedDRAReceiptSource(t, admin, verifier, receipt, candidate)
+	resolved, databaseNow, err := journal.ResolveRegisteredDRAUnprepareVerifier(
+		ctx, candidate.Delete.TenantID, receipt.Event,
+	)
+	if err != nil || resolved == nil || databaseNow.IsZero() {
+		t.Fatalf("DBA-registered source did not resolve: verifier=%v databaseNow=%v err=%v", resolved, databaseNow, err)
+	}
+	if err := resolved.VerifySignedEnvelope(receipt, databaseNow); err != nil {
+		t.Fatalf("resolved verifier rejected current signed event against PostgreSQL time: %v", err)
+	}
+
+	if resolved, databaseNow, err := journal.ResolveRegisteredDRAUnprepareVerifier(
+		ctx, "tenant-foreign", receipt.Event,
+	); !errors.Is(err, ErrDRAReceiptSourceUntrusted) || resolved != nil || !databaseNow.IsZero() {
+		t.Fatalf("cross-tenant source resolved: verifier=%v databaseNow=%v err=%v", resolved, databaseNow, err)
+	}
+
+	if _, err := admin.ExecContext(ctx, `INSERT INTO public.dra_unprepare_source_revocations
+		(cluster_id, source_id, key_id, reason) VALUES ($1,$2,$3,'DBA revoked test source')`,
+		receipt.Event.ClusterID, receipt.Event.SourceID, receipt.Event.KeyID); err != nil {
+		t.Fatalf("DBA source revocation: %v", err)
+	}
+	if resolved, databaseNow, err := journal.ResolveRegisteredDRAUnprepareVerifier(
+		ctx, candidate.Delete.TenantID, receipt.Event,
+	); !errors.Is(err, ErrDRAReceiptSourceUntrusted) || resolved != nil || !databaseNow.IsZero() {
+		t.Fatalf("revoked source resolved: verifier=%v databaseNow=%v err=%v", resolved, databaseNow, err)
+	}
+}
