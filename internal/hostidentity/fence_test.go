@@ -11,7 +11,7 @@ func TestHeartbeatFence(t *testing.T) {
 	digest := "sha256:" + strings.Repeat("a", 64)
 	otherDigest := "sha256:" + strings.Repeat("b", 64)
 	binding := Binding{HostID: "host-a", ProviderID: "provider-a", ClusterScope: "cluster-a", NodeUID: "node-uid-a", Subject: "spiffe://ccp.example/host/a"}
-	current := SessionFence{Binding: binding, Epoch: 3, SessionID: "session-3", LastSequence: 7, LastDigest: digest, ExpiresAt: now.Add(time.Minute)}
+	current := SessionFence{Binding: binding, Epoch: 3, SessionID: "session-3", LastSequence: 7, LastDigest: digest, IssuedAt: now.Add(-time.Minute), LastRecordedAt: now.Add(-time.Second), ExpiresAt: now.Add(time.Minute)}
 	heartbeat := Heartbeat{Binding: binding, Epoch: 3, SessionID: "session-3", Sequence: 8, Digest: digest}
 	for _, tc := range []struct {
 		name   string
@@ -38,8 +38,20 @@ func TestHeartbeatFence(t *testing.T) {
 		{name: "first valid heartbeat", mutate: func(s *SessionFence, h *Heartbeat, _ *time.Time) {
 			s.LastSequence = 0
 			s.LastDigest = ""
+			s.LastRecordedAt = time.Time{}
 			h.Sequence = 1
 		}, want: Accept},
+		{name: "clock before issuance", mutate: func(s *SessionFence, _ *Heartbeat, n *time.Time) { *n = s.IssuedAt.Add(-time.Nanosecond) }, want: Reject},
+		{name: "clock rollback before last receipt", mutate: func(s *SessionFence, _ *Heartbeat, n *time.Time) { *n = s.LastRecordedAt.Add(-time.Nanosecond) }, want: Reject},
+		{name: "same timestamp as last receipt", mutate: func(s *SessionFence, _ *Heartbeat, n *time.Time) { *n = s.LastRecordedAt }, want: Accept},
+		{name: "replay during rollback", mutate: func(s *SessionFence, h *Heartbeat, n *time.Time) {
+			*n = s.LastRecordedAt.Add(-time.Nanosecond)
+			h.Sequence = s.LastSequence
+		}, want: Reject},
+		{name: "missing issuance", mutate: func(s *SessionFence, _ *Heartbeat, _ *time.Time) { s.IssuedAt = time.Time{} }, want: Reject},
+		{name: "missing receipt time", mutate: func(s *SessionFence, _ *Heartbeat, _ *time.Time) { s.LastRecordedAt = time.Time{} }, want: Reject},
+		{name: "receipt predates issuance", mutate: func(s *SessionFence, _ *Heartbeat, _ *time.Time) { s.LastRecordedAt = s.IssuedAt.Add(-time.Nanosecond) }, want: Reject},
+		{name: "receipt without sequence", mutate: func(s *SessionFence, _ *Heartbeat, _ *time.Time) { s.LastSequence = 0; s.LastDigest = "" }, want: Reject},
 		{name: "zero sequence", mutate: func(_ *SessionFence, h *Heartbeat, _ *time.Time) { h.Sequence = 0 }, want: Reject},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

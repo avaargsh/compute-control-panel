@@ -21,13 +21,18 @@ type Binding struct {
 // SessionFence is a snapshot of a server-owned, durably persisted session.
 // Epoch and SessionID are issued by the repository; the caller must read and
 // lock the current row before evaluating and atomically recording a heartbeat.
+// IssuedAt and LastRecordedAt are authoritative server-clock lower bounds,
+// not timestamps supplied by the remote host. LastRecordedAt is zero until
+// the first accepted heartbeat.
 type SessionFence struct {
-	Binding      Binding
-	Epoch        int64
-	SessionID    string
-	LastSequence int64
-	LastDigest   string
-	ExpiresAt    time.Time
+	Binding        Binding
+	Epoch          int64
+	SessionID      string
+	LastSequence   int64
+	LastDigest     string
+	IssuedAt       time.Time
+	LastRecordedAt time.Time
+	ExpiresAt      time.Time
 }
 
 // Heartbeat is a normalized observation after independent authentication and
@@ -75,11 +80,13 @@ func validDigest(value string) bool {
 // transactional observation write; REPLAY must not extend session expiry.
 // Neither outcome establishes hardware trust, capacity or GPU readiness.
 func EvaluateHeartbeat(current SessionFence, incoming Heartbeat, now time.Time) Disposition {
-	if now.IsZero() || current.ExpiresAt.IsZero() || !now.Before(current.ExpiresAt) ||
+	if now.IsZero() || current.IssuedAt.IsZero() || current.ExpiresAt.IsZero() ||
+		!current.IssuedAt.Before(current.ExpiresAt) || now.Before(current.IssuedAt) || !now.Before(current.ExpiresAt) ||
 		!validBinding(current.Binding) || current.Epoch <= 0 || !validIdentity(current.SessionID) ||
 		current.LastSequence < 0 ||
-		(current.LastSequence == 0 && current.LastDigest != "") ||
-		(current.LastSequence > 0 && !validDigest(current.LastDigest)) {
+		(current.LastSequence == 0 && (current.LastDigest != "" || !current.LastRecordedAt.IsZero())) ||
+		(current.LastSequence > 0 && (!validDigest(current.LastDigest) || current.LastRecordedAt.IsZero() ||
+			current.LastRecordedAt.Before(current.IssuedAt) || now.Before(current.LastRecordedAt))) {
 		return Reject
 	}
 	if incoming.Binding != current.Binding || incoming.Epoch != current.Epoch ||
