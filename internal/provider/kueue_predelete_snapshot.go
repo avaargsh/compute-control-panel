@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"reflect"
 	"strings"
 	"time"
@@ -149,7 +148,7 @@ func (a *KueueJobAdapter) RecordPreDeleteDRASnapshot(
 		return reject(err)
 	}
 	devices, valid := canonicalDRADeviceSet(deviceSet.Devices, deviceSet.Devices[0].Request)
-	if !valid || deviceSet.Pod != bound.Evidence.Pod ||
+	if len(deviceSet.Devices) == 0 || !valid || deviceSet.Pod != bound.Evidence.Pod ||
 		deviceSet.NodeName != bound.Evidence.PodNodeName ||
 		deviceSet.Claim.Namespace != a.namespace ||
 		deviceSet.ClaimTemplateName != a.resourceClaimTemplateName ||
@@ -179,7 +178,7 @@ func preDeleteSnapshotMatchesDelete(snapshot KueuePreDeleteDRASnapshot, namespac
 		snapshot.DeleteOperationID == req.OperationID &&
 		snapshot.DeleteGeneration == req.DesiredGeneration &&
 		snapshot.Job.Namespace == namespace &&
-		snapshot.Job.Name == strings.TrimPrefix(req.TargetResourceID, namespace+"/") &&
+		req.TargetResourceID == namespace+"/"+snapshot.Job.Name &&
 		snapshot.Job.UID == req.TargetResourceUID &&
 		snapshot.ClaimTemplateName == templateName &&
 		snapshot.Digest == kueuePreDeleteSnapshotDigest(snapshot) &&
@@ -190,4 +189,3 @@ func preDeleteSnapshotMatchesDelete(snapshot KueuePreDeleteDRASnapshot, namespac
 		}())
 }
 
-var _ = fmt.Sprintf
