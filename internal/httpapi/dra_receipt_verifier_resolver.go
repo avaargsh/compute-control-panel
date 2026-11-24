@@ -14,7 +14,7 @@ import (
 // signature and freshness verification. Keep this interface package-private:
 // production construction below accepts only the restricted journal type.
 type registeredDRAReceiptVerifierSource interface {
-	ResolveRegisteredDRAUnprepareVerifier(context.Context, string, provider.DRAUnprepareEvent) (*provider.DRAUnprepareVerifier, time.Time, error)
+	ResolveRegisteredDRAUnprepareVerifier(context.Context, string, provider.DRAUnprepareEvent) (string, *provider.DRAUnprepareVerifier, time.Time, error)
 }
 
 // RegisteredDRAReceiptVerifierResolver adapts the restricted PostgreSQL
@@ -42,14 +42,17 @@ func (r *RegisteredDRAReceiptVerifierResolver) ResolveDRAReceiptVerifier(
 		!validWorkloadPrincipal(principal) || principal.Service != "dra-node-driver" {
 		return DRAReceiptVerifierResolution{}, provider.ErrDRAReceiptSourceUntrusted
 	}
-	verifier, databaseNow, err := r.source.ResolveRegisteredDRAUnprepareVerifier(ctx, principal.TenantID, event)
+	providerID, verifier, databaseNow, err := r.source.ResolveRegisteredDRAUnprepareVerifier(ctx, principal.TenantID, event)
 	if err != nil {
 		return DRAReceiptVerifierResolution{}, err
+	}
+	if !validDRAReceiptProviderID(providerID) {
+		return DRAReceiptVerifierResolution{}, provider.ErrDRAReceiptSourceUntrusted
 	}
 	if verifier == nil || databaseNow.IsZero() {
 		return DRAReceiptVerifierResolution{}, provider.ErrDRAReceiptJournalUnavailable
 	}
-	return DRAReceiptVerifierResolution{Verifier: verifier, DatabaseNow: databaseNow}, nil
+	return DRAReceiptVerifierResolution{ProviderID: providerID, Verifier: verifier, DatabaseNow: databaseNow}, nil
 }
 
 var _ DRAReceiptVerifierResolver = (*RegisteredDRAReceiptVerifierResolver)(nil)

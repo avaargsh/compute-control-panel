@@ -12,21 +12,22 @@ import (
 )
 
 type registeredDRAReceiptVerifierSourceStub struct {
-	calls    int
-	tenantID string
-	event    provider.DRAUnprepareEvent
-	verifier *provider.DRAUnprepareVerifier
-	database time.Time
-	err      error
+	calls      int
+	tenantID   string
+	providerID string
+	event      provider.DRAUnprepareEvent
+	verifier   *provider.DRAUnprepareVerifier
+	database   time.Time
+	err        error
 }
 
 func (s *registeredDRAReceiptVerifierSourceStub) ResolveRegisteredDRAUnprepareVerifier(
 	_ context.Context, tenantID string, event provider.DRAUnprepareEvent,
-) (*provider.DRAUnprepareVerifier, time.Time, error) {
+) (string, *provider.DRAUnprepareVerifier, time.Time, error) {
 	s.calls++
 	s.tenantID = tenantID
 	s.event = event
-	return s.verifier, s.database, s.err
+	return s.providerID, s.verifier, s.database, s.err
 }
 
 func registeredDRAReceiptTestVerifier(t *testing.T) *provider.DRAUnprepareVerifier {
@@ -53,8 +54,9 @@ func registeredDRAReceiptTestPrincipal() WorkloadPrincipal {
 func TestRegisteredDRAReceiptVerifierResolverUsesAuthenticatedTenantAndDatabaseClock(t *testing.T) {
 	databaseNow := time.Date(2026, 11, 24, 9, 0, 0, 0, time.UTC)
 	source := &registeredDRAReceiptVerifierSourceStub{
-		verifier: registeredDRAReceiptTestVerifier(t),
-		database: databaseNow,
+		providerID: "provider-a",
+		verifier:   registeredDRAReceiptTestVerifier(t),
+		database:   databaseNow,
 	}
 	resolver := &RegisteredDRAReceiptVerifierResolver{source: source}
 	event := provider.DRAUnprepareEvent{ClusterID: "cluster-a", SourceID: "source-a", KeyID: "key-a"}
@@ -65,7 +67,7 @@ func TestRegisteredDRAReceiptVerifierResolverUsesAuthenticatedTenantAndDatabaseC
 	if source.calls != 1 || source.tenantID != "tenant-a" || source.event != event {
 		t.Fatalf("registry lookup did not use authenticated scope: calls=%d tenant=%q event=%+v", source.calls, source.tenantID, source.event)
 	}
-	if got.Verifier != source.verifier || !got.DatabaseNow.Equal(databaseNow) {
+	if got.ProviderID != "provider-a" || got.Verifier != source.verifier || !got.DatabaseNow.Equal(databaseNow) {
 		t.Fatalf("resolver changed verifier/DB clock: got=%+v", got)
 	}
 }
@@ -84,10 +86,21 @@ func TestRegisteredDRAReceiptVerifierResolverRejectsNonDriverPrincipalBeforeLook
 }
 
 func TestRegisteredDRAReceiptVerifierResolverRejectsMissingDatabaseClock(t *testing.T) {
-	source := &registeredDRAReceiptVerifierSourceStub{verifier: registeredDRAReceiptTestVerifier(t)}
+	source := &registeredDRAReceiptVerifierSourceStub{providerID: "provider-a", verifier: registeredDRAReceiptTestVerifier(t)}
 	resolver := &RegisteredDRAReceiptVerifierResolver{source: source}
 	if _, err := resolver.ResolveDRAReceiptVerifier(context.Background(), registeredDRAReceiptTestPrincipal(), provider.DRAUnprepareEvent{}); !errors.Is(err, provider.ErrDRAReceiptJournalUnavailable) {
 		t.Fatalf("missing registry clock did not fail closed: %v", err)
+	}
+}
+
+func TestRegisteredDRAReceiptVerifierResolverRejectsMissingRegisteredProvider(t *testing.T) {
+	source := &registeredDRAReceiptVerifierSourceStub{
+		verifier: registeredDRAReceiptTestVerifier(t),
+		database: time.Now().UTC(),
+	}
+	resolver := &RegisteredDRAReceiptVerifierResolver{source: source}
+	if got, err := resolver.ResolveDRAReceiptVerifier(context.Background(), registeredDRAReceiptTestPrincipal(), provider.DRAUnprepareEvent{}); !errors.Is(err, provider.ErrDRAReceiptSourceUntrusted) || got.ProviderID != "" || got.Verifier != nil {
+		t.Fatalf("missing registered Provider was accepted: resolution=%+v err=%v", got, err)
 	}
 }
 

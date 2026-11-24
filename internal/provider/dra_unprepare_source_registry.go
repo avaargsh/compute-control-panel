@@ -80,10 +80,12 @@ func verifyRegisteredDRAUnprepareSource(
 	return nil
 }
 
-// ResolveRegisteredDRAUnprepareVerifier resolves a signer exclusively from
-// the independently DBA-provisioned source registry. It is deliberately
-// candidate-free: no Provider Operation, Kueue, Pod or ResourceClaim history
-// is queried before the HTTP ingress verifies the signed envelope.
+// ResolveRegisteredDRAUnprepareVerifier resolves the exact Provider scope
+// and signer exclusively from the independently DBA-provisioned source
+// registry. It is deliberately candidate-free: no Provider Operation, Kueue,
+// Pod or ResourceClaim history is queried before the HTTP ingress verifies
+// the signed envelope. The returned Provider ID must fence every later
+// historical evidence query and the candidate's CREATE/DELETE/absence rows.
 //
 // The restricted journal login is required because it is the only existing
 // runtime role granted read access to source keys/revocations. The lookup
@@ -93,32 +95,32 @@ func verifyRegisteredDRAUnprepareSource(
 // The journal repeats the live-clock and revocation checks when it records.
 func (j *DRAUnprepareReceiptJournal) ResolveRegisteredDRAUnprepareVerifier(
 	ctx context.Context, tenantID string, event DRAUnprepareEvent,
-) (*DRAUnprepareVerifier, time.Time, error) {
+) (string, *DRAUnprepareVerifier, time.Time, error) {
 	if j == nil || j.db == nil || !j.restricted {
-		return nil, time.Time{}, ErrDRAReceiptJournalRole
+		return "", nil, time.Time{}, ErrDRAReceiptJournalRole
 	}
 	if ctx == nil || !validDRAIdentity(tenantID) ||
 		!validDRAIdentity(event.ClusterID) || !validDRAIdentity(event.SourceID) ||
 		!validDRAIdentity(event.KeyID) || !validDRAIdentity(event.Driver) ||
 		event.CompletedAt.IsZero() {
-		return nil, time.Time{}, ErrDRAReceiptSourceUntrusted
+		return "", nil, time.Time{}, ErrDRAReceiptSourceUntrusted
 	}
 
 	conn, err := j.db.Conn(ctx)
 	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("%w: open source-registry session: %v", ErrDRAReceiptJournalUnavailable, err)
+		return "", nil, time.Time{}, fmt.Errorf("%w: open source-registry session: %v", ErrDRAReceiptJournalUnavailable, err)
 	}
 	defer conn.Close()
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("%w: begin source-registry transaction: %v", ErrDRAReceiptJournalUnavailable, err)
+		return "", nil, time.Time{}, fmt.Errorf("%w: begin source-registry transaction: %v", ErrDRAReceiptJournalUnavailable, err)
 	}
 	defer tx.Rollback()
 	if err := verifyDRAJournalSchema(ctx, tx); err != nil {
-		return nil, time.Time{}, err
+		return "", nil, time.Time{}, err
 	}
 	if err := verifyDRAJournalRole(ctx, tx); err != nil {
-		return nil, time.Time{}, err
+		return "", nil, time.Time{}, err
 	}
 
 	var providerID string
@@ -136,13 +138,13 @@ func (j *DRAUnprepareReceiptJournal) ResolveRegisteredDRAUnprepareVerifier(
 		event.Driver, event.CompletedAt,
 	).Scan(&providerID, &publicKey, &maximumAgeSeconds, &futureSkewSeconds)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, time.Time{}, ErrDRAReceiptSourceUntrusted
+		return "", nil, time.Time{}, ErrDRAReceiptSourceUntrusted
 	}
 	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("%w: lock DBA-registered DRA signer: %v", ErrDRAReceiptJournalUnavailable, err)
+		return "", nil, time.Time{}, fmt.Errorf("%w: lock DBA-registered DRA signer: %v", ErrDRAReceiptJournalUnavailable, err)
 	}
 	if !validDRAIdentity(providerID) || len(publicKey) != ed25519.PublicKeySize {
-		return nil, time.Time{}, ErrDRAReceiptSourceUntrusted
+		return "", nil, time.Time{}, ErrDRAReceiptSourceUntrusted
 	}
 
 	// Re-read revocation and validity only AFTER FOR UPDATE has acquired the
@@ -171,23 +173,23 @@ func (j *DRAUnprepareReceiptJournal) ResolveRegisteredDRAUnprepareVerifier(
 	`, event.ClusterID, event.SourceID, event.KeyID, tenantID, event.Driver,
 	).Scan(&databaseNow, &currentlyValid, &revoked)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, time.Time{}, ErrDRAReceiptSourceUntrusted
+		return "", nil, time.Time{}, ErrDRAReceiptSourceUntrusted
 	}
 	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("%w: recheck DBA DRA signer validity and revocation: %v", ErrDRAReceiptJournalUnavailable, err)
+		return "", nil, time.Time{}, fmt.Errorf("%w: recheck DBA DRA signer validity and revocation: %v", ErrDRAReceiptJournalUnavailable, err)
 	}
 	if !currentlyValid || revoked || databaseNow.IsZero() {
-		return nil, time.Time{}, ErrDRAReceiptSourceUntrusted
+		return "", nil, time.Time{}, ErrDRAReceiptSourceUntrusted
 	}
 	verifier, err := NewDRAUnprepareVerifier(DRAUnprepareAuthority{
 		ClusterID: event.ClusterID, SourceID: event.SourceID, KeyID: event.KeyID,
 		Driver: event.Driver, PublicKey: ed25519.PublicKey(publicKey),
 	}, time.Duration(maximumAgeSeconds)*time.Second, time.Duration(futureSkewSeconds)*time.Second)
 	if err != nil {
-		return nil, time.Time{}, ErrDRAReceiptSourceUntrusted
+		return "", nil, time.Time{}, ErrDRAReceiptSourceUntrusted
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, time.Time{}, fmt.Errorf("%w: finish source-registry lookup: %v", ErrDRAReceiptJournalUnavailable, err)
+		return "", nil, time.Time{}, fmt.Errorf("%w: finish source-registry lookup: %v", ErrDRAReceiptJournalUnavailable, err)
 	}
-	return verifier, databaseNow.UTC(), nil
+	return providerID, verifier, databaseNow.UTC(), nil
 }
