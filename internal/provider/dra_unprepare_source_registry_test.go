@@ -241,3 +241,21 @@ func TestRestrictedDRAJournalResolvesRegisteredVerifierBeforeHistoricalCandidate
 		t.Fatalf("revoked source resolved: verifier=%v databaseNow=%v err=%v", resolved, databaseNow, err)
 	}
 }
+
+
+func TestUncheckedDRAJournalCannotResolveRegisteredVerifier(t *testing.T) {
+	admin := openProviderPostgresDB(t)
+	journal, err := NewDRAUnprepareReceiptJournal(admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, databaseNow, err := journal.ResolveRegisteredDRAUnprepareVerifier(
+		context.Background(), "tenant-a", DRAUnprepareEvent{
+			ClusterID: "cluster-a", SourceID: "source-a", KeyID: "key-a",
+			Driver: "gpu.example.com", CompletedAt: time.Now().UTC(),
+		},
+	)
+	if !errors.Is(err, ErrDRAReceiptJournalRole) || !databaseNow.IsZero() {
+		t.Fatalf("unchecked journal resolved trusted source: databaseNow=%v err=%v", databaseNow, err)
+	}
+}
