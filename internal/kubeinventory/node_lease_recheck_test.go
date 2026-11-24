@@ -46,8 +46,8 @@ func TestNodeLeaseSourceRejectsChangedSecondLease(t *testing.T) {
 func TestNodeLeaseSourceRejectsClockRollbackAndExpiredCollection(t *testing.T) {
 	start := time.Date(2026, 11, 21, 8, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {
-		name  string
-		end   time.Time
+		name   string
+		end    time.Time
 		lease  string
 		maxAge time.Duration
 	}{
