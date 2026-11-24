@@ -1,6 +1,6 @@
 # HostIdentity PostgreSQL enrollment boundary
 
-Status: **unmounted authenticated-ingress candidate**. Immutable HostIdentity bindings and durable session-epoch/heartbeat receipts exist in PostgreSQL. The dedicated host-only X.509 verifier, revocable subject-grant boundary and standalone session/heartbeat HTTP handler are implemented in PR #197 but are not mounted. No independent hardware attestation, administrator enrollment workflow, OCSP, Kubernetes Lease ingestion, hardware trust, or GPU capacity authority is enabled. The unmounted host verifier now supports an explicit static issuer-CRL bundle; this is not an OCSP or dynamic CRL distribution service.
+Status: **unmounted authenticated-ingress candidate**. Immutable HostIdentity bindings and durable session-epoch/heartbeat receipts exist in PostgreSQL. The dedicated host-only X.509 verifier, revocable subject-grant boundary and standalone session/heartbeat HTTP handler are implemented in PR #197; static issuer-CRL enforcement is added in PR #203. The handler remains unmounted. No independent hardware attestation, administrator enrollment workflow, OCSP, Kubernetes Lease ingestion, hardware trust, or GPU capacity authority is enabled. The unmounted host verifier now supports an explicit static issuer-CRL bundle; this is not an OCSP or dynamic CRL distribution service.
 
 ## Authority and lifecycle
 
@@ -142,7 +142,7 @@ The handler registers routes only on a private mux returned by `NewHostSessionIn
 | CRL rotation or OCSP response required | CRL bundle is startup-loaded and requires handler restart; OCSP is unsupported. Keep listener unmounted if dynamic refresh/OCSP is mandatory |
 | Missing TPM/TEE/Node Lease/device evidence | No hardware trust, GPU READY/free/released or capacity assertion |
 
-This is an internal software identity and durable session boundary only. It does not add an enrollment API, hardware attestation, OCSP validation or dynamic CRL refresh, Kubernetes Lease freshness, physical GPU UUID evidence, health, DRA release, G04/G05 or Cost FINAL. Keep the handler unmounted until the independent machine authority, operational grant provisioning, certificate revocation decision, dedicated listener configuration, exact-head CI and branch governance are separately approved.
+This is an internal software identity and durable session boundary only. It does not add an enrollment API, hardware attestation, OCSP validation or dynamic CRL refresh, Kubernetes Lease freshness, physical GPU UUID evidence, health, DRA release, G04/G05 or Cost FINAL. Keep the handler unmounted until the independent machine authority, operational grant provisioning, CRL refresh/OCSP operating requirements, dedicated listener configuration, independent security review, exact-head CI and branch governance are separately approved.
 
 ## Session verification
 
