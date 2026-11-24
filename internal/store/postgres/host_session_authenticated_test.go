@@ -423,7 +423,6 @@ func TestAuthenticatedHostSessionGrantExpiresWhileWaitingForProvider(t *testing.
 	}
 }
 
-
 func TestHostSessionSubjectGrantRevocationFencesConcurrentStart(t *testing.T) {
 	admin := openIntegrationDB(t)
 	_, binding := hostSessionFixture(t, admin)
@@ -514,7 +513,6 @@ func TestHostSessionSubjectGrantRevocationFencesConcurrentStart(t *testing.T) {
 
 // Authorization expiry is checked after the raw heartbeat has waited on the
 // Provider lock; a preflight check alone must never authorize a late receipt.
-
 
 func TestAuthenticatedHostHeartbeatGrantExpiresWhileWaitingForProvider(t *testing.T) {
 	admin := openIntegrationDB(t)
