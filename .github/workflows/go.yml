@@ -5,6 +5,10 @@ on:
     branches: [main, "feat/go-foundation"]
   pull_request:
 
+concurrency:
+  group: ccp-go-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
