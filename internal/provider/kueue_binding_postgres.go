@@ -3,7 +3,9 @@ package provider
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"reflect"
 	"fmt"
 	"math"
 	"time"
@@ -23,6 +25,11 @@ const selectKueueCreatePinSQL = `
 	SELECT ` + kueueCreatePinColumns + `
 	FROM public.kueue_job_create_pins
 	WHERE namespace = $1 AND tenant_id = $2 AND operation_id = $3`
+
+const selectKueueCreatePinByJobSQL = `
+	SELECT ` + kueueCreatePinColumns + `
+	FROM public.kueue_job_create_pins
+	WHERE namespace = $1 AND tenant_id = $2 AND job_name = $3`
 
 const insertKueueCreatePinSQL = `
 	INSERT INTO public.kueue_job_create_pins (` + kueueCreatePinColumns + `)
@@ -44,6 +51,25 @@ const acknowledgeKueueDeleteTombstoneSQL = `
 	SET acknowledged = TRUE, updated_at = pg_catalog.clock_timestamp()
 	WHERE namespace = $1 AND tenant_id = $2 AND operation_id = $3
 	  AND acknowledged = FALSE`
+
+const kueuePreDeleteSnapshotColumns = `
+	namespace, tenant_id, delete_operation_id, create_operation_id,
+	workload_id, provider_id, create_generation, delete_generation,
+	job_name, job_uid, job_resource_version,
+	kueue_workload_name, kueue_workload_uid, kueue_workload_resource_version,
+	pod_name, pod_uid, pod_resource_version, node_name,
+	claim_name, claim_uid, claim_resource_version, claim_template_name,
+	pod_claim_alias, consumer_container, devices, source, adapter_version,
+	observed_at, snapshot_digest`
+
+const selectKueuePreDeleteSnapshotSQL = `
+	SELECT ` + kueuePreDeleteSnapshotColumns + `
+	FROM public.kueue_job_pre_delete_dra_snapshots
+	WHERE namespace = $1 AND tenant_id = $2 AND delete_operation_id = $3`
+
+const insertKueuePreDeleteSnapshotSQL = `
+	INSERT INTO public.kueue_job_pre_delete_dra_snapshots (` + kueuePreDeleteSnapshotColumns + `)
+	VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)`
 
 // PostgresKueueJobBindingStore is the PostgreSQL KueueJobBindingStore.
 // A later process loads the same CREATE pin and DELETE tombstone by opening
@@ -87,6 +113,21 @@ func (s *PostgresKueueJobBindingStore) GetCreatePin(namespace string, req Reques
 	pin, ok, err := queryKueueCreatePin(ctx, s.db, selectKueueCreatePinSQL, namespace, req.TenantID, req.OperationID)
 	if err != nil {
 		return KueueCreatePin{}, false, fmt.Errorf("read kueue create pin: %w", err)
+	}
+	return pin, ok, nil
+}
+
+// GetCreatePinByJob resolves the immutable CREATE pin by unique namespace/Job name.
+func (s *PostgresKueueJobBindingStore) GetCreatePinByJob(namespace, tenantID, jobName string) (KueueCreatePin, bool, error) {
+	if err := s.usable(); err != nil || !validKubeName(namespace) || tenantID == "" ||
+		tenantID != strings.TrimSpace(tenantID) || !validKubeName(jobName) {
+		return KueueCreatePin{}, false, ErrInvalidKueueObservation
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), kueueBindingQueryTimeout)
+	defer cancel()
+	pin, ok, err := queryKueueCreatePinByJob(ctx, s.db, selectKueueCreatePinByJobSQL, namespace, tenantID, jobName)
+	if err != nil {
+		return KueueCreatePin{}, false, fmt.Errorf("read kueue create pin by Job: %w", err)
 	}
 	return pin, ok, nil
 }
@@ -188,6 +229,17 @@ func (s *PostgresKueueJobBindingStore) putDeleteTombstoneOnce(namespace string, 
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// Snapshot capture and DELETE intent serialize on the immutable CREATE pin.
+	// A snapshot can only be inserted before this transaction creates the
+	// tombstone; a tombstone winner makes a missing snapshot permanently late.
+	pin, pinned, err := queryKueueCreatePinByJob(ctx, tx, selectKueueCreatePinByJobSQL+" FOR UPDATE", namespace, req.TenantID, name)
+	if err != nil {
+		return err
+	}
+	if pinned && (pin.UID != uid || pin.Request.WorkloadID != req.WorkloadID || pin.Request.ProviderID != req.ProviderID) {
+		return ErrOperationConflict
+	}
+
 	tomb, ok, err := queryKueueDeleteTombstone(ctx, tx, selectKueueDeleteTombstoneSQL+" FOR UPDATE", namespace, req.TenantID, req.OperationID)
 	if err != nil {
 		return err
@@ -222,6 +274,96 @@ func (s *PostgresKueueJobBindingStore) putDeleteTombstoneOnce(namespace string, 
 		return err
 	}
 	return tx.Commit()
+}
+
+// PutPreDeleteDRASnapshot stores one immutable snapshot before the matching
+// DELETE tombstone. Both writers lock the same CREATE pin row, so concurrent
+// capture and DELETE intent have a deterministic winner.
+func (s *PostgresKueueJobBindingStore) PutPreDeleteDRASnapshot(
+	namespace string, req Request, snapshot KueuePreDeleteDRASnapshot,
+) (KueuePreDeleteDRASnapshot, error) {
+	if err := s.usable(); err != nil || !validKubeName(namespace) {
+		return KueuePreDeleteDRASnapshot{}, ErrInvalidKueueObservation
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), kueueBindingQueryTimeout)
+	defer cancel()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return KueuePreDeleteDRASnapshot{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	pin, ok, err := queryKueueCreatePinByJob(ctx, tx, selectKueueCreatePinByJobSQL+" FOR UPDATE", namespace, req.TenantID, snapshot.Job.Name)
+	if err != nil {
+		return KueuePreDeleteDRASnapshot{}, err
+	}
+	if !ok {
+		return KueuePreDeleteDRASnapshot{}, ErrOperationConflict
+	}
+	canonical, err := validateKueuePreDeleteDRASnapshot(namespace, req, pin, snapshot)
+	if err != nil {
+		return KueuePreDeleteDRASnapshot{}, err
+	}
+	previous, exists, err := queryKueuePreDeleteSnapshot(ctx, tx, selectKueuePreDeleteSnapshotSQL+" FOR UPDATE",
+		namespace, req.TenantID, req.OperationID)
+	if err != nil {
+		return KueuePreDeleteDRASnapshot{}, err
+	}
+	if exists {
+		if previous.Digest != canonical.Digest {
+			return KueuePreDeleteDRASnapshot{}, ErrOperationConflict
+		}
+		if err := tx.Commit(); err != nil {
+			return KueuePreDeleteDRASnapshot{}, err
+		}
+		return previous, nil
+	}
+	tomb, hasTombstone, err := queryKueueDeleteTombstone(ctx, tx,
+		selectKueueDeleteTombstoneSQL+" FOR UPDATE", namespace, req.TenantID, req.OperationID)
+	if err != nil {
+		return KueuePreDeleteDRASnapshot{}, err
+	}
+	if hasTombstone {
+		return KueuePreDeleteDRASnapshot{}, ErrOperationConflict
+	}
+	devices, err := json.Marshal(canonical.Devices)
+	if err != nil {
+		return KueuePreDeleteDRASnapshot{}, ErrInvalidPreDeleteDRASnapshot
+	}
+	_, err = tx.ExecContext(ctx, insertKueuePreDeleteSnapshotSQL,
+		canonical.Namespace, canonical.TenantID, canonical.DeleteOperationID, canonical.CreateOperationID,
+		canonical.WorkloadID, canonical.ProviderID, int64(canonical.CreateGeneration), int64(canonical.DeleteGeneration),
+		canonical.Job.Name, canonical.Job.UID, canonical.Job.ResourceVersion,
+		canonical.KueueWorkload.Name, canonical.KueueWorkload.UID, canonical.KueueWorkload.ResourceVersion,
+		canonical.Pod.Name, canonical.Pod.UID, canonical.Pod.ResourceVersion, canonical.NodeName,
+		canonical.Claim.Name, canonical.Claim.UID, canonical.Claim.ResourceVersion, canonical.ClaimTemplateName,
+		canonical.PodClaimAlias, canonical.ConsumerContainer, devices, canonical.Source, canonical.AdapterVersion,
+		canonical.ObservedAt, canonical.Digest,
+	)
+	if err != nil {
+		return KueuePreDeleteDRASnapshot{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return KueuePreDeleteDRASnapshot{}, err
+	}
+	return canonical, nil
+}
+
+func (s *PostgresKueueJobBindingStore) GetPreDeleteDRASnapshot(
+	namespace string, req Request,
+) (KueuePreDeleteDRASnapshot, bool, error) {
+	if err := s.usable(); err != nil || !validKubeName(namespace) ||
+		req.Validate() != nil || req.Kind != operation.Delete {
+		return KueuePreDeleteDRASnapshot{}, false, ErrInvalidKueueObservation
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), kueueBindingQueryTimeout)
+	defer cancel()
+	snapshot, ok, err := queryKueuePreDeleteSnapshot(ctx, s.db, selectKueuePreDeleteSnapshotSQL,
+		namespace, req.TenantID, req.OperationID)
+	if err != nil {
+		return KueuePreDeleteDRASnapshot{}, false, fmt.Errorf("read pre-delete DRA snapshot: %w", err)
+	}
+	return snapshot, ok, nil
 }
 
 // CreatePinUID returns the trusted UID recorded for a Job name in this
@@ -281,6 +423,28 @@ func queryKueueCreatePin(ctx context.Context, q rowQuery, query, namespace, tena
 	return pin, true, nil
 }
 
+func queryKueueCreatePinByJob(ctx context.Context, q rowQuery, query, namespace, tenantID, jobName string) (KueueCreatePin, bool, error) {
+	pin, err := scanKueueCreatePin(q.QueryRowContext(ctx, query, namespace, tenantID, jobName))
+	if errors.Is(err, sql.ErrNoRows) {
+		return KueueCreatePin{}, false, nil
+	}
+	if err != nil {
+		return KueueCreatePin{}, false, err
+	}
+	return pin, true, nil
+}
+
+func queryKueuePreDeleteSnapshot(ctx context.Context, q rowQuery, query, namespace, tenantID, deleteOperationID string) (KueuePreDeleteDRASnapshot, bool, error) {
+	snapshot, err := scanKueuePreDeleteSnapshot(q.QueryRowContext(ctx, query, namespace, tenantID, deleteOperationID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return KueuePreDeleteDRASnapshot{}, false, nil
+	}
+	if err != nil {
+		return KueuePreDeleteDRASnapshot{}, false, err
+	}
+	return snapshot, true, nil
+}
+
 func queryKueueDeleteTombstone(ctx context.Context, q rowQuery, query, namespace, tenantID, operationID string) (KueueDeleteTombstone, bool, error) {
 	tomb, err := scanKueueDeleteTombstone(q.QueryRowContext(ctx, query, namespace, tenantID, operationID))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -316,6 +480,44 @@ func scanKueueCreatePin(row rowScanner) (KueueCreatePin, error) {
 	pin.Request.DesiredGeneration = uint64(generation)
 	pin.Request.Kind = operation.Kind(kind)
 	return pin, nil
+}
+
+func scanKueuePreDeleteSnapshot(row rowScanner) (KueuePreDeleteDRASnapshot, error) {
+	var snapshot KueuePreDeleteDRASnapshot
+	var createGeneration, deleteGeneration int64
+	var devices []byte
+	err := row.Scan(
+		&snapshot.Namespace, &snapshot.TenantID, &snapshot.DeleteOperationID, &snapshot.CreateOperationID,
+		&snapshot.WorkloadID, &snapshot.ProviderID, &createGeneration, &deleteGeneration,
+		&snapshot.Job.Name, &snapshot.Job.UID, &snapshot.Job.ResourceVersion,
+		&snapshot.KueueWorkload.Name, &snapshot.KueueWorkload.UID, &snapshot.KueueWorkload.ResourceVersion,
+		&snapshot.Pod.Name, &snapshot.Pod.UID, &snapshot.Pod.ResourceVersion, &snapshot.NodeName,
+		&snapshot.Claim.Name, &snapshot.Claim.UID, &snapshot.Claim.ResourceVersion, &snapshot.ClaimTemplateName,
+		&snapshot.PodClaimAlias, &snapshot.ConsumerContainer, &devices, &snapshot.Source,
+		&snapshot.AdapterVersion, &snapshot.ObservedAt, &snapshot.Digest,
+	)
+	if err != nil {
+		return KueuePreDeleteDRASnapshot{}, err
+	}
+	if createGeneration <= 0 || deleteGeneration <= 0 ||
+		json.Unmarshal(devices, &snapshot.Devices) != nil {
+		return KueuePreDeleteDRASnapshot{}, ErrInvalidPreDeleteDRASnapshot
+	}
+	snapshot.CreateGeneration = uint64(createGeneration)
+	snapshot.DeleteGeneration = uint64(deleteGeneration)
+	snapshot.Job.Namespace = snapshot.Namespace
+	snapshot.KueueWorkload.Namespace = snapshot.Namespace
+	snapshot.Pod.Namespace = snapshot.Namespace
+	snapshot.Claim.Namespace = snapshot.Namespace
+	canonicalDevices, ok := canonicalDRADeviceSet(snapshot.Devices, func() string {
+		if len(snapshot.Devices) == 0 { return "" }
+		return snapshot.Devices[0].Request
+	}())
+	if !ok || !reflect.DeepEqual(canonicalDevices, snapshot.Devices) ||
+		snapshot.Digest != kueuePreDeleteSnapshotDigest(snapshot) {
+		return KueuePreDeleteDRASnapshot{}, ErrInvalidPreDeleteDRASnapshot
+	}
+	return snapshot, nil
 }
 
 func scanKueueDeleteTombstone(row rowScanner) (KueueDeleteTombstone, error) {
