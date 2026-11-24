@@ -133,6 +133,13 @@ func TestHostSessionStartAndHeartbeatDatabaseContract(t *testing.T) {
 		hostSessionSQLState(err) != "23514" {
 		t.Fatalf("active epoch replacement after repository restart was not rejected: %v", err)
 	}
+	var sessionCount int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM public.compute_host_sessions WHERE host_id=$1`, binding.HostID).Scan(&sessionCount); err != nil {
+		t.Fatal(err)
+	}
+	if sessionCount != 1 {
+		t.Fatalf("lost-ACK replay created duplicate session rows=%d, want 1", sessionCount)
+	}
 
 	digest := "sha256:" + strings.Repeat("a", 64)
 	heartbeat := hostidentity.Heartbeat{
