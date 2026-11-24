@@ -353,7 +353,7 @@ func (r *Reader) getNodePage(ctx context.Context, continuation string) (nodeList
 		return result, ErrUnavailable
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize+1))
-	if err != nil || len(body) > maxResponseSize || json.Unmarshal(body, &result) != nil {
+	if err != nil || len(body) > maxResponseSize || json.Unmarshal(body, &result) != nil || result.Items == nil {
 		return nodeList{}, ErrInvalidResponse
 	}
 	return result, nil
