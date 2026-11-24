@@ -14,7 +14,7 @@ func preDeleteSnapshotFixture(create, remove Request, namespace, jobName, jobUID
 	return KueuePreDeleteDRASnapshot{
 		Namespace: namespace, TenantID: create.TenantID, WorkloadID: create.WorkloadID,
 		ProviderID: create.ProviderID, CreateOperationID: create.OperationID,
-		DeleteOperationID: remove.OperationID, DesiredGeneration: create.DesiredGeneration,
+		DeleteOperationID: remove.OperationID, CreateGeneration: create.DesiredGeneration, DeleteGeneration: remove.DesiredGeneration,
 		Job:               KubernetesResourceRef{Namespace: namespace, Name: jobName, UID: jobUID, ResourceVersion: "11"},
 		KueueWorkload:     KubernetesResourceRef{Namespace: namespace, Name: "kueue-" + suffix, UID: "kueue-uid-" + suffix, ResourceVersion: "12"},
 		Pod:               KubernetesResourceRef{Namespace: namespace, Name: "pod-" + suffix, UID: "pod-uid-" + suffix, ResourceVersion: "13"},
