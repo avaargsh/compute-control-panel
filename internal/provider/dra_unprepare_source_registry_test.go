@@ -259,7 +259,6 @@ func TestUncheckedDRAJournalCannotResolveRegisteredVerifier(t *testing.T) {
 	}
 }
 
-
 func TestRestrictedDRAJournalRechecksRevocationAfterWaitingForSourceLock(t *testing.T) {
 	admin := openProviderPostgresDB(t)
 	if !postgresCurrentUserIsSuperuser(t, admin) {
