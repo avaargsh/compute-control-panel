@@ -30,21 +30,24 @@ func (a draReceiptTestAuthenticator) Authenticate(_ context.Context, _ *http.Req
 }
 
 type draReceiptTestResolver struct {
-	verifierCalls int
-	calls         int
+	verifierCalls      int
+	calls              int
+	providerID         string
+	evidenceProviderID string
 	err           error
 	verifier      *provider.DRAUnprepareVerifier
 	serverNow     time.Time
 	candidate     provider.ReleaseEvidenceCandidate
 }
 
-func (r *draReceiptTestResolver) ResolveRegisteredDRAUnprepareVerifier(_ context.Context, _ string, _ provider.DRAUnprepareEvent) (*provider.DRAUnprepareVerifier, time.Time, error) {
+func (r *draReceiptTestResolver) ResolveRegisteredDRAUnprepareVerifier(_ context.Context, _ string, _ provider.DRAUnprepareEvent) (string, *provider.DRAUnprepareVerifier, time.Time, error) {
 	r.verifierCalls++
-	return r.verifier, r.serverNow, nil
+	return r.providerID, r.verifier, r.serverNow, nil
 }
 
-func (r *draReceiptTestResolver) ResolveDRAReceiptEvidence(_ context.Context, _ WorkloadPrincipal, _ provider.DRAUnprepareEvent) (provider.ReleaseEvidenceCandidate, error) {
+func (r *draReceiptTestResolver) ResolveDRAReceiptEvidence(_ context.Context, _ WorkloadPrincipal, providerID string, _ provider.DRAUnprepareEvent) (provider.ReleaseEvidenceCandidate, error) {
 	r.calls++
+	r.evidenceProviderID = providerID
 	return r.candidate, r.err
 }
 
@@ -135,9 +138,10 @@ func draReceiptTestHandler(t *testing.T, authenticator WorkloadAuthenticator) (h
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolver := &draReceiptTestResolver{verifier: verifier, serverNow: time.Now().UTC()}
+	resolver := &draReceiptTestResolver{providerID: "provider-a", verifier: verifier, serverNow: time.Now().UTC()}
 	resolver.candidate.Create.ProviderID = "provider-a"
 	resolver.candidate.Delete.ProviderID = "provider-a"
+	resolver.candidate.ProviderAbsence.ProviderID = "provider-a"
 	journal := &draReceiptTestJournal{created: true}
 	h, err := NewDRAReceiptIngestHandler(DRAReceiptIngestDependencies{
 		Authenticator: authenticator, Authorizer: policy, VerifierResolver: &RegisteredDRAReceiptVerifierResolver{source: resolver}, Resolver: resolver, Journal: journal,
@@ -211,7 +215,7 @@ func TestDRAReceiptIngestRequiresVerifiedSPIFFEIdentityAndExactSource(t *testing
 	req.TLS = peer
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusAccepted || resolver.calls != 1 || journal.calls != 1 {
+	if rec.Code != http.StatusAccepted || resolver.calls != 1 || resolver.evidenceProviderID != "provider-a" || journal.calls != 1 {
 		t.Fatalf("verified identity refused: HTTP %d calls %d/%d", rec.Code, resolver.calls, journal.calls)
 	}
 
@@ -234,6 +238,7 @@ func TestDRAReceiptIngestRejectsHistoricalEvidenceFromDifferentProvider(t *testi
 	}{
 		{name: "CREATE provider differs", mutate: func(c *provider.ReleaseEvidenceCandidate) { c.Create.ProviderID = "provider-b" }},
 		{name: "DELETE provider differs", mutate: func(c *provider.ReleaseEvidenceCandidate) { c.Delete.ProviderID = "provider-b" }},
+		{name: "Provider absence source differs", mutate: func(c *provider.ReleaseEvidenceCandidate) { c.ProviderAbsence.ProviderID = "provider-b" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, resolver, journal := draReceiptTestHandler(t, draReceiptSPIFFEAuthenticator(t))
@@ -249,6 +254,21 @@ func TestDRAReceiptIngestRejectsHistoricalEvidenceFromDifferentProvider(t *testi
 					rec.Code, resolver.calls, journal.calls)
 			}
 		})
+	}
+}
+
+func TestDRAReceiptIngestRejectsMissingRegisteredProviderBeforeEvidenceLookup(t *testing.T) {
+	h, resolver, journal := draReceiptTestHandler(t, draReceiptSPIFFEAuthenticator(t))
+	resolver.providerID = ""
+	req := httptest.NewRequest(http.MethodPost, draReceiptIngestPath,
+		bytes.NewReader(draReceiptTestBody(t, draReceiptTestSigned())))
+	req.Header.Set("Content-Type", "application/json")
+	req.TLS = draReceiptTestTLS()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden || resolver.verifierCalls != 1 || resolver.calls != 0 || journal.calls != 0 {
+		t.Fatalf("missing DBA Provider scope reached historical evidence/journal: HTTP %d verifier=%d evidence=%d journal=%d",
+			rec.Code, resolver.verifierCalls, resolver.calls, journal.calls)
 	}
 }
 
