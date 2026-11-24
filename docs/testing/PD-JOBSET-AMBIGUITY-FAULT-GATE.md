@@ -1,0 +1,3 @@
+# PD JobSet ambiguity fault matrix
+
+Test-only follow-up to #169. Real disposable kind/PG, four independent intent records. Kill the child before any POST or after successful POST before durable pin, replace the exact pinned inert fixture using a disposable admin UID-preconditioned delete/create, and close only the fault child's restricted PostgreSQL binding pool before PutCreatePin (connection-loss injection, not a whole database server outage). Reconcile only by Inspect: absent -> MANUAL_REVIEW; unbound -> UNKNOWN; replacement -> MANUAL_REVIEW; binding disconnect -> UNKNOWN. Require original pin cardinality unchanged, no automatic adoption, no blind POST, Allocation PENDING. No production mounting or physical hardware/cost claim.
