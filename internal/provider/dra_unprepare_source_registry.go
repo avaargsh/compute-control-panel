@@ -3,6 +3,7 @@ package provider
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -77,4 +78,92 @@ func verifyRegisteredDRAUnprepareSource(
 		return ErrDRAReceiptSourceUntrusted
 	}
 	return nil
+}
+
+
+// ResolveRegisteredDRAUnprepareVerifier resolves a signer exclusively from
+// the independently DBA-provisioned source registry. It is deliberately
+// candidate-free: no Provider Operation, Kueue, Pod or ResourceClaim history
+// is queried before the HTTP ingress verifies the signed envelope.
+//
+// The restricted journal login is required because it is the only existing
+// runtime role granted read access to source keys/revocations. The lookup
+// re-attests the journal schema and role on the same transaction, samples one
+// PostgreSQL clock_timestamp(), requires the key to be valid both at the event
+// time and now, rejects revocation, and holds FOR UPDATE while resolving.
+// The journal repeats the live-clock and revocation checks when it records.
+func (j *DRAUnprepareReceiptJournal) ResolveRegisteredDRAUnprepareVerifier(
+	ctx context.Context, tenantID string, event DRAUnprepareEvent,
+) (*DRAUnprepareVerifier, time.Time, error) {
+	if j == nil || j.db == nil || !j.restricted {
+		return nil, time.Time{}, ErrDRAReceiptJournalRole
+	}
+	if ctx == nil || !validDRAIdentity(tenantID) ||
+		!validDRAIdentity(event.ClusterID) || !validDRAIdentity(event.SourceID) ||
+		!validDRAIdentity(event.KeyID) || !validDRAIdentity(event.Driver) ||
+		event.CompletedAt.IsZero() {
+		return nil, time.Time{}, ErrDRAReceiptSourceUntrusted
+	}
+
+	conn, err := j.db.Conn(ctx)
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("%w: open source-registry session: %v", ErrDRAReceiptJournalUnavailable, err)
+	}
+	defer conn.Close()
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("%w: begin source-registry transaction: %v", ErrDRAReceiptJournalUnavailable, err)
+	}
+	defer tx.Rollback()
+	if err := verifyDRAJournalSchema(ctx, tx); err != nil {
+		return nil, time.Time{}, err
+	}
+	if err := verifyDRAJournalRole(ctx, tx); err != nil {
+		return nil, time.Time{}, err
+	}
+
+	var providerID string
+	var publicKey []byte
+	var maximumAgeSeconds, futureSkewSeconds int64
+	var databaseNow time.Time
+	err = tx.QueryRowContext(ctx, `
+		WITH db_clock AS MATERIALIZED (
+			SELECT pg_catalog.clock_timestamp() AS now
+		)
+		SELECT k.provider_id, k.public_key, k.maximum_age_seconds,
+		       k.future_skew_seconds, db_clock.now
+		FROM public.dra_unprepare_source_keys k
+		CROSS JOIN db_clock
+		WHERE k.cluster_id=$1 AND k.source_id=$2 AND k.key_id=$3
+		  AND k.tenant_id=$4 AND k.driver=$5
+		  AND k.valid_from <= $6 AND k.valid_until > $6
+		  AND k.valid_from <= db_clock.now AND k.valid_until > db_clock.now
+		  AND NOT EXISTS (
+		    SELECT 1 FROM public.dra_unprepare_source_revocations r
+		    WHERE r.cluster_id=k.cluster_id AND r.source_id=k.source_id AND r.key_id=k.key_id
+		  )
+		FOR UPDATE OF k
+	`, event.ClusterID, event.SourceID, event.KeyID, tenantID,
+		event.Driver, event.CompletedAt,
+	).Scan(&providerID, &publicKey, &maximumAgeSeconds, &futureSkewSeconds, &databaseNow)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, time.Time{}, ErrDRAReceiptSourceUntrusted
+	}
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("%w: resolve DBA-registered DRA signer: %v", ErrDRAReceiptJournalUnavailable, err)
+	}
+	if !validDRAIdentity(providerID) || len(publicKey) != ed25519.PublicKeySize || databaseNow.IsZero() {
+		return nil, time.Time{}, ErrDRAReceiptSourceUntrusted
+	}
+	verifier, err := NewDRAUnprepareVerifier(DRAUnprepareAuthority{
+		ClusterID: event.ClusterID, SourceID: event.SourceID, KeyID: event.KeyID,
+		Driver: event.Driver, PublicKey: ed25519.PublicKey(publicKey),
+	}, time.Duration(maximumAgeSeconds)*time.Second, time.Duration(futureSkewSeconds)*time.Second)
+	if err != nil {
+		return nil, time.Time{}, ErrDRAReceiptSourceUntrusted
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, time.Time{}, fmt.Errorf("%w: finish source-registry lookup: %v", ErrDRAReceiptJournalUnavailable, err)
+	}
+	return verifier, databaseNow.UTC(), nil
 }
