@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	ErrHostSessionInvalid   = errors.New("invalid HostSession start or heartbeat")
+	ErrHostSessionInvalid  = errors.New("invalid HostSession start or heartbeat")
 	ErrHostSessionRejected = errors.New("HostSession persistence fence rejected the request")
 )
 
