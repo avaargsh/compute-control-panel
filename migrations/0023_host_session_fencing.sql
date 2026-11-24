@@ -47,7 +47,8 @@ BEGIN
            OR member=writer_oid
     ) OR EXISTS (
         SELECT 1 FROM pg_catalog.pg_auth_members
-        WHERE roleid=guard_owner_oid AND member=current_user_oid AND NOT admin_option
+        WHERE roleid=guard_owner_oid AND member=current_user_oid
+          AND (NOT admin_option OR NOT set_option)
     ) OR EXISTS (SELECT 1 FROM pg_catalog.pg_database WHERE datdba IN (guard_owner_oid, writer_oid))
        OR EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspowner IN (guard_owner_oid, writer_oid))
        OR EXISTS (SELECT 1 FROM pg_catalog.pg_class WHERE relowner IN (guard_owner_oid, writer_oid))
@@ -462,10 +463,6 @@ ALTER TABLE public.compute_host_session_heartbeats
     ENABLE ALWAYS TRIGGER compute_host_session_heartbeats_no_truncate;
 
 GRANT USAGE ON SCHEMA public TO ccp_host_session_writer;
-GRANT EXECUTE ON FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,INTEGER)
-    TO ccp_host_session_writer;
-GRANT EXECUTE ON FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT)
-    TO ccp_host_session_writer;
 
 -- The NOLOGIN owner is the only direct table owner. The runtime writer gets
 -- EXECUTE only; Provider and binding reads/locks remain inside the definer.
@@ -477,6 +474,15 @@ ALTER FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT
     OWNER TO ccp_host_session_guard_owner;
 ALTER FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT)
     OWNER TO ccp_host_session_guard_owner;
+
+-- Use the dedicated owner as grantor so the migration principal does
+-- not retain a grantor path after the temporary membership is revoked.
+SET ROLE ccp_host_session_guard_owner;
+GRANT EXECUTE ON FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,INTEGER)
+    TO ccp_host_session_writer;
+GRANT EXECUTE ON FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT)
+    TO ccp_host_session_writer;
+RESET ROLE;
 
 REVOKE ccp_host_session_guard_owner FROM CURRENT_USER;
 REVOKE CREATE ON SCHEMA public FROM ccp_host_session_guard_owner;
