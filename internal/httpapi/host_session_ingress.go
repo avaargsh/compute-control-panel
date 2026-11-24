@@ -1,10 +1,8 @@
 package httpapi
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
-	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -28,34 +26,40 @@ const (
 )
 
 type HostSessionIngressRepository interface {
+	hostidentity.HostIdentityResolver
 	StartAuthenticatedHostSession(context.Context, postgres.AuthenticatedHostSessionStartRequest) (hostidentity.SessionFence, error)
 	RecordAuthenticatedHostHeartbeat(context.Context, postgres.AuthenticatedHostHeartbeatRequest) (hostidentity.Disposition, time.Time, error)
 }
 
 type HostSessionIngressDependencies struct {
-	HostTrustRoots  *x509.CertPool
 	HostTrustDomain string
+	Now             func() time.Time
 	Repository      HostSessionIngressRepository
 }
 
 type hostSessionIngressHandler struct {
-	roots       *x509.CertPool
-	trustDomain string
-	repo        HostSessionIngressRepository
+	auth *hostidentity.HostSPIFFEAuthenticator
+	repo HostSessionIngressRepository
 }
 
 // NewHostSessionIngressHandler constructs a standalone, unmounted host-only
-// handler. The serving listener must separately require and verify mTLS using
-// the same narrowly scoped host CA bundle.
+// handler. Its repository resolves the certificate subject to the immutable
+// HostIdentity binding; the authenticated SQL wrappers recheck the grant in
+// the same transaction as every session start and heartbeat write.
 func NewHostSessionIngressHandler(deps HostSessionIngressDependencies) (http.Handler, error) {
-	if deps.HostTrustRoots == nil || strings.TrimSpace(deps.HostTrustDomain) == "" ||
-		strings.TrimSpace(deps.HostTrustDomain) != deps.HostTrustDomain ||
-		len(deps.HostTrustDomain) > 253 || missingProviderManagementDependency(deps.Repository) {
-		return nil, errors.New("host session ingress requires a dedicated host trust bundle, trust domain and repository")
+	if strings.TrimSpace(deps.HostTrustDomain) == "" ||
+		missingProviderManagementDependency(deps.Repository) {
+		return nil, errors.New("host session ingress requires a host trust domain and repository")
 	}
-	h := &hostSessionIngressHandler{
-		roots: deps.HostTrustRoots.Clone(), trustDomain: deps.HostTrustDomain, repo: deps.Repository,
+	now := deps.Now
+	if now == nil {
+		now = time.Now
 	}
+	auth, err := hostidentity.NewHostSPIFFEAuthenticator(deps.HostTrustDomain, deps.Repository, now)
+	if err != nil {
+		return nil, err
+	}
+	h := &hostSessionIngressHandler{auth: auth, repo: deps.Repository}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST "+hostSessionStartPath, h.start)
 	mux.HandleFunc("POST "+hostHeartbeatPath, h.heartbeat)
@@ -119,41 +123,13 @@ func readHostIngressBody(w http.ResponseWriter, r *http.Request, dst any, fields
 	return false
 }
 
-func verifiedHostClientTLS(r *http.Request) bool {
-	if r == nil || r.TLS == nil || len(r.TLS.PeerCertificates) == 0 || len(r.TLS.VerifiedChains) == 0 {
-		return false
-	}
-	leaf := r.TLS.PeerCertificates[0]
-	if leaf == nil || len(leaf.Raw) == 0 {
-		return false
-	}
-	for _, chain := range r.TLS.VerifiedChains {
-		if len(chain) > 0 && chain[0] != nil && bytes.Equal(chain[0].Raw, leaf.Raw) {
-			return true
-		}
-	}
-	return false
-}
-
 func (h *hostSessionIngressHandler) subject(w http.ResponseWriter, r *http.Request) (string, bool) {
-	if !verifiedHostClientTLS(r) {
-		writeWorkloadAPIError(w, http.StatusUnauthorized, "HOST_UNAUTHENTICATED", "Verified host client TLS required")
-		return "", false
-	}
-	chain := make([][]byte, 0, len(r.TLS.PeerCertificates))
-	for _, cert := range r.TLS.PeerCertificates {
-		if cert == nil || len(cert.Raw) == 0 {
-			writeWorkloadAPIError(w, http.StatusUnauthorized, "HOST_UNAUTHENTICATED", "Invalid host certificate chain")
-			return "", false
-		}
-		chain = append(chain, cert.Raw)
-	}
-	subject, err := hostidentity.VerifyHostCredential(chain, h.roots, h.trustDomain, time.Now())
+	binding, err := h.auth.Authenticate(r.Context(), r)
 	if err != nil {
-		writeWorkloadAPIError(w, http.StatusUnauthorized, "HOST_UNAUTHENTICATED", "Dedicated host credential required")
+		writeWorkloadAPIError(w, http.StatusUnauthorized, "HOST_UNAUTHENTICATED", "Verified host SPIFFE mTLS identity required")
 		return "", false
 	}
-	return subject, true
+	return binding.Subject, true
 }
 
 func hostIngressError(w http.ResponseWriter, err error) {
