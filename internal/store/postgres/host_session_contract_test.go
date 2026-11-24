@@ -309,8 +309,12 @@ func TestHostSessionStartWaitsForProviderDrain(t *testing.T) {
 			t.Fatal("session start never waited behind the Provider Drain row lock")
 		case <-ticker.C:
 			if err := db.QueryRowContext(ctx, `
-				SELECT $1 = ANY(pg_catalog.pg_blocking_pids($2))
-			`, drainPID, backendPIDForHostSession(t, ctx, db, binding.HostID)).Scan(&waiting); err != nil {
+				SELECT EXISTS (
+					SELECT 1 FROM pg_catalog.pg_stat_activity a
+					WHERE $1 = ANY(pg_catalog.pg_blocking_pids(a.pid))
+					  AND a.query LIKE '%compute_host_session_start%'
+				)
+			`, drainPID).Scan(&waiting); err != nil {
 				t.Fatal(err)
 			}
 		}
