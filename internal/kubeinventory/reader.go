@@ -217,9 +217,10 @@ type nodeList struct {
 
 type node struct {
 	Metadata struct {
-		Name            string `json:"name"`
-		UID             string `json:"uid"`
-		ResourceVersion string `json:"resourceVersion"`
+		Name              string  `json:"name"`
+		UID               string  `json:"uid"`
+		ResourceVersion   string  `json:"resourceVersion"`
+		DeletionTimestamp *string `json:"deletionTimestamp"`
 	} `json:"metadata"`
 	Spec struct {
 		Unschedulable bool `json:"unschedulable"`
@@ -235,6 +236,11 @@ type node struct {
 }
 
 func nodeCondition(n node) (observation.Condition, string) {
+	// A terminating Node cannot be available, even while its last reported
+	// Ready condition remains True. Raw GPU quantities remain non-authoritative.
+	if n.Metadata.DeletionTimestamp != nil {
+		return observation.ConditionUnavailable, "NODE_TERMINATING"
+	}
 	ready := ""
 	for _, item := range n.Status.Conditions {
 		if item.Type != "Ready" {
