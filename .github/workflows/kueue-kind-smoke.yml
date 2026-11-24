@@ -83,6 +83,8 @@ jobs:
         run: |
           go install sigs.k8s.io/kind@v0.30.0
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Verify PD smoke source paths and invocation contract
+        run: python3 .github/scripts/test_pd_kind_source_paths.py
       - name: Check shell syntax before starting Docker
         run: |
           bash -n scripts/kueue_kind_smoke.sh
