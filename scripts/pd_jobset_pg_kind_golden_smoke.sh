@@ -81,3 +81,23 @@ kubectl -n "$ns" get pods -o json |
 }
 echo "pd_pg_kube_golden=$(jq -c . "$receipt")"
 echo "PASS: one signed PD Intent, PostgreSQL lease, real JobSet API/UID pin, actual SIGKILL, expired lease UNKNOWN, Inspect-first and Operation-only recovery; GPU READY/RELEASED/FINAL unproven"
+
+# Independently require all four fault receipts; ordinary Go tests skip this
+# opt-in suite, so a missing receipt cannot be accepted as success.
+fault_receipt="$tmp/fault-receipt.json"
+DATABASE_URL="$CCP_PD_KIND_ADMIN_DSN" \
+CCP_PD_KIND_BINDING_DSN="$CCP_PD_KIND_BINDING_DSN" \
+CCP_PD_KIND_API_URL="$CCP_PD_KIND_API_URL" \
+CCP_PD_KIND_CA_PATH="$CCP_PD_KIND_CA_PATH" \
+CCP_PD_KIND_TOKEN_PATH="$tmp/token" \
+CCP_PD_KIND_NAMESPACE="$ns" \
+CCP_PD_KIND_STAGE_BINARY="$tmp/pd-stage-process.test" \
+CCP_PD_KIND_FAULT_RECEIPT_PATH="$fault_receipt" \
+CCP_DISPOSABLE_KIND_SMOKE=1 \
+  go test -count=1 -timeout 240s -run '^TestPDPostgresKubeJobSetFaults$' -v ./internal/store/postgres
+[[ -s "$fault_receipt" ]] || { echo "FAIL: PD fault matrix did not execute" >&2; exit 1; }
+jq -e '
+  .outcomes=={"pre-post":"MANUAL_REVIEW","post-before-pin":"UNKNOWN","replacement":"MANUAL_REVIEW","binding-disconnect":"UNKNOWN"} and
+  .physical_gpu_verified==false and .allocation_ready==false and .released==false and .cost_final==false
+' "$fault_receipt" >/dev/null
+echo "pd_pg_kube_fault_matrix=$(jq -c . "$fault_receipt")"
