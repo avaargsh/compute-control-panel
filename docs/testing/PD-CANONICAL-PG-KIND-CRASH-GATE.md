@@ -1,0 +1,5 @@
+# Canonical staging PG16 + kind post-pin crash gate
+
+Test-only, opt-in fixture. A signed synthetic PD intent and fixture-only prior release enter the existing PostgreSQL promotion/lease flow. A separately compiled Go test child calls the real StageInertPDJobSet through the row-locked current-source fence with restricted durable binding credentials and the staging ServiceAccount. After the successful staged return, the parent must observe the marker, SIGKILL the child, wait for the database-clock lease expiry, persist UNKNOWN, reject a stale callback, and reconcile by the original UID through a new adapter. Require one durable pin, one inert gated JobSet, no child Pods, and Allocation PENDING. No marker or skipped test is failure.
+
+This covers only the post-pin/pre-control-plane-ACK crash boundary. POST-before-pin, pre-POST, replacement UID, revocation and unavailable-source end-to-end recovery remain separate gates. No authenticated hardware, actual device preparation/release, G04/G05, Cost FINAL or production deployment authorization.

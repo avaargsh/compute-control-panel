@@ -24,8 +24,9 @@ trap 'rm -rf "$tmp"' EXIT
 (umask 077; kubectl -n "$ns" create token ccp-pd-staging --duration=15m >"$tmp/token")
 [[ -s "$tmp/token" && -s "$CCP_PD_KIND_CA_PATH" ]] || exit 1
 receipt="$tmp/receipt.json"
+go test -c -o "$tmp/pd-stage-process.test" ./internal/pdstaging
 
-# The test reuses an independently signed real PD fixture, canonical PG
+# The test reuses a signed synthetic PD fixture, canonical PG
 # Promotion/Operation journal, actual K8s API with only staging permissions,
 # restricted and catalog-attested PostgreSQL binding login, and Inspect-first.
 DATABASE_URL="$CCP_PD_KIND_ADMIN_DSN" \
@@ -35,6 +36,7 @@ CCP_PD_KIND_CA_PATH="$CCP_PD_KIND_CA_PATH" \
 CCP_PD_KIND_TOKEN_PATH="$tmp/token" \
 CCP_PD_KIND_NAMESPACE="$ns" \
 CCP_PD_KIND_RECEIPT_PATH="$receipt" \
+CCP_PD_KIND_STAGE_BINARY="$tmp/pd-stage-process.test" \
 CCP_DISPOSABLE_KIND_SMOKE=1 \
   go test -count=1 -timeout 90s -run '^TestPDPostgresKubeJobSetGolden$' -v ./internal/store/postgres
 
@@ -43,7 +45,7 @@ jq -e '
   (.intent_id|type=="string" and length==64) and
   (.uid|type=="string" and length>0) and
   .operation_status=="SUCCEEDED" and .allocation_phase=="PENDING" and
-  .lost_ack_unknown==true and .inspect_first==true and
+  .lost_ack_unknown==true and .actual_sigkill==true and .canonical_stage==true and .inspect_first==true and
   .physical_gpu_verified==false and .driver_prepared==false and .cost_final==false
 ' "$receipt" >/dev/null || { echo "FAIL: untrusted cross-service receipt" >&2; exit 1; }
 
@@ -78,4 +80,4 @@ kubectl -n "$ns" get pods -o json |
   echo "FAIL: gated JobSet created runnable Pods before approval" >&2; exit 1;
 }
 echo "pd_pg_kube_golden=$(jq -c . "$receipt")"
-echo "PASS: one signed PD Intent, PostgreSQL lease, real JobSet API/UID pin, lost ACK UNKNOWN, restarted Inspect-first and Operation-only recovery; GPU READY/RELEASED/FINAL unproven"
+echo "PASS: one signed PD Intent, PostgreSQL lease, real JobSet API/UID pin, actual SIGKILL, expired lease UNKNOWN, Inspect-first and Operation-only recovery; GPU READY/RELEASED/FINAL unproven"

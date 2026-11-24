@@ -16,6 +16,8 @@ PD_SOURCE_PATHS = (
     "internal/store/postgres/pd_staging_write_fence.go",
     "cmd/pd-jobset-provider-smoke/main.go",
     "scripts/pd_jobset_provider_kind_smoke.sh",
+    "scripts/pd_jobset_pg_kind_golden_smoke.sh",
+    "internal/pdstaging/stage_kind_process_test.go",
 )
 
 
@@ -68,6 +70,7 @@ class PDKueueKindSourceCoverageTests(unittest.TestCase):
             "bash -n scripts/pd_jobset_dra_kind_smoke.sh",
             "bash -n scripts/pd_jobset_activation_gate_kind_smoke.sh",
             "bash -n scripts/pd_jobset_provider_kind_smoke.sh",
+            "bash -n scripts/pd_jobset_pg_kind_golden_smoke.sh",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, self.workflow)
@@ -80,6 +83,8 @@ class PDKueueKindSourceCoverageTests(unittest.TestCase):
         self.assertIn("COPY pd-jobset-provider-smoke /pd-jobset-provider-smoke", text)
         self.assertGreater(text.index("bash scripts/pd_jobset_provider_kind_smoke.sh"),
                            text.index("bash scripts/pd_jobset_activation_gate_kind_smoke.sh"))
+        self.assertGreater(text.index("bash scripts/pd_jobset_pg_kind_golden_smoke.sh"),
+                           text.index("bash scripts/pd_jobset_provider_kind_smoke.sh"))
 
 
 if __name__ == "__main__":

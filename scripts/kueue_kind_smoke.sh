@@ -1461,6 +1461,12 @@ bash scripts/pd_jobset_dra_kind_smoke.sh
 bash scripts/pd_jobset_activation_gate_kind_smoke.sh
 # Actual GET/CREATE-only ServiceAccount HTTPS, in-memory pin fixture only.
 bash scripts/pd_jobset_provider_kind_smoke.sh
+# Real PG16 + canonical staging child, SIGKILL and inspect-first, no hardware.
+CCP_PD_KIND_ADMIN_DSN="$binding_dsn" \
+CCP_PD_KIND_BINDING_DSN="$binding_role_dsn" \
+CCP_PD_KIND_API_URL="https://${api_host}:${api_port}" \
+CCP_PD_KIND_CA_PATH="$dir/kube-ca.crt" \
+  bash scripts/pd_jobset_pg_kind_golden_smoke.sh
 
 # Independent upstream Kueue CPU-quota Cohort borrowing/reclaim acceptance.
 # This is not physical GPU release or CCP provider write evidence.
