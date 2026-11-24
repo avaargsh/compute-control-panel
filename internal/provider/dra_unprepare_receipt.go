@@ -163,7 +163,8 @@ func (v *DRAUnprepareVerifier) Correlate(
 		return reject()
 	}
 	release, err := CorrelateReleaseEvidence(candidate)
-	if err != nil {
+	if err != nil || candidate.PreDeleteSnapshot == nil ||
+		!preDeleteSnapshotMatchesReleaseCandidate(*candidate.PreDeleteSnapshot, candidate) {
 		return reject()
 	}
 	event := signed.Event
