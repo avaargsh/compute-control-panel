@@ -252,7 +252,7 @@ jobs:
             echo 'authenticated HostSession PostgreSQL acceptance was skipped' >&2
             exit 1
           fi
-          printf 'verified_authenticated_host_session_source_sha=%s\\n' "$(git rev-parse --verify HEAD)"
+          printf 'verified_authenticated_host_session_source_sha=%s\n' "$(git rev-parse --verify HEAD)"
       - name: Require real PostgreSQL release Generation/UID fence test (no skip)
         shell: bash
         env:
@@ -266,6 +266,20 @@ jobs:
             exit 1
           fi
           printf 'verified_release_fence_source_sha=%s\n' "$(git rev-parse --verify HEAD)"
+      - name: Require database-derived PostgreSQL release fence resolver (no skip)
+        shell: bash
+        env:
+          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
+        run: |
+          set -euo pipefail
+          go test -count=1 -v -run '^TestResolveReleaseCommitFence' ./internal/store/postgres | tee release-fence-resolver-pg.log
+          grep -F -- '--- PASS: TestResolveReleaseCommitFenceDerivesAndLocksCurrentRows' release-fence-resolver-pg.log
+          grep -F -- '--- PASS: TestResolveReleaseCommitFenceRejectsMissingTransactionAndMalformedScope' release-fence-resolver-pg.log
+          if grep -F -- '--- SKIP: TestResolveReleaseCommitFenceDerivesAndLocksCurrentRows' release-fence-resolver-pg.log; then
+            echo 'database-derived PostgreSQL release fence resolver test skipped: no acceptance evidence' >&2
+            exit 1
+          fi
+          printf 'verified_release_fence_resolver_source_sha=%s\n' "$(git rev-parse --verify HEAD)"
       - name: Require real PostgreSQL correlated release bridge acceptance (no skip)
         shell: bash
         env:

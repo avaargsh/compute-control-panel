@@ -4,6 +4,7 @@ from pathlib import Path
 
 WORKFLOW = Path(__file__).resolve().parents[1] / "workflows" / "go.yml"
 
+
 class ReleaseBridgeWorkflowContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -21,10 +22,11 @@ class ReleaseBridgeWorkflowContractTests(unittest.TestCase):
     def test_source_postgres_command_is_not_broken_by_js_dollar_quote(self):
         expected = "go test -count=1 -v -run '^TestCorrelatedReleasePreflightChecksCurrentPostgresRows$' ./internal/store/postgres | tee release-bridge-pg.log"
         self.assertEqual(self.source.count(expected), 1)
-        self.assertIn("ref: ${{ github.event.pull_request.head.sha }}", self.source)
+        self.assertIn("ref: " + "$" + "{{ github.event.pull_request.head.sha }}", self.source)
         self.assertIn("verified_release_bridge_source_sha=", self.source)
         self.assertIn("grep -F -- '--- PASS: TestCorrelatedReleasePreflightChecksCurrentPostgresRows'", self.source)
         self.assertIn("if grep -F -- '--- SKIP:'", self.source)
+
 
 if __name__ == "__main__":
     unittest.main()
