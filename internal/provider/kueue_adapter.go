@@ -864,6 +864,9 @@ func (a *KueueJobAdapter) applyDelete(ctx context.Context, req Request) (Acknowl
 		if !ok || intent.UID != req.TargetResourceUID || intent.Name != name {
 			return Acknowledgement{}, fmt.Errorf("%w: delete target is absent", ErrOperationConflict)
 		}
+		if err = a.requirePreDeleteDRASnapshot(req); err != nil {
+			return Acknowledgement{}, err
+		}
 		if err = a.recordDelete(req, name, req.TargetResourceUID, true); err != nil {
 			return Acknowledgement{}, uncommittedKueueBinding("DELETE", err)
 		}
@@ -882,8 +885,16 @@ func (a *KueueJobAdapter) applyDelete(ctx context.Context, req Request) (Acknowl
 		if err != nil {
 			return Acknowledgement{}, err
 		}
+		if err := a.requirePreDeleteDRASnapshot(req); err != nil {
+			return Acknowledgement{}, err
+		}
 		if ok && intent.Acknowledged {
 			return Acknowledgement{OperationID: req.OperationID, RequestDigest: req.RequestDigest}, nil
+		}
+		// Persist DELETE intent before the external side effect. The snapshot
+		// writer and this tombstone writer serialize on the CREATE pin row.
+		if err := a.recordDelete(req, name, meta.UID, false); err != nil {
+			return Acknowledgement{}, uncommittedKueueBinding("DELETE", err)
 		}
 		return a.deleteJob(ctx, req, name, meta.UID)
 	default:
@@ -1074,6 +1085,9 @@ func (a *KueueJobAdapter) inspectDelete(ctx context.Context, req Request) (opera
 	case http.StatusNotFound:
 		if !intended {
 			return conflictObservation(req, "MISSING_AUTHORITATIVE_OPERATION"), nil
+		}
+		if err := a.requirePreDeleteDRASnapshot(req); err != nil {
+			return conflictObservation(req, "PRE_DELETE_DRA_SNAPSHOT_MISSING"), nil
 		}
 		return absentObservation(req), nil
 	case http.StatusOK:
