@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
@@ -140,7 +141,7 @@ func readHostIngressBody(w http.ResponseWriter, r *http.Request, dst any, fields
 }
 
 func verifiedHostClientTLS(r *http.Request) bool {
-	if r == nil || r.TLS == nil || len(r.TLS.PeerCertificates) == 0 || len(r.TLS.VerifiedChains) == 0 {
+	if r == nil || r.TLS == nil || r.TLS.Version < tls.VersionTLS13 || len(r.TLS.PeerCertificates) == 0 || len(r.TLS.VerifiedChains) == 0 {
 		return false
 	}
 	leaf := r.TLS.PeerCertificates[0]
