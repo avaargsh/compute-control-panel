@@ -164,6 +164,7 @@ func TestHostIdentityBindingDatabaseContract(t *testing.T) {
 // state, and is therefore insufficient to serialize these operations.
 func TestHostIdentityEnrollmentWaitsForProviderDrain(t *testing.T) {
 	db := openIntegrationDB(t)
+	writer, _ := testHostIdentityRestrictedWriterDB(t, db)
 	repo, err := NewRepository(db)
 	if err != nil {
 		t.Fatal(err)
@@ -198,7 +199,7 @@ func TestHostIdentityEnrollmentWaitsForProviderDrain(t *testing.T) {
 	hostID := "host-" + randomSuffix(t)
 	nodeUID := "node-" + randomSuffix(t)
 	subject := "spiffe://ccp.example/host/" + hostID
-	conn, err := db.Conn(ctx)
+	conn, err := writer.Conn(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
