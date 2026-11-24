@@ -143,12 +143,19 @@ func (r *Reader) ListObservations(ctx context.Context, tenantID string, projects
 	if !allowed {
 		return snapshot, nil
 	}
+	// Timestamp the complete paginated collection from its first read.
+	// Finishing later must not renew the lifetime of earlier Node facts.
+	startedAt := r.now().UTC()
+	if startedAt.IsZero() {
+		return observation.Snapshot{}, ErrInvalidResponse
+	}
 	nodes, err := r.listNodes(ctx)
 	if err != nil {
 		return observation.Snapshot{}, err
 	}
-	now := r.now().UTC()
-	if now.IsZero() {
+	expiresAt := startedAt.Add(r.ttl)
+	completedAt := r.now().UTC()
+	if completedAt.Before(startedAt) || !completedAt.Before(expiresAt) {
 		return observation.Snapshot{}, ErrInvalidResponse
 	}
 	for _, n := range nodes {
@@ -157,7 +164,7 @@ func (r *Reader) ListObservations(ctx context.Context, tenantID string, projects
 			TenantID: r.tenantID, ProjectID: r.projectID,
 			Source:         "kubernetes/core/v1/node.status",
 			SourceRevision: n.Metadata.ResourceVersion,
-			ObservedAt:     now, ExpiresAt: now.Add(r.ttl),
+			ObservedAt:     startedAt, ExpiresAt: expiresAt,
 		}
 		nr := base
 		nr.Resource = observation.ResourceRef{
