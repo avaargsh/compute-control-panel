@@ -2,10 +2,10 @@ package provider
 
 import (
 	"bytes"
-	"errors"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"strings"
 	"testing"
 	"time"
