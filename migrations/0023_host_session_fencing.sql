@@ -11,6 +11,7 @@ DO $host_session_role_preflight$
 DECLARE
     guard_owner_oid pg_catalog.oid;
     writer_oid pg_catalog.oid;
+    current_user_oid pg_catalog.oid;
 BEGIN
     SELECT oid INTO guard_owner_oid
     FROM pg_catalog.pg_roles
@@ -32,9 +33,19 @@ BEGIN
         RAISE EXCEPTION 'ccp_host_session_writer must be independently provisioned as restricted LOGIN NOINHERIT';
     END IF;
 
-    IF EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members WHERE member IN (guard_owner_oid, writer_oid)
-               OR roleid IN (guard_owner_oid, writer_oid))
-       OR EXISTS (SELECT 1 FROM pg_catalog.pg_database WHERE datdba IN (guard_owner_oid, writer_oid))
+    SELECT oid INTO current_user_oid FROM pg_catalog.pg_roles WHERE rolname=current_user;
+
+    -- A non-superuser migration role may temporarily be a member of the
+    -- dedicated NOLOGIN owner to perform ALTER OWNER. No other role may
+    -- assume or inherit either restricted role; the temporary membership is
+    -- revoked before commit.
+    IF EXISTS (
+        SELECT 1 FROM pg_catalog.pg_auth_members
+        WHERE (roleid=guard_owner_oid AND member <> current_user_oid)
+           OR member=guard_owner_oid
+           OR roleid=writer_oid
+           OR member=writer_oid
+    ) OR EXISTS (SELECT 1 FROM pg_catalog.pg_database WHERE datdba IN (guard_owner_oid, writer_oid))
        OR EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspowner IN (guard_owner_oid, writer_oid))
        OR EXISTS (SELECT 1 FROM pg_catalog.pg_class WHERE relowner IN (guard_owner_oid, writer_oid))
        OR EXISTS (SELECT 1 FROM pg_catalog.pg_proc WHERE proowner IN (guard_owner_oid, writer_oid))
@@ -419,6 +430,15 @@ BEGIN
 END;
 $heartbeat$;
 
+COMMENT ON TABLE public.compute_host_sessions IS
+    'Append-only durable HostIdentity session epochs; server-issued IDs and DB-clock expiry; not host attestation or GPU readiness.';
+COMMENT ON TABLE public.compute_host_session_heartbeats IS
+    'Append-only per-epoch heartbeat receipts; exact replay is idempotent and does not extend session expiry.';
+COMMENT ON FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,INTEGER) IS
+    'Unmounted internal CAS entrypoint; caller must authenticate/revoke principal before invoking; locks Provider and immutable HostIdentity binding.';
+COMMENT ON FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT) IS
+    'Unmounted internal heartbeat entrypoint; enforces active latest epoch, DB clock, monotonic sequence and exact replay without expiry extension.';
+
 -- The NOLOGIN owner is the only direct table owner. The runtime writer gets
 -- EXECUTE only; Provider and binding reads/locks remain inside the definer.
 GRANT CREATE ON SCHEMA public TO ccp_host_session_guard_owner;
@@ -440,6 +460,7 @@ REVOKE ALL ON FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT,TEX
 REVOKE ALL ON FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,INTEGER) FROM CURRENT_USER;
 REVOKE ALL ON FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT) FROM CURRENT_USER;
+REVOKE ccp_host_session_guard_owner FROM CURRENT_USER;
 REVOKE CREATE ON SCHEMA public FROM ccp_host_session_guard_owner;
 
 GRANT USAGE ON SCHEMA public TO ccp_host_session_writer;
@@ -500,11 +521,3 @@ BEGIN
 END;
 $host_session_acl_attestation$;
 
-COMMENT ON TABLE public.compute_host_sessions IS
-    'Append-only durable HostIdentity session epochs; server-issued IDs and DB-clock expiry; not host attestation or GPU readiness.';
-COMMENT ON TABLE public.compute_host_session_heartbeats IS
-    'Append-only per-epoch heartbeat receipts; exact replay is idempotent and does not extend session expiry.';
-COMMENT ON FUNCTION public.compute_host_session_start(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,INTEGER) IS
-    'Unmouted internal CAS entrypoint; caller must authenticate/revoke principal before invoking; locks Provider and immutable HostIdentity binding.';
-COMMENT ON FUNCTION public.compute_host_session_heartbeat(TEXT,TEXT,TEXT,TEXT,TEXT,BIGINT,TEXT,BIGINT,TEXT) IS
-    'Unmouted internal heartbeat entrypoint; enforces active latest epoch, DB clock, monotonic sequence and exact replay without expiry extension.';
