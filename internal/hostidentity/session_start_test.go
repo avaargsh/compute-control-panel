@@ -17,6 +17,7 @@ func TestPrepareSessionStart(t *testing.T) {
 		want   int64
 	}{
 		{name: "expired predecessor can be replaced", want: 4},
+		{name: "predecessor expires at now can be replaced", change: func(_ *Binding, p **SessionFence, _ *int64, _ *string, n, _ *time.Time) { (*p).ExpiresAt = *n }, want: 4},
 		{name: "first epoch", change: func(_ *Binding, p **SessionFence, e *int64, _ *string, _, _ *time.Time) { *p = nil; *e = 0 }, want: 1},
 		{name: "stale expected epoch", change: func(_ *Binding, _ **SessionFence, e *int64, _ *string, _, _ *time.Time) { *e = 2 }},
 		{name: "future expected epoch", change: func(_ *Binding, _ **SessionFence, e *int64, _ *string, _, _ *time.Time) { *e = 4 }},
@@ -58,5 +59,17 @@ func TestPrepareSessionStart(t *testing.T) {
 				t.Fatalf("candidate=%+v, want %+v", got, want)
 			}
 		})
+	}
+}
+
+func TestPrepareSessionStartRejectsUnexpiredPredecessor(t *testing.T) {
+	now := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
+	binding := Binding{HostID: "host-active", ProviderID: "provider-active", ClusterScope: "cluster-active", NodeUID: "uid-active", Subject: "spiffe://ccp.example/host/active"}
+	previous := SessionFence{
+		Binding: binding, Epoch: 7, SessionID: "session-active",
+		IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Second),
+	}
+	if candidate, ok := PrepareSessionStart(binding, &previous, 7, "session-next", now, now.Add(time.Minute)); ok {
+		t.Fatalf("active session was replaced: candidate=%+v", candidate)
 	}
 }
