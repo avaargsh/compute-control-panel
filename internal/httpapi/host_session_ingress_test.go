@@ -83,10 +83,10 @@ func (s *hostSessionIngressRepositoryStub) setStartError(err error) {
 }
 
 type hostCredentialAuthority struct {
-	roots   *x509.CertPool
-	ca      *x509.Certificate
-	key     ed25519.PrivateKey
-	crlDER  []byte
+	roots  *x509.CertPool
+	ca     *x509.Certificate
+	key    ed25519.PrivateKey
+	crlDER []byte
 }
 
 func newHostCredentialAuthority(t *testing.T) *hostCredentialAuthority {
@@ -101,7 +101,7 @@ func newHostCredentialAuthority(t *testing.T) *hostCredentialAuthority {
 		Subject:      pkix.Name{CommonName: "CCP host-only test CA"},
 		NotBefore:    now.Add(-time.Hour), NotAfter: now.Add(time.Hour),
 		IsCA: true, BasicConstraintsValid: true,
-		KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
+		KeyUsage:     x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
 		SubjectKeyId: []byte{1, 2, 3, 4},
 	}
 	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, publicKey, privateKey)
