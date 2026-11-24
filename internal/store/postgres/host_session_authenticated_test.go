@@ -40,7 +40,7 @@ func TestHostSessionAuthenticatedStartHeartbeatAndGrantRevocation(t *testing.T) 
 		t.Fatal(err)
 	}
 	start := AuthenticatedHostSessionStartRequest{
-		TenantID: tenantID, Service: "compute-host-agent", Subject: binding.Subject,
+		Subject: binding.Subject,
 		ExpectedEpoch: 0, RequestID: "authenticated-start-" + randomSuffix(t), TTL: 30 * time.Second,
 	}
 	first, err := repo.StartAuthenticatedHostSession(ctx, start)
@@ -52,7 +52,7 @@ func TestHostSessionAuthenticatedStartHeartbeatAndGrantRevocation(t *testing.T) 
 	}
 
 	heartbeat := AuthenticatedHostHeartbeatRequest{
-		TenantID: tenantID, Service: "compute-host-agent", Subject: binding.Subject,
+		Subject: binding.Subject,
 		Epoch: first.Epoch, SessionID: first.SessionID, Sequence: 1,
 		Digest: "sha256:" + strings.Repeat("a", 64),
 	}
@@ -66,16 +66,16 @@ func TestHostSessionAuthenticatedStartHeartbeatAndGrantRevocation(t *testing.T) 
 	}
 
 	if _, err := repo.StartAuthenticatedHostSession(ctx, AuthenticatedHostSessionStartRequest{
-		TenantID: tenantID + "-wrong", Service: "compute-host-agent", Subject: binding.Subject,
-		ExpectedEpoch: 1, RequestID: "wrong-tenant-" + randomSuffix(t), TTL: 30 * time.Second,
+		Subject: "spiffe://ccp.example/host/unregistered-" + randomSuffix(t),
+		ExpectedEpoch: 0, RequestID: "unknown-subject-" + randomSuffix(t), TTL: 30 * time.Second,
 	}); !errors.Is(err, ErrHostSessionUnauthorized) {
-		t.Fatalf("cross-tenant host subject grant was accepted: %v", err)
+		t.Fatalf("unregistered host subject was accepted: %v", err)
 	}
 	if _, err := repo.StartAuthenticatedHostSession(ctx, AuthenticatedHostSessionStartRequest{
-		TenantID: tenantID, Service: "agent-runtime", Subject: binding.Subject,
-		ExpectedEpoch: 1, RequestID: "wrong-service-" + randomSuffix(t), TTL: 30 * time.Second,
-	}); !errors.Is(err, ErrHostSessionUnauthorized) {
-		t.Fatalf("non-host service identity was accepted: %v", err)
+		Subject: "spiffe://ccp.example/ns/compute-host/sa/host-agent",
+		ExpectedEpoch: 0, RequestID: "workload-subject-" + randomSuffix(t), TTL: 30 * time.Second,
+	}); !errors.Is(err, ErrHostSessionInvalid) {
+		t.Fatalf("workload identity was accepted: %v", err)
 	}
 
 	if _, err := admin.ExecContext(ctx, `
@@ -91,7 +91,7 @@ func TestHostSessionAuthenticatedStartHeartbeatAndGrantRevocation(t *testing.T) 
 		t.Fatalf("revoked host subject continued heartbeating: %v", err)
 	}
 	if _, err := repo.StartAuthenticatedHostSession(ctx, AuthenticatedHostSessionStartRequest{
-		TenantID: tenantID, Service: "compute-host-agent", Subject: binding.Subject,
+		Subject: binding.Subject,
 		ExpectedEpoch: 1, RequestID: "revoked-start-" + randomSuffix(t), TTL: 30 * time.Second,
 	}); !errors.Is(err, ErrHostSessionUnauthorized) {
 		t.Fatalf("revoked host subject started a successor session: %v", err)
@@ -116,7 +116,7 @@ func TestHostSessionSubjectGrantRevocationFencesConcurrentHeartbeat(t *testing.T
 		t.Fatal(err)
 	}
 	first, err := repo.StartAuthenticatedHostSession(ctx, AuthenticatedHostSessionStartRequest{
-		TenantID: tenantID, Service: "compute-host-agent", Subject: binding.Subject,
+		Subject: binding.Subject,
 		ExpectedEpoch: 0, RequestID: "revoke-race-start-" + randomSuffix(t), TTL: 30 * time.Second,
 	})
 	if err != nil {
@@ -147,7 +147,7 @@ func TestHostSessionSubjectGrantRevocationFencesConcurrentHeartbeat(t *testing.T
 	done := make(chan error, 1)
 	go func() {
 		_, _, err := repo.RecordAuthenticatedHostHeartbeat(ctx, AuthenticatedHostHeartbeatRequest{
-			TenantID: tenantID, Service: "compute-host-agent", Subject: binding.Subject,
+			Subject: binding.Subject,
 			Epoch: first.Epoch, SessionID: first.SessionID, Sequence: 1,
 			Digest: "sha256:" + strings.Repeat("c", 64),
 		})
@@ -205,9 +205,9 @@ func TestHostSessionWriterCanOnlyInvokeAuthenticatedFunctions(t *testing.T) {
 			pg_catalog.has_function_privilege(current_user,
 				'public.compute_host_session_heartbeat(text,text,text,text,text,bigint,text,bigint,text)', 'EXECUTE'),
 			pg_catalog.has_function_privilege(current_user,
-				'public.compute_host_session_start_authenticated(text,text,text,bigint,text,integer)', 'EXECUTE'),
+				'public.compute_host_session_start_authenticated(text,bigint,text,integer)', 'EXECUTE'),
 			pg_catalog.has_function_privilege(current_user,
-				'public.compute_host_session_heartbeat_authenticated(text,text,text,bigint,text,bigint,text)', 'EXECUTE')
+				'public.compute_host_session_heartbeat_authenticated(text,bigint,text,bigint,text)', 'EXECUTE')
 	`).Scan(&rawStart, &rawHeartbeat, &authenticatedStart, &authenticatedHeartbeat)
 	if err != nil {
 		t.Fatal(err)
@@ -255,7 +255,7 @@ func TestAuthenticatedHostSessionCannotOutliveGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = repo.StartAuthenticatedHostSession(ctx, AuthenticatedHostSessionStartRequest{
-		TenantID: tenant, Service: "compute-host-agent", Subject: binding.Subject,
+		Subject: binding.Subject,
 		ExpectedEpoch: 0, RequestID: "too-long-" + randomSuffix(t), TTL: 120 * time.Second,
 	})
 	if !errors.Is(err, ErrHostSessionUnauthorized) {
@@ -313,7 +313,7 @@ func TestAuthenticatedHostSessionGrantExpiresWhileWaitingForProvider(t *testing.
 		t.Fatal(err)
 	}
 	req := AuthenticatedHostSessionStartRequest{
-		TenantID: tenant, Service: "compute-host-agent", Subject: binding.Subject,
+		Subject: binding.Subject,
 		ExpectedEpoch: 0, RequestID: "expiry-lock-" + randomSuffix(t), TTL: time.Second,
 	}
 	done := make(chan error, 1)
