@@ -52,8 +52,8 @@ func validNodeDNSName(name string) bool {
 }
 
 // observeNodeLease reads only authenticated Kubernetes API facts. It bounds
-// and brackets an exact Lease GET with two complete core/v1 Node lists, then
-// requires the Node identity and status to remain identical and available.
+// Node and Lease reads within the inventory TTL, requiring both snapshots
+// to remain identical and the Node to remain available.
 // The result remains an unmounted observation, not a host-attestation,
 // scheduler, GPU-allocation, or resource-reclamation authority.
 func (r *Reader) observeNodeLease(
@@ -81,6 +81,10 @@ func (r *Reader) observeNodeLease(
 	if !validNodeDNSName(nodeName) || strings.TrimSpace(expectedNodeUID) == "" || maxAge <= 0 {
 		return unknown("LEASE_QUERY_INVALID"), ErrInvalidResponse
 	}
+	started := r.now().UTC()
+	if started.IsZero() {
+		return unknown("LEASE_CLOCK_INVALID"), ErrInvalidResponse
+	}
 	beforeList, err := r.listNodes(ctx)
 	if err != nil {
 		return unknown("NODE_SOURCE_UNAVAILABLE"), err
@@ -104,8 +108,24 @@ func (r *Reader) observeNodeLease(
 	if !found || !reflect.DeepEqual(before, after) {
 		return unknown("NODE_CHANGED_DURING_LEASE_READ"), nil
 	}
+	finalLease, err := r.getNodeLease(ctx, nodeName)
+	if err != nil {
+		if errors.Is(err, errLeaseMissing) {
+			return unknown("LEASE_MISSING"), nil
+		}
+		return unknown("LEASE_SOURCE_UNAVAILABLE"), err
+	}
+	if !reflect.DeepEqual(lease, finalLease) {
+		return unknown("LEASE_CHANGED_DURING_READ"), nil
+	}
 	now := r.now().UTC()
-	assessment := assessNodeLease(nodeName, expectedNodeUID, lease, now, maxAge)
+	if now.IsZero() || now.Before(started) {
+		return unknown("LEASE_CLOCK_INVALID"), ErrInvalidResponse
+	}
+	if !now.Before(started.Add(r.ttl)) {
+		return unknown("LEASE_COLLECTION_EXPIRED"), ErrInvalidResponse
+	}
+	assessment := assessNodeLease(nodeName, expectedNodeUID, finalLease, now, maxAge)
 	return nodeLeaseSourceObservation{
 		NodeUID: expectedNodeUID, NodeResourceVersion: before.Metadata.ResourceVersion,
 		LeaseUID: lease.Metadata.UID, LeaseResourceVersion: lease.Metadata.ResourceVersion,
