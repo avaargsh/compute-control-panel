@@ -125,6 +125,9 @@ func (a *KueueJobAdapter) RecordPreDeleteDRASnapshot(
 		}
 		return KueuePreDeleteDRASnapshot{}, ErrInvalidPreDeleteDRASnapshot
 	}
+	if ctx == nil {
+		return reject(nil)
+	}
 	if err := ctx.Err(); err != nil {
 		return reject(err)
 	}
