@@ -252,7 +252,7 @@ jobs:
             echo 'authenticated HostSession PostgreSQL acceptance was skipped' >&2
             exit 1
           fi
-          printf 'verified_authenticated_host_session_source_sha=%s\\n' "$(git rev-parse --verify HEAD)"
+          printf 'verified_authenticated_host_session_source_sha=%s\n' "$(git rev-parse --verify HEAD)"
       - name: Require real PostgreSQL release Generation/UID fence test (no skip)
         shell: bash
         env:
