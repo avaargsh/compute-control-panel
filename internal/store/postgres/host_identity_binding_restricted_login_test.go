@@ -134,7 +134,6 @@ func TestHostIdentityBindingRestrictedLoginDoesNotNeedProviderPrivileges(t *test
 	}
 }
 
-
 func TestHostIdentityGuardOwnerCatalogBoundary(t *testing.T) {
 	db := openIntegrationDB(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
