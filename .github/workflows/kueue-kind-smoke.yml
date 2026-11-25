@@ -2,26 +2,8 @@ name: Kueue real-controller kind smoke (no GPU readiness claim)
 
 on:
   pull_request:
-    paths:
-      - '.github/workflows/kueue-kind-smoke.yml'
-      - 'scripts/kueue_kind_smoke.sh'
-      - 'scripts/kueue_relist_kind_smoke.sh'
-      - 'scripts/dra_example_kind_smoke.sh'
-      - 'scripts/kueue_dra_quota_kind_smoke.sh'
-      - 'scripts/pd_jobset_dra_kind_smoke.sh'
-      - 'scripts/pd_jobset_activation_gate_kind_smoke.sh'
-      - 'scripts/pd_jobset_provider_kind_smoke.sh'
-      - 'scripts/pd_jobset_pg_kind_golden_smoke.sh'
-      - 'scripts/kueue_preemption_kind_smoke.sh'
-      - 'scripts/kueue_cohort_kind_smoke.sh'
-      - 'cmd/kueue-observe/**'
-      - 'cmd/kueue-provider-smoke/**'
-      - 'internal/provider/kueue_*.go'
-      - 'internal/provider/dra_*.go'
-      - 'internal/provider/pd_*.go'
-      - 'internal/pdstaging/**'
-      - 'internal/store/postgres/pd_*.go'
-      - 'cmd/pd-jobset-provider-smoke/**'
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
     paths:
@@ -54,7 +36,30 @@ env:
   GOTOOLCHAIN: local
 
 jobs:
+  scope:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      kind: ${{ steps.classify.outputs.kind }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6 immutable commit
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify scope and verdict contract
+        run: python3 .github/scripts/test_kueue_kind_gate.py
+      - name: Classify exact source change
+        id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 .github/scripts/kueue_kind_gate.py scope "$GITHUB_EVENT_NAME" "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
   disposable-kind:
+    needs: scope
+    if: ${{ needs.scope.outputs.kind == 'required' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
@@ -63,6 +68,7 @@ jobs:
           # PR workflows normally check out a synthetic merge commit. Pin the
           # tested tree to the PR head; main/push/dispatch use the trigger SHA.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - name: Assert exact PR/source checkout identity
         env:
           EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -103,3 +109,24 @@ jobs:
         env:
           CCP_DISPOSABLE_KIND_SMOKE: '1'
         run: bash scripts/kueue_kind_smoke.sh
+
+
+  required-kind:
+    name: Kueue kind required verdict
+    if: ${{ always() }}
+    needs: [scope, disposable-kind]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require successful relevant kind execution
+        env:
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          KIND_SCOPE: ${{ needs.scope.outputs.kind }}
+          KIND_RESULT: ${{ needs.disposable-kind.result }}
+        run: |
+          set -eu
+          case "$SCOPE_RESULT:$KIND_SCOPE:$KIND_RESULT" in
+            success:required:success) echo "Relevant source: disposable kind passed." ;;
+            success:unrelated:skipped) echo "Only allowlisted documentation changed; kind not required." ;;
+            *) echo "Unverified kind gate: scope=$SCOPE_RESULT classification=$KIND_SCOPE kind=$KIND_RESULT" >&2; exit 1 ;;
+          esac
