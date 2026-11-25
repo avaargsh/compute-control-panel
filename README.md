@@ -4,13 +4,29 @@ Go-based Compute Control Plane for self-hosted, Kubernetes-first heterogeneous c
 
 ## Try the local Demo
 
-The synthetic-only Dashboard, Clusters and GPUs preview is available on `main`. It needs a Go toolchain matching `go.mod`, but no Kubernetes cluster, GPU, PostgreSQL or cloud credentials.
+The synthetic-only Dashboard, Clusters and GPUs preview is available on `main`. It needs a Go toolchain matching `go.mod` (Go 1.27.0 or newer), but no Kubernetes cluster, GPU, PostgreSQL or cloud credentials. GitHub Go validation pins Go 1.27.4 with `GOTOOLCHAIN=local`.
 
 ```bash
-go run ./cmd/ccp-demo -addr 127.0.0.1:8081
+make demo
 ```
 
-Open `http://127.0.0.1:8081` on the same machine. See the [Demo Quickstart](docs/product/DEMO-CONSOLE-QUICKSTART.md) for verification and limitations. This is not an authenticated live Console; never expose the Demo publicly.
+That runs `go run ./cmd/ccp-demo -addr 127.0.0.1:8081`. Open `http://127.0.0.1:8081` on the same machine. See the [Demo Quickstart](docs/product/DEMO-CONSOLE-QUICKSTART.md) for verification and limitations. This is not an authenticated live Console; never expose the Demo publicly.
+
+## Local checks
+
+From a checkout that contains the Makefile:
+
+```bash
+make help
+make lint   # gofmt -l ., go vet ./..., go mod verify
+make test   # go test -race -count=1 ./...
+make build  # writes bin/ccp-demo, bin/compute-control-panel, bin/migrate, bin/kueue-observe
+make clean  # deletes bin/ only; it does not clear the Go build cache
+```
+
+`make lint` and `make test` do not start PostgreSQL or a kind cluster. Tests that need `DATABASE_URL` skip when it is unset, so a passing local `make test` is the race command from Go validation, not that whole job. The job also applies migrations, checks schema constraints, and repeats the SIGKILL recovery test. Kind workflows are separate and are not invoked by these targets.
+
+`bin/compute-control-panel` serves `GET /livez`, `GET /readyz`, and `GET /api/v1/meta`. It listens on `127.0.0.1:8080` unless `LISTEN_ADDR` is set. It does not mount workload, provider, host-session, or receipt handlers. `bin/migrate` applies SQL from `MIGRATIONS_DIR` (default `./migrations`) only when `DATABASE_URL` is set; running it is not part of `make build`. `bin/kueue-observe` is a one-shot read-only Kubernetes Job observer. With no flags it exits before contacting Kubernetes (`all Job identity and credential-path flags are required`). In-cluster execution was not verified.
 
 ## Interview highlights
 
