@@ -57,11 +57,16 @@ func TestRunReportsBoundAddressAndServesHealth(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+			resp.Body.Close()
+			t.Fatalf("read GET %s response: %v", endpoint, err)
+		}
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("GET %s: got %d", endpoint, resp.StatusCode)
 		}
 	}
+	client.CloseIdleConnections()
 	cancel()
 	select {
 	case err := <-stopped:
