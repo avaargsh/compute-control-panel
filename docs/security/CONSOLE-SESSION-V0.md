@@ -29,6 +29,8 @@ All routes require a direct HTTPS request (`r.TLS != nil`) and the expected Host
 - A project-scoped `httpapi.ObservationReader` is required at construction; no wildcard-read default.
 - Exact HTTP response status/permission behavior is covered by `internal/consoleauth/handler_test.go`.
 
+The separate live Console command currently under review in [PR #183](https://github.com/avaargsh/compute-control-panel/pull/183) has an opt-in [loopback quickstart](../product/LIVE-CONSOLE-LOCAL-QUICKSTART.md). The quickstart is not a security sign-off, browser-trust proof or production deployment guide.
+
 ## Known limitations / explicit non-goals
 
 **Not mounted**: `cmd/compute-control-panel/main.go` still exposes its existing health/meta surface. There is no new public bind, no automatic Console startup, no TLS certificate management, no browser page behind this handler, and no exposure of a private Kubernetes token.
