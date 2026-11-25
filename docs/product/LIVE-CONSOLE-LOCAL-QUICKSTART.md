@@ -6,7 +6,7 @@ The separate `cmd/ccp-console` executable exposes only a **single-administrator*
 
 ## Requirements and boundaries
 
-- Go matching `go.mod` (CI pins Go **1.27.4**), `openssl`, and `htpasswd` for creating an interactive bcrypt verifier. `curl` is used to test the API; `jq` is optional for extracting the logout CSRF token.
+- Go matching `go.mod` (CI pins Go **1.27.4**), `openssl`, and `htpasswd` for creating an interactive bcrypt verifier. `curl` and `jq` are used to verify the API and logout without printing session secrets.
 - An already reachable **HTTPS** Kubernetes API endpoint; its verified CA PEM; a **dedicated, time-bounded, rotatable ServiceAccount bearer-token file** that can only **list core/v1 Nodes**, not workloads or Secrets; and administrator-selected cluster, tenant and project IDs. Do not use cluster-admin credentials or a kubeconfig's client private key as the reader token.
 - A private workspace for the bcrypt verifier, TLS key, and session cookies (`umask 077`). Never add these files to Git, pass the password on a command line, or log them.
 - This preview requires direct TLS to the local server. No reverse proxy, port forwarding, shared host, public load balancer, ingress, wildcard listener, `X-Forwarded-Proto` trust, or persistent/HA browser sessions.
@@ -93,40 +93,52 @@ The API refuses non-loopback bind, missing/invalid certificate or key, unexpecte
 
 ## 4. Verify anonymous denial, authenticated read, and logout
 
-In a **second terminal**, set `work` to the private directory created above:
+In a **second terminal**, set `work` to the private directory created above. Use the same loopback address and port as the server:
 
 ```bash
+umask 077
 origin="https://127.0.0.1:8443"
-# Expect HTTP 401. The upstream Kubernetes reader must not be called.
-curl -sS --cacert "$work/console.crt" -o /dev/null -w '%{http_code}\n' \
-  "$origin/api/v1/observations"
+expect_status() {
+  local expected="$1" actual
+  shift
+  actual="$(curl -sS --cacert "$work/console.crt" -o /dev/null -w '%{http_code}' "$@")" || return
+  if [ "$actual" != "$expected" ]; then
+    printf 'Expected HTTP %s, got %s\n' "$expected" "$actual" >&2
+    return 1
+  fi
+  printf 'HTTP %s\n' "$actual"
+}
+
+# The upstream Kubernetes reader must not be called.
+expect_status 401 "$origin/api/v1/observations"
 ```
 
-Privately create `$work/login.json` containing exactly `{"username":"admin","password":"<the interactively provisioned password>"}` with mode `0600`. Do not paste real credentials into terminal history or send them to a public endpoint. Then:
+Privately create `$work/login.json` containing exactly `{"username":"admin","password":"<the interactively provisioned password>"}` with mode `0600`. Do not paste real credentials into terminal history or send them to a public endpoint. Run the following block and stop if a command fails:
 
 ```bash
-curl -sS --cacert "$work/console.crt" -c "$work/cookies" \
+curl -fsS --cacert "$work/console.crt" -c "$work/cookies" -o /dev/null \
   -H "Content-Type: application/json" -H "Origin: $origin" \
-  --data-binary "@$work/login.json" "$origin/api/v1/console/login"
-# Expect authenticated:true and a __Host-ccp_session Secure/HttpOnly cookie.
-curl -sS --cacert "$work/console.crt" -b "$work/cookies" \
-  "$origin/api/v1/console/session"
-curl -sS --cacert "$work/console.crt" -b "$work/cookies" \
+  --data-binary "@$work/login.json" "$origin/api/v1/console/login" &&
+curl -fsS --cacert "$work/console.crt" -b "$work/cookies" \
+  -o "$work/session.json" "$origin/api/v1/console/session" &&
+jq -e '.authenticated == true' "$work/session.json" >/dev/null &&
+curl -fsS --cacert "$work/console.crt" -b "$work/cookies" \
   "$origin/api/v1/observations"
 ```
 
-Expect HTTP 200 with `"data_mode":"live"` for an authorized session, and observations restricted to the configured project. Node allocatable is **not** unallocated/free GPU capacity, and there is no physical device UID proof. An invalid ServiceAccount, unreachable API, wrong CA, or forbidden Node LIST must fail closed rather than fall back to synthetic data.
+Expect HTTP 200 with `"data_mode":"live"` for an authorized session, and observations restricted to the configured project. Login sets a `__Host-ccp_session` Secure/HttpOnly cookie. An invalid or forbidden Node reader returns an error rather than falling back to synthetic data. Node allocatable is **not** unallocated/free GPU capacity, and there is no physical device UID proof.
 
-To explicitly revoke the session, read `csrf_token` from the session JSON (using `jq -r .csrf_token` if available), then:
+To revoke the session without putting its CSRF token in terminal output or command arguments, pass curl a private header file. Deliberately replay the old cookie to check server-side revocation:
 
 ```bash
-curl -sS --cacert "$work/console.crt" -b "$work/cookies" \
-  -H "Origin: $origin" -H "X-CCP-CSRF: <csrf_token_from_session>" \
-  -X POST "$origin/api/v1/console/logout"
-# Subsequent GET /api/v1/observations using the old cookie must return HTTP 401.
+jq -er '.csrf_token | select(type == "string" and length > 0) | "X-CCP-CSRF: " + .' \
+  "$work/session.json" > "$work/logout.headers" &&
+expect_status 204 -b "$work/cookies" -H "Origin: $origin" \
+  -H "@$work/logout.headers" -X POST "$origin/api/v1/console/logout" &&
+expect_status 401 -b "$work/cookies" "$origin/api/v1/observations"
 ```
 
-Do not log or share `csrf_token`, `login.json`, the cookie jar or any private key.
+Do not log or share the session JSON, logout header file, login JSON, cookie jar or any private key.
 
 ## 5. Repeatable test checks and cleanup
 
@@ -134,7 +146,7 @@ Do not log or share `csrf_token`, `login.json`, the cookie jar or any private ke
 go test -count=1 ./cmd/ccp-console ./internal/consoleauth ./internal/kubeinventory
 ```
 
-Source-level tests verify TLS 1.2 rejection, TLS 1.3 handshake, invalid TLS leaf, loopback-only listen, real scoped Kubernetes read, login cookie, CSRF logout and revocation. **These tests do not establish a real cluster installation or independent security acceptance**; exact-head GitHub Go/race verification and a separate authorized reviewer are required before merge.
+Source-level tests verify TLS 1.2 rejection, TLS 1.3 handshake, invalid TLS leaf, loopback-only listen, scoped Kubernetes reader behavior, login cookie, CSRF logout and revocation. **These tests do not establish a real cluster installation or independent security acceptance**; exact-head GitHub Go/race verification and a separate authorized reviewer are required before merge.
 
 Stop the Console process, revoke the disposable ServiceAccount token per cluster policy, and securely delete the private workspace. If a TLS certificate is untrusted, fix the certificate/CA chain; never work around it by disabling verification. If observations return `UNKNOWN`, inspect source provenance and Node condition rather than assuming device availability.
 
