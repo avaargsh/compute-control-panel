@@ -17,7 +17,7 @@ import (
 
 // run owns service admission and shutdown. Domain API writes will only be
 // admitted once a durable store and authorization boundary are integrated.
-func run(ctx context.Context, addr string) error {
+func run(ctx context.Context, addr string, logger *slog.Logger) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
@@ -33,6 +33,7 @@ func run(ctx context.Context, addr string) error {
 	}
 	stopped := make(chan error, 1)
 	ready.Store(true)
+	logger.Info("control plane listening", "addr", ln.Addr().String())
 	go func() { stopped <- srv.Serve(ln) }()
 	select {
 	case err := <-stopped:
@@ -59,7 +60,7 @@ func main() {
 	if addr == "" {
 		addr = "127.0.0.1:8080"
 	}
-	if err := run(ctx, addr); err != nil {
+	if err := run(ctx, addr, slog.Default()); err != nil {
 		slog.Error("control plane stopped", "error", err)
 		os.Exit(1)
 	}
