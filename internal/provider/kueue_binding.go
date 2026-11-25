@@ -54,6 +54,8 @@ type KueueJobBindingStore interface {
 	PutDeleteTombstone(namespace string, req Request, name, uid string, acknowledged bool) error
 	PutPreDeleteDRASnapshot(namespace string, req Request, snapshot KueuePreDeleteDRASnapshot) (KueuePreDeleteDRASnapshot, error)
 	GetPreDeleteDRASnapshot(namespace string, req Request) (KueuePreDeleteDRASnapshot, bool, error)
+	// GetPreDeleteDRASnapshotForReceipt uses an authenticated signed receipt only as an exact lookup key; returned history is structural, not release authority.
+	GetPreDeleteDRASnapshotForReceipt(tenantID string, event DRAUnprepareEvent) (KueuePreDeleteDRASnapshot, bool, error)
 	CreatePinUID(namespace, jobName string) (string, bool, error)
 }
 
