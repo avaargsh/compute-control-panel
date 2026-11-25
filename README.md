@@ -14,7 +14,7 @@ That runs `go run ./cmd/ccp-demo -addr 127.0.0.1:8081`. Open `http://127.0.0.1:8
 
 ## Local checks
 
-From a checkout that contains the Makefile:
+From a checkout that contains the Makefile, select an installed Go SDK on PATH. These targets set `GOTOOLCHAIN=local` and do not download a different Go toolchain:
 
 ```bash
 make help
