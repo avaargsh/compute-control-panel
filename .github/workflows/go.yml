@@ -333,3 +333,21 @@ jobs:
             echo 'signed/current same-transaction PG test was skipped: no acceptance evidence' >&2
             exit 1
           fi
+      - name: Require tenant and Provider scoped receipt snapshot lookup (no skip)
+        shell: bash
+        env:
+          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
+        run: |
+          set -euo pipefail
+          go test -count=1 -v -run '^(TestGetPreDeleteDRASnapshotForReceiptDistinguishesUnusableStoreFromUncorrelatedEvent|TestGetPreDeleteDRASnapshotForReceiptIsTenantProviderAndIdentityScoped|TestPreDeleteReceiptSnapshotLookupRejectsAmbiguousIdentity|TestMemoryPreDeleteReceiptSnapshotLookupRejectsMalformedInput)$' ./internal/provider | tee dra-receipt-snapshot-lookup-pg.log
+          for test in TestGetPreDeleteDRASnapshotForReceiptDistinguishesUnusableStoreFromUncorrelatedEvent TestGetPreDeleteDRASnapshotForReceiptIsTenantProviderAndIdentityScoped TestPreDeleteReceiptSnapshotLookupRejectsAmbiguousIdentity TestMemoryPreDeleteReceiptSnapshotLookupRejectsMalformedInput; do
+            grep -F -- "--- PASS: $test " dra-receipt-snapshot-lookup-pg.log
+          done
+          for test in TestGetPreDeleteDRASnapshotForReceiptIsTenantProviderAndIdentityScoped TestPreDeleteReceiptSnapshotLookupRejectsAmbiguousIdentity; do
+            grep -F -- "--- PASS: $test/postgres " dra-receipt-snapshot-lookup-pg.log
+          done
+          if grep -F -- '--- SKIP:' dra-receipt-snapshot-lookup-pg.log; then
+            echo 'DRA receipt snapshot lookup acceptance was skipped' >&2
+            exit 1
+          fi
+          printf 'verified_dra_receipt_snapshot_lookup_source_sha=%s\n' "$(git rev-parse --verify HEAD)"

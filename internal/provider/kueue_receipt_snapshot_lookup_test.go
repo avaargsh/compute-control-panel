@@ -1,0 +1,248 @@
+package provider
+
+import (
+	"errors"
+	"strings"
+	"testing"
+)
+
+func receiptSnapshotLookupEvent(snapshot KueuePreDeleteDRASnapshot) DRAUnprepareEvent {
+	return DRAUnprepareEvent{
+		ClaimNamespace:                snapshot.Claim.Namespace,
+		ClaimName:                     snapshot.Claim.Name,
+		ClaimUID:                      snapshot.Claim.UID,
+		PodUID:                        snapshot.Pod.UID,
+		AllocatedClaimResourceVersion: snapshot.Claim.ResourceVersion,
+		NodeName:                      snapshot.NodeName,
+		AllocatedDevice:               snapshot.Devices[0],
+	}
+}
+
+func TestGetPreDeleteDRASnapshotForReceiptDistinguishesUnusableStoreFromUncorrelatedEvent(t *testing.T) {
+	var memory *MemoryKueueJobBindingStore
+	var postgres *PostgresKueueJobBindingStore
+	create := uniqueKueueRequest(t)
+	remove := preDeleteDeleteRequest(create, "tenant-a", "job-a", "job-uid-a")
+	event := receiptSnapshotLookupEvent(preDeleteSnapshotFixture(create, remove, "tenant-a", "job-a", "job-uid-a"))
+
+	for _, tc := range []struct {
+		name string
+		read func() (KueuePreDeleteDRASnapshot, bool, error)
+	}{
+		{"unusable memory store", func() (KueuePreDeleteDRASnapshot, bool, error) {
+			return memory.GetPreDeleteDRASnapshotForReceipt(create.TenantID, create.ProviderID, event)
+		}},
+		{"unusable PostgreSQL store", func() (KueuePreDeleteDRASnapshot, bool, error) {
+			return postgres.GetPreDeleteDRASnapshotForReceipt(create.TenantID, create.ProviderID, event)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, ok, err := tc.read()
+			if ok || !errors.Is(err, ErrInvalidKueueObservation) {
+				t.Fatalf("unavailable snapshot store was misclassified as a normal uncorrelated receipt: ok=%t err=%v", ok, err)
+			}
+		})
+	}
+}
+
+func TestGetPreDeleteDRASnapshotForReceiptIsTenantProviderAndIdentityScoped(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		open func(*testing.T) KueueJobBindingStore
+	}{
+		{name: "memory", open: func(*testing.T) KueueJobBindingStore { return NewMemoryKueueJobBindingStore() }},
+		{name: "postgres", open: func(t *testing.T) KueueJobBindingStore {
+			db := openProviderPostgresDB(t)
+			store, err := NewPostgresKueueJobBindingStore(db)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return store
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := tc.open(t)
+			create := uniqueKueueRequest(t)
+			const namespace = "tenant-a"
+			suffix := strings.TrimPrefix(create.OperationID, "op-")
+			jobName, jobUID := "job-"+suffix, "job-uid-"+suffix
+			remove := preDeleteDeleteRequest(create, namespace, jobName, jobUID)
+			if err := store.PutCreatePin(namespace, create, jobName, jobUID); err != nil {
+				t.Fatal(err)
+			}
+			// A valid DELETE request may target the same desired generation as
+			// its pinned CREATE. Receipt lookup must use the durable snapshot
+			// contract, not invent an increment-only generation requirement.
+			if create.DesiredGeneration != remove.DesiredGeneration {
+				t.Fatal("fixture must cover equal CREATE/DELETE desired generations")
+			}
+			want, err := store.PutPreDeleteDRASnapshot(namespace, remove,
+				preDeleteSnapshotFixture(create, remove, namespace, jobName, jobUID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			event := receiptSnapshotLookupEvent(want)
+
+			got, ok, err := store.GetPreDeleteDRASnapshotForReceipt(create.TenantID, create.ProviderID, event)
+			if err != nil || !ok || got.Digest != want.Digest || got.DeleteOperationID != remove.OperationID {
+				t.Fatalf("exact receipt lookup got=%+v ok=%t err=%v", got, ok, err)
+			}
+
+			if _, ok, err := store.GetPreDeleteDRASnapshotForReceipt("tenant-other", create.ProviderID, event); err != nil || ok {
+				t.Fatalf("foreign tenant resolved snapshot: ok=%t err=%v", ok, err)
+			}
+			// Provider scope comes from the independently registered signer
+			// resolver, not from tenant input or the signed event itself.
+			if _, ok, err := store.GetPreDeleteDRASnapshotForReceipt(create.TenantID, "provider-other", event); err != nil || ok {
+				t.Fatalf("foreign Provider resolved receipt snapshot: ok=%t err=%v", ok, err)
+			}
+			// Identical Kubernetes names/UIDs can exist in different Provider
+			// clusters. They must not make each other's tenant-scoped history
+			// ambiguous; the registered Provider scope selects one lineage.
+			otherCreate := uniqueKueueRequest(t)
+			otherCreate.ProviderID = "provider-other"
+			otherSuffix := strings.TrimPrefix(otherCreate.OperationID, "op-")
+			otherJob, otherUID := "job-"+otherSuffix, "job-uid-"+otherSuffix
+			otherRemove := preDeleteDeleteRequest(otherCreate, namespace, otherJob, otherUID)
+			if err := store.PutCreatePin(namespace, otherCreate, otherJob, otherUID); err != nil {
+				t.Fatal(err)
+			}
+			otherSnapshot := preDeleteSnapshotFixture(otherCreate, otherRemove, namespace, otherJob, otherUID)
+			otherSnapshot.Claim = want.Claim
+			otherSnapshot.Pod = want.Pod
+			otherSnapshot.NodeName = want.NodeName
+			otherSnapshot.Devices = want.Devices
+			otherStored, err := store.PutPreDeleteDRASnapshot(namespace, otherRemove, otherSnapshot)
+			if err != nil {
+				t.Fatalf("store colliding cross-Provider snapshot: %v", err)
+			}
+			gotOther, ok, err := store.GetPreDeleteDRASnapshotForReceipt(otherCreate.TenantID, otherCreate.ProviderID, event)
+			if err != nil || !ok || gotOther.Digest != otherStored.Digest {
+				t.Fatalf("registered Provider did not select its own colliding snapshot: got=%+v ok=%t err=%v", gotOther, ok, err)
+			}
+			gotOriginal, ok, err := store.GetPreDeleteDRASnapshotForReceipt(create.TenantID, create.ProviderID, event)
+			if err != nil || !ok || gotOriginal.Digest != want.Digest {
+				t.Fatalf("foreign Provider collision made original history ambiguous: got=%+v ok=%t err=%v", gotOriginal, ok, err)
+			}
+			mutations := []struct {
+				name   string
+				mutate func(*DRAUnprepareEvent)
+			}{
+				{name: "claim namespace", mutate: func(e *DRAUnprepareEvent) { e.ClaimNamespace = "tenant-other" }},
+				{name: "claim name", mutate: func(e *DRAUnprepareEvent) { e.ClaimName = "successor-claim" }},
+				{name: "claim UID", mutate: func(e *DRAUnprepareEvent) { e.ClaimUID = "successor-claim-uid" }},
+				{name: "claim resourceVersion", mutate: func(e *DRAUnprepareEvent) { e.AllocatedClaimResourceVersion = "999" }},
+				{name: "Pod UID", mutate: func(e *DRAUnprepareEvent) { e.PodUID = "successor-pod-uid" }},
+				{name: "Node", mutate: func(e *DRAUnprepareEvent) { e.NodeName = "successor-node" }},
+				{name: "device", mutate: func(e *DRAUnprepareEvent) { e.AllocatedDevice.Device = "successor-device" }},
+			}
+			for _, mutation := range mutations {
+				t.Run(mutation.name, func(t *testing.T) {
+					changed := event
+					mutation.mutate(&changed)
+					if _, ok, err := store.GetPreDeleteDRASnapshotForReceipt(create.TenantID, create.ProviderID, changed); err != nil || ok {
+						t.Fatalf("mismatched receipt resolved snapshot: ok=%t err=%v", ok, err)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestPreDeleteReceiptSnapshotLookupRejectsAmbiguousIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		open func(*testing.T) KueueJobBindingStore
+	}{
+		{name: "memory", open: func(*testing.T) KueueJobBindingStore { return NewMemoryKueueJobBindingStore() }},
+		{name: "postgres", open: func(t *testing.T) KueueJobBindingStore {
+			store, err := NewPostgresKueueJobBindingStore(openProviderPostgresDB(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return store
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := tc.open(t)
+			createA := uniqueKueueRequest(t)
+			createB := uniqueKueueRequest(t)
+			const namespace = "tenant-a"
+			suffixA := strings.TrimPrefix(createA.OperationID, "op-")
+			suffixB := strings.TrimPrefix(createB.OperationID, "op-")
+			jobA, uidA := "job-"+suffixA, "job-uid-"+suffixA
+			jobB, uidB := "job-"+suffixB, "job-uid-"+suffixB
+			removeA := preDeleteDeleteRequest(createA, namespace, jobA, uidA)
+			removeB := preDeleteDeleteRequest(createB, namespace, jobB, uidB)
+			for _, item := range []struct {
+				create Request
+				remove Request
+				job    string
+				uid    string
+			}{{createA, removeA, jobA, uidA}, {createB, removeB, jobB, uidB}} {
+				if err := store.PutCreatePin(namespace, item.create, item.job, item.uid); err != nil {
+					t.Fatal(err)
+				}
+				snapshot := preDeleteSnapshotFixture(item.create, item.remove, namespace, item.job, item.uid)
+				if item.job == jobB {
+					snapshot.Claim = preDeleteSnapshotFixture(createA, removeA, namespace, jobA, uidA).Claim
+					snapshot.Pod = preDeleteSnapshotFixture(createA, removeA, namespace, jobA, uidA).Pod
+					snapshot.NodeName = preDeleteSnapshotFixture(createA, removeA, namespace, jobA, uidA).NodeName
+					snapshot.Devices = preDeleteSnapshotFixture(createA, removeA, namespace, jobA, uidA).Devices
+				}
+				if _, err := store.PutPreDeleteDRASnapshot(namespace, item.remove, snapshot); err != nil {
+					t.Fatal(err)
+				}
+			}
+			snapshotA, ok, err := store.GetPreDeleteDRASnapshot(namespace, removeA)
+			if err != nil || !ok {
+				t.Fatalf("read first snapshot: ok=%t err=%v", ok, err)
+			}
+			if _, ok, err := store.GetPreDeleteDRASnapshotForReceipt(createA.TenantID, createA.ProviderID, receiptSnapshotLookupEvent(snapshotA)); !errors.Is(err, ErrOperationConflict) || ok {
+				t.Fatalf("ambiguous claim identity did not fail closed: ok=%t err=%v", ok, err)
+			}
+		})
+	}
+}
+
+func TestMemoryPreDeleteReceiptSnapshotLookupRejectsMalformedInput(t *testing.T) {
+	event := DRAUnprepareEvent{
+		ClaimNamespace: "tenant-a", ClaimName: "claim-a", ClaimUID: "claim-uid-a",
+		PodUID: "pod-uid-a", AllocatedClaimResourceVersion: "14", NodeName: "node-a",
+		AllocatedDevice: DRAAllocatedDevice{Request: "gpu", Driver: "vendor.example", Pool: "pool-a", Device: "gpu-a"},
+	}
+	cases := []struct {
+		name     string
+		tenantID string
+		mutate   func(*DRAUnprepareEvent)
+	}{
+		{name: "empty tenant", tenantID: "", mutate: func(*DRAUnprepareEvent) {}},
+		{name: "whitespace tenant", tenantID: " tenant-a ", mutate: func(*DRAUnprepareEvent) {}},
+		{name: "missing Claim UID", tenantID: "tenant-a", mutate: func(e *DRAUnprepareEvent) { e.ClaimUID = "" }},
+		{name: "missing Pod UID", tenantID: "tenant-a", mutate: func(e *DRAUnprepareEvent) { e.PodUID = "" }},
+		{name: "missing device", tenantID: "tenant-a", mutate: func(e *DRAUnprepareEvent) { e.AllocatedDevice.Device = "" }},
+	}
+	store := NewMemoryKueueJobBindingStore()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			changed := event
+			tc.mutate(&changed)
+			if _, ok, err := store.GetPreDeleteDRASnapshotForReceipt(tc.tenantID, "provider-a", changed); !errors.Is(err, ErrUncorrelatedDRAUnprepare) || ok {
+				t.Fatalf("malformed receipt lookup did not fail closed: ok=%t err=%v", ok, err)
+			}
+		})
+	}
+	for _, providerID := range []string{"", " provider-a ", "provider\x00a", "provider\nid", "provider\\\\id", strings.Repeat("p", 254)} {
+		if _, ok, err := store.GetPreDeleteDRASnapshotForReceipt("tenant-a", providerID, event); !errors.Is(err, ErrUncorrelatedDRAUnprepare) || ok {
+			t.Fatalf("malformed Provider scope did not fail closed: ok=%t err=%v", ok, err)
+		}
+	}
+	var nilStore *MemoryKueueJobBindingStore
+	if _, ok, err := nilStore.GetPreDeleteDRASnapshotForReceipt("tenant-a", "provider-a", event); !errors.Is(err, ErrInvalidKueueObservation) || ok {
+		t.Fatalf("unavailable memory store error was hidden: ok=%t err=%v", ok, err)
+	}
+	var nilPostgres *PostgresKueueJobBindingStore
+	if _, ok, err := nilPostgres.GetPreDeleteDRASnapshotForReceipt("tenant-a", "provider-a", event); !errors.Is(err, ErrInvalidKueueObservation) || ok {
+		t.Fatalf("unavailable PostgreSQL store error was hidden: ok=%t err=%v", ok, err)
+	}
+}
