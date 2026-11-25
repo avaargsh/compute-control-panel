@@ -5,6 +5,8 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/asn1"
 	"errors"
 	"flag"
 	"log/slog"
@@ -38,9 +40,13 @@ func newLiveHandler(cfg liveConfig) (http.Handler, error) {
 	return consoleauth.NewHandler(cfg.Auth, reader)
 }
 
+const consoleHost = "127.0.0.1"
+
+var oidKeyUsage = asn1.ObjectIdentifier{2, 5, 29, 15}
+
 func validateListen(addr string) error {
 	host, port, err := net.SplitHostPort(addr)
-	if err != nil || host != "127.0.0.1" {
+	if err != nil || host != consoleHost {
 		return errors.New("console must bind explicitly to 127.0.0.1")
 	}
 	n, err := strconv.Atoi(port)
@@ -50,6 +56,42 @@ func validateListen(addr string) error {
 	return nil
 }
 
+// This checks the presented leaf, not browser trust or the full issuing chain.
+func loadConsoleCertificate(certFile, keyFile string, now time.Time) (tls.Certificate, error) {
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return tls.Certificate{}, errors.New("console TLS credentials unavailable")
+	}
+	leaf := cert.Leaf
+	if leaf == nil {
+		leaf, err = x509.ParseCertificate(cert.Certificate[0])
+		if err != nil {
+			return tls.Certificate{}, errors.New("console TLS certificate is invalid")
+		}
+	}
+	if leaf.VerifyHostname(consoleHost) != nil {
+		return tls.Certificate{}, errors.New("console TLS certificate is not valid for " + consoleHost + "; include this IP in the subject alternative names")
+	}
+	if now.Before(leaf.NotBefore) || now.After(leaf.NotAfter) {
+		return tls.Certificate{}, errors.New("console TLS certificate is outside its validity period")
+	}
+	// TLS 1.3 uses a certificate to sign the handshake (RFC 8446 §4.4.2.2).
+	for _, ext := range leaf.Extensions {
+		if ext.Id.Equal(oidKeyUsage) && leaf.KeyUsage&x509.KeyUsageDigitalSignature == 0 {
+			return tls.Certificate{}, errors.New("console TLS certificate is not valid for digital signatures")
+		}
+	}
+	if len(leaf.ExtKeyUsage)+len(leaf.UnknownExtKeyUsage) != 0 {
+		for _, usage := range leaf.ExtKeyUsage {
+			if usage == x509.ExtKeyUsageServerAuth || usage == x509.ExtKeyUsageAny {
+				return cert, nil
+			}
+		}
+		return tls.Certificate{}, errors.New("console TLS certificate is not valid for server authentication")
+	}
+	return cert, nil
+}
+
 func run(ctx context.Context, addr, certFile, keyFile string, cfg liveConfig) error {
 	if err := validateListen(addr); err != nil {
 		return err
@@ -57,9 +99,9 @@ func run(ctx context.Context, addr, certFile, keyFile string, cfg liveConfig) er
 	if certFile == "" || keyFile == "" || cfg.Auth.Origin != "https://"+addr {
 		return errors.New("console requires explicit TLS certificate, key and matching HTTPS origin")
 	}
-	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	cert, err := loadConsoleCertificate(certFile, keyFile, time.Now())
 	if err != nil {
-		return errors.New("console TLS credentials unavailable")
+		return err
 	}
 	h, err := newLiveHandler(cfg)
 	if err != nil {
@@ -104,7 +146,7 @@ func serveConsole(ctx context.Context, ln net.Listener, cert tls.Certificate, h 
 }
 
 func main() {
-	addr := flag.String("addr", "127.0.0.1:8443", "explicit loopback HTTPS address")
+	addr := flag.String("addr", consoleHost+":8443", "explicit loopback HTTPS address")
 	cert := flag.String("tls-cert", "", "TLS certificate file")
 	key := flag.String("tls-key", "", "TLS private key file")
 	user := flag.String("admin-user", "", "configured administrator username")
