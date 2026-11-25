@@ -35,7 +35,12 @@ def validate(event):
     base, head = pr.get('base'), pr.get('head')
     if not isinstance(base, dict) or not isinstance(head, dict):
         return ['Missing GitHub base/head commit metadata']
-    if base.get('ref') != 'main' or pr.get('draft') is True:
+    base_ref = base.get('ref')
+    if not isinstance(base_ref, str) or not base_ref or base_ref != base_ref.strip():
+        return ['Missing or invalid GitHub base ref']
+    if not isinstance(pr.get('draft'), bool):
+        return ['Missing or invalid GitHub draft flag']
+    if base_ref != 'main' or pr['draft']:
         return []
 
     errors = []
@@ -75,11 +80,14 @@ def validate(event):
             errors.append('Empty or unexplained placeholder field: ' + prefix.strip())
 
     binding = (fields.get('Target branch ') or [''])[0]
-    declared_base = re.search(r'\bbase\s*=\s*([0-9a-f]{40})\b', binding)
-    declared_head = re.search(r'\bhead\s*=\s*([0-9a-f]{40})\b', binding)
-    if 'main' not in binding or not declared_base or declared_base.group(1) != expected_base:
+    # A single canonical declaration prevents substring and duplicate-SHA ambiguity.
+    declared = re.fullmatch(
+        r'main[ \t]+base[ \t]*=[ \t]*([0-9a-f]{40})[ \t]+head[ \t]*=[ \t]*([0-9a-f]{40})',
+        binding,
+    )
+    if not declared or declared.group(1) != expected_base:
         errors.append('PR base SHA/target does not match GitHub event main base')
-    if not declared_head or declared_head.group(1) != expected_head:
+    if not declared or declared.group(2) != expected_head:
         errors.append('PR head SHA does not match exact proposed commit')
 
     for prefix in ('Authorization/recovery negative-case evidence or explained N/A',
@@ -106,7 +114,13 @@ def main():
         for error in errors:
             print('ERROR: ' + error, file=sys.stderr)
         return 1
-    print('PR declaration complete; independent verification/Ruleset enforcement not implied')
+    pr = event['pull_request']
+    if pr['base']['ref'] != 'main':
+        print('PR declaration skipped: non-main target; no promotion evidence')
+    elif pr['draft']:
+        print('PR declaration skipped: draft; Ready-stage validation required')
+    else:
+        print('PR declaration complete; independent verification/Ruleset enforcement not implied')
     return 0
 
 
