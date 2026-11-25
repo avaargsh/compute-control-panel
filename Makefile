@@ -29,7 +29,7 @@ build:
 	go build -o $(BIN_DIR)/kueue-observe ./cmd/kueue-observe
 
 lint:
-	unformatted=$$(gofmt -l .); \
+	unformatted=$$(gofmt -l .) || exit $$?; \
 	if [ -n "$$unformatted" ]; then \
 		printf 'Unformatted Go files:\n%s\n' "$$unformatted"; \
 		exit 1; \

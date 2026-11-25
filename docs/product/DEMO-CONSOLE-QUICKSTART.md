@@ -6,8 +6,9 @@
 
 Requirements: a locally installed Go toolchain matching `go.mod` (Go 1.27.0 or newer). GitHub Go validation pins Go 1.27.4 with `GOTOOLCHAIN=local`. No running Kubernetes cluster, GPU, PostgreSQL service, npm or cloud credentials are needed.
 
+Run from the repository root.
+
 ```bash
-git switch main
 go test ./internal/demoinventory ./cmd/ccp-demo
 make demo
 ```
