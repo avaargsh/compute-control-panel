@@ -92,7 +92,7 @@ func loadConsoleCertificate(certFile, keyFile string, now time.Time) (tls.Certif
 	return cert, nil
 }
 
-func run(ctx context.Context, addr, certFile, keyFile string, cfg liveConfig) error {
+func run(ctx context.Context, addr, certFile, keyFile string, cfg liveConfig, logger *slog.Logger) error {
 	if err := validateListen(addr); err != nil {
 		return err
 	}
@@ -112,11 +112,11 @@ func run(ctx context.Context, addr, certFile, keyFile string, cfg liveConfig) er
 		return err
 	}
 	defer ln.Close()
-	return serveConsole(ctx, ln, cert, h)
+	return serveConsole(ctx, ln, cert, h, logger)
 }
 
 // serveConsole is shared by the opt-in command and real TLS acceptance tests.
-func serveConsole(ctx context.Context, ln net.Listener, cert tls.Certificate, h http.Handler) error {
+func serveConsole(ctx context.Context, ln net.Listener, cert tls.Certificate, h http.Handler, logger *slog.Logger) error {
 	srv := &http.Server{
 		Handler:           h,
 		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{cert}},
@@ -127,6 +127,7 @@ func serveConsole(ctx context.Context, ln net.Listener, cert tls.Certificate, h 
 		MaxHeaderBytes:    1 << 16,
 	}
 	done := make(chan error, 1)
+	logger.Info("console HTTPS listener bound", "url", "https://"+ln.Addr().String())
 	go func() { done <- srv.ServeTLS(ln, "", "") }()
 	select {
 	case err := <-done:
@@ -180,7 +181,7 @@ func main() {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	if err := run(ctx, *addr, *cert, *key, cfg); err != nil {
+	if err := run(ctx, *addr, *cert, *key, cfg, slog.Default()); err != nil {
 		slog.Error("console stopped", "error", err)
 		os.Exit(1)
 	}

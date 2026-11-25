@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
+	"log/slog"
 	"math/big"
 	"net"
 	"os"
@@ -64,7 +66,12 @@ func TestRunRejectsUnusableServingCertificateBeforeStarting(t *testing.T) {
 			}
 			tc.modify(&cert)
 			certPath, keyPath := writeFixtureTLS(t, &cert)
-			err := run(context.Background(), addr, certPath, keyPath, cfg)
+			var log bytes.Buffer
+			logger := slog.New(slog.NewTextHandler(&log, nil))
+			err := run(context.Background(), addr, certPath, keyPath, cfg, logger)
+			if log.Len() != 0 {
+				t.Fatal("unusable TLS credentials must not announce a listener")
+			}
 			if err == nil || !strings.Contains(err.Error(), tc.diagnostic) {
 				t.Fatalf("got %v, want certificate diagnostic %q before using inventory", err, tc.diagnostic)
 			}

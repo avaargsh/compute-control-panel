@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -69,13 +71,18 @@ func TestConsoleTLSListenerSessionLifecycle(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- serveConsole(ctx, ln, source.TLS.Certificates[0], h) }()
+	var log bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&log, nil))
+	go func() { done <- serveConsole(ctx, ln, source.TLS.Certificates[0], h, logger) }()
 	defer func() {
 		cancel()
 		select {
 		case err := <-done:
 			if err != nil {
 				t.Errorf("console shutdown: %v", err)
+			}
+			if !strings.Contains(log.String(), "console HTTPS listener bound") || !strings.Contains(log.String(), "url="+origin) {
+				t.Error("startup log did not report the actual loopback HTTPS listener")
 			}
 		case <-time.After(10 * time.Second):
 			t.Error("console did not stop")
