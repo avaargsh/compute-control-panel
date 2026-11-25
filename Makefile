@@ -7,7 +7,8 @@
 # when DATABASE_URL is unset, so `make test` is not the full Go validation job.
 #
 # GitHub Actions pins Go 1.27.4 with GOTOOLCHAIN=local. go.mod requires
-# Go 1.27.0 or newer. This Makefile does not download a toolchain.
+# Go 1.27.0 or newer. Local targets use the SDK already selected on PATH.
+override export GOTOOLCHAIN := local
 
 .PHONY: help build lint test demo clean
 

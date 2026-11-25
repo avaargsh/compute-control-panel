@@ -9,11 +9,11 @@ Requirements: a locally installed Go toolchain matching `go.mod` (Go 1.27.0 or n
 Run from the repository root.
 
 ```bash
-go test ./internal/demoinventory ./cmd/ccp-demo
+GOTOOLCHAIN=local go test ./internal/demoinventory ./cmd/ccp-demo
 make demo
 ```
 
-`make demo` is `go run ./cmd/ccp-demo -addr 127.0.0.1:8081`. The same command works without Make. `make test` in the repository [README](../../README.md) is the broader race suite; PostgreSQL tests skip when `DATABASE_URL` is unset, so it is not the full GitHub Go validation job.
+`make demo` is `go run ./cmd/ccp-demo -addr 127.0.0.1:8081`. Make uses the Go SDK on PATH without downloading a toolchain. If running without Make, use `GOTOOLCHAIN=local go run ./cmd/ccp-demo -addr 127.0.0.1:8081` for the same toolchain behavior. `make test` in the repository [README](../../README.md) is the broader race suite; PostgreSQL tests skip when `DATABASE_URL` is unset, so it is not the full GitHub Go validation job.
 
 Open **http://127.0.0.1:8081** on the same machine. Use Dashboard / Clusters / GPUs in the sidebar and the Refresh button.
 
@@ -71,4 +71,4 @@ The process logs `CCP Demo stopped` and exits non-zero when startup fails. The `
 
 A usable observations response has `"data_mode":"demo"` and every item `"source":"synthetic/demo"`. If either differs, stop using that response. The preview does not report physical GPU readiness.
 
-`go.mod` requires Go 1.27.0 or newer. GitHub Go validation pins Go 1.27.4 with `GOTOOLCHAIN=local` and does not download a toolchain. If `go version` is older than 1.27.0, install a matching release before `go run` or `go test`.
+`go.mod` requires Go 1.27.0 or newer. GitHub Go validation pins Go 1.27.4 with `GOTOOLCHAIN=local` and does not download a toolchain. If `GOTOOLCHAIN=local go version` reports a release older than 1.27.0, install a matching release before `go run` or `go test`.
