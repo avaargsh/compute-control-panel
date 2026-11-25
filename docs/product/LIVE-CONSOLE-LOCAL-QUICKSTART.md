@@ -89,6 +89,8 @@ go run ./cmd/ccp-console \
   -gpu-resources "nvidia.com/gpu"
 ```
 
+To validate local startup inputs first, append `-check-config` to that command. The check exits without listening or contacting Kubernetes. It validates the local certificate, bcrypt verifier, scope, Kubernetes HTTPS origin and CA PEM, and token file path. It does not check whether the port is free, the API is reachable, or the token is authorized; still perform the authenticated read below.
+
 The API refuses non-loopback bind, missing/invalid certificate or key, unexpected certificate IP SAN, wrong Origin, invalid bcrypt hash, and mismatched tenant/project inventory scope. It does not start a browser UI. The `-gpu-resources` flag accepts explicit comma-separated extended-resource names. Ensure the local API port is available. After the port is bound, the server logs `console HTTPS listener bound` with the exact local URL. This is not a Kubernetes readiness check; verify the authenticated read in the next section.
 
 ## 4. Verify anonymous denial, authenticated read, and logout

@@ -92,18 +92,28 @@ func loadConsoleCertificate(certFile, keyFile string, now time.Time) (tls.Certif
 	return cert, nil
 }
 
-func run(ctx context.Context, addr, certFile, keyFile string, cfg liveConfig, logger *slog.Logger) error {
+// prepareConsole validates the same inputs for startup and offline preflight.
+// It constructs the handlers without binding a listener or calling Kubernetes.
+func prepareConsole(addr, certFile, keyFile string, cfg liveConfig) (tls.Certificate, http.Handler, error) {
 	if err := validateListen(addr); err != nil {
-		return err
+		return tls.Certificate{}, nil, err
 	}
 	if certFile == "" || keyFile == "" || cfg.Auth.Origin != "https://"+addr {
-		return errors.New("console requires explicit TLS certificate, key and matching HTTPS origin")
+		return tls.Certificate{}, nil, errors.New("console requires explicit TLS certificate, key and matching HTTPS origin")
 	}
 	cert, err := loadConsoleCertificate(certFile, keyFile, time.Now())
 	if err != nil {
-		return err
+		return tls.Certificate{}, nil, err
 	}
 	h, err := newLiveHandler(cfg)
+	if err != nil {
+		return tls.Certificate{}, nil, err
+	}
+	return cert, h, nil
+}
+
+func run(ctx context.Context, addr, certFile, keyFile string, cfg liveConfig, logger *slog.Logger) error {
+	cert, h, err := prepareConsole(addr, certFile, keyFile, cfg)
 	if err != nil {
 		return err
 	}
@@ -159,6 +169,7 @@ func main() {
 	ca := flag.String("kube-ca", "", "Kubernetes CA file")
 	token := flag.String("kube-token-file", "", "rotatable read-only ServiceAccount token file")
 	resources := flag.String("gpu-resources", "", "comma-separated explicit extended resource names")
+	checkConfig := flag.Bool("check-config", false, "validate local configuration without listening or contacting Kubernetes")
 	flag.Parse()
 
 	// Secret material is read from files, never command-line passwords.
@@ -178,6 +189,14 @@ func main() {
 			TenantID: *tenant, ProjectID: *project, ResourceNames: strings.Split(*resources, ","),
 			ObservationTTL: time.Minute, Timeout: 3 * time.Second,
 		},
+	}
+	if *checkConfig {
+		if _, _, err := prepareConsole(*addr, *cert, *key, cfg); err != nil {
+			slog.Error("console configuration invalid", "error", err)
+			os.Exit(1)
+		}
+		slog.Info("console local configuration valid (no listener or Kubernetes request)")
+		return
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
