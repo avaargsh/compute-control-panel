@@ -46,6 +46,15 @@ class ScopeTest(unittest.TestCase):
                 self.assertEqual(kueue_kind_gate.scope(event, "", HEAD), "required")
 
 
+class WorkflowTriggerTest(unittest.TestCase):
+    def test_retargeting_pull_request_to_main_triggers_the_gate(self):
+        source = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn(
+            "types: [opened, synchronize, reopened, ready_for_review, edited]",
+            source,
+        )
+
+
 class WorkflowVerdictTest(unittest.TestCase):
     def test_verdict_truth_table(self):
         source = WORKFLOW.read_text(encoding="utf-8")
