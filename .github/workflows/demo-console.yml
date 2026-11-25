@@ -22,6 +22,8 @@ jobs:
         run: |
           node --version
           node --check cmd/ccp-demo/assets/app.js
+      - name: Run Demo rendering regressions without npm installs
+        run: node --test cmd/ccp-demo/app_test.cjs
       - name: Verify permanent synthetic-only Demo banner
         run: |
           grep -q '模拟数据 · 非真实 GPU 监控' cmd/ccp-demo/assets/index.html
