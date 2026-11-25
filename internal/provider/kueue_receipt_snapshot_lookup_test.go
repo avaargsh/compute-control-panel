@@ -204,7 +204,7 @@ func TestMemoryPreDeleteReceiptSnapshotLookupRejectsMalformedInput(t *testing.T)
 			}
 		})
 	}
-	for _, providerID := range []string{"", " provider-a ", "provider\x00a"} {
+	for _, providerID := range []string{"", " provider-a ", "provider\x00a", "provider\nid", "provider\\\\id", strings.Repeat("p", 254)} {
 		if _, ok, err := store.GetPreDeleteDRASnapshotForReceipt("tenant-a", providerID, event); !errors.Is(err, ErrUncorrelatedDRAUnprepare) || ok {
 			t.Fatalf("malformed Provider scope did not fail closed: ok=%t err=%v", ok, err)
 		}
