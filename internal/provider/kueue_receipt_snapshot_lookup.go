@@ -72,7 +72,10 @@ func preDeleteSnapshotMatchesDRAReceipt(snapshot KueuePreDeleteDRASnapshot, tena
 func (s *MemoryKueueJobBindingStore) GetPreDeleteDRASnapshotForReceipt(
 	tenantID string, event DRAUnprepareEvent,
 ) (KueuePreDeleteDRASnapshot, bool, error) {
-	if err := s.usable(); err != nil || !validDRAReceiptSnapshotLookup(tenantID, event) {
+	if err := s.usable(); err != nil {
+		return KueuePreDeleteDRASnapshot{}, false, err
+	}
+	if !validDRAReceiptSnapshotLookup(tenantID, event) {
 		return KueuePreDeleteDRASnapshot{}, false, ErrUncorrelatedDRAUnprepare
 	}
 	s.mu.Lock()
@@ -103,7 +106,10 @@ func (s *MemoryKueueJobBindingStore) GetPreDeleteDRASnapshotForReceipt(
 func (s *PostgresKueueJobBindingStore) GetPreDeleteDRASnapshotForReceipt(
 	tenantID string, event DRAUnprepareEvent,
 ) (KueuePreDeleteDRASnapshot, bool, error) {
-	if err := s.usable(); err != nil || !validDRAReceiptSnapshotLookup(tenantID, event) {
+	if err := s.usable(); err != nil {
+		return KueuePreDeleteDRASnapshot{}, false, err
+	}
+	if !validDRAReceiptSnapshotLookup(tenantID, event) {
 		return KueuePreDeleteDRASnapshot{}, false, ErrUncorrelatedDRAUnprepare
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), kueueBindingQueryTimeout)
