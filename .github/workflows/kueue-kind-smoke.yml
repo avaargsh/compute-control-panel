@@ -3,7 +3,7 @@ name: Kueue real-controller kind smoke (no GPU readiness claim)
 on:
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
   push:
     branches: [main]
     paths:
