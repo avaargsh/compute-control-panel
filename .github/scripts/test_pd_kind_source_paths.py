@@ -50,7 +50,9 @@ class PDKueueKindSourceCoverageTests(unittest.TestCase):
         cls.workflow = WORKFLOW.read_text(encoding="utf-8")
 
     def test_pd_source_changes_run_controller_smoke_on_pr_and_main(self):
-        for event in ("pull_request", "push"):
+        self.assertIn("  pull_request:\n    branches: [main]", self.workflow)
+        self.assertFalse(event_paths(self.workflow, "pull_request"), "PR gate must always report")
+        for event in ("push",):
             with self.subTest(event=event):
                 patterns = event_paths(self.workflow, event)
                 self.assertTrue(patterns, f"{event} must filter real paths")
