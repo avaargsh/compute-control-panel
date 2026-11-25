@@ -103,17 +103,20 @@ function gpuItems() {
   return state.items.filter((item) => item.resource?.kind === "NodeGPUResource");
 }
 
-function number(value) {
-  try {
-    if (!/^[0-9]+$/.test(String(value))) return 0n;
-    return BigInt(String(value));
-  } catch {
-    return 0n;
-  }
+function reportedQuantity(item, key) {
+  const value = item.reported_quantity?.[key];
+  return typeof value === "string" && /^[0-9]+$/.test(value) ? value : null;
 }
 
 function sumReported(items, key) {
-  return items.reduce((sum, item) => sum + number(item.reported_quantity?.[key]), 0n).toString();
+  if (items.length === 0) return "未上报";
+  let sum = 0n;
+  for (const item of items) {
+    const value = reportedQuantity(item, key);
+    if (value === null) return "数据不完整";
+    sum += BigInt(value);
+  }
+  return sum.toString();
 }
 
 function nodeRows(items) {
@@ -163,8 +166,8 @@ function renderGPUs(root) {
   const rows = items.map((item) => [
     node("strong", "name", item.reported_quantity?.resource_name ?? "未知资源类型"),
     node("span", "mono", item.resource?.name?.split("/")[0] ?? "—"),
-    node("span", "mono", item.reported_quantity?.capacity ?? "—"),
-    node("span", "mono", item.reported_quantity?.allocatable ?? "—"),
+    node("span", "mono", reportedQuantity(item, "capacity") ?? "—"),
+    node("span", "mono", reportedQuantity(item, "allocatable") ?? "—"),
     pill(item),
     node("span", "mono", item.reason_code || "—"),
     timeLabel(item.observed_at),
