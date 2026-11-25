@@ -31,7 +31,7 @@ func preDeleteSnapshotMatchesDRAReceipt(snapshot KueuePreDeleteDRASnapshot, tena
 		snapshot.TenantID == "" || snapshot.WorkloadID == "" || snapshot.ProviderID == "" ||
 		snapshot.CreateOperationID == "" || snapshot.DeleteOperationID == "" ||
 		snapshot.CreateOperationID == snapshot.DeleteOperationID ||
-		snapshot.CreateGeneration == 0 || snapshot.DeleteGeneration <= snapshot.CreateGeneration ||
+		snapshot.CreateGeneration == 0 || snapshot.DeleteGeneration == 0 || snapshot.DeleteGeneration < snapshot.CreateGeneration ||
 		!validKubernetesRef(snapshot.Job) || snapshot.Job.Namespace != snapshot.Namespace ||
 		!validKubernetesRef(snapshot.KueueWorkload) || snapshot.KueueWorkload.Namespace != snapshot.Namespace ||
 		!validKubernetesRef(snapshot.Pod) || snapshot.Pod.Namespace != snapshot.Namespace ||

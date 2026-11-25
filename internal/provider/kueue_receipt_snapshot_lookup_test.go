@@ -41,6 +41,12 @@ func TestGetPreDeleteDRASnapshotForReceiptIsTenantAndIdentityScoped(t *testing.T
 			if err := store.PutCreatePin(namespace, create, jobName, jobUID); err != nil {
 				t.Fatal(err)
 			}
+			// A valid DELETE request may target the same desired generation as
+			// its pinned CREATE. Receipt lookup must use the durable snapshot
+			// contract, not invent an increment-only generation requirement.
+			if create.DesiredGeneration != remove.DesiredGeneration {
+				t.Fatal("fixture must cover equal CREATE/DELETE desired generations")
+			}
 			want, err := store.PutPreDeleteDRASnapshot(namespace, remove,
 				preDeleteSnapshotFixture(create, remove, namespace, jobName, jobUID))
 			if err != nil {
