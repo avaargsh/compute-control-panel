@@ -4,13 +4,10 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"strings"
 )
 
 func validDRAReceiptSnapshotLookup(tenantID, providerID string, event DRAUnprepareEvent) bool {
-	if tenantID == "" || tenantID != strings.TrimSpace(tenantID) ||
-		strings.ContainsRune(tenantID, 0) ||
-		providerID == "" || providerID != strings.TrimSpace(providerID) || strings.ContainsRune(providerID, 0) ||
+	if !validDRAIdentity(tenantID) || !validDRAIdentity(providerID) ||
 		!validKubeName(event.ClaimNamespace) || !validKubeName(event.ClaimName) {
 		return false
 	}
