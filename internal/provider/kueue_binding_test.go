@@ -290,7 +290,7 @@ func (failingBindingStore) GetPreDeleteDRASnapshot(string, Request) (KueuePreDel
 	return KueuePreDeleteDRASnapshot{}, false, errBindingUnreadable
 }
 
-func (failingBindingStore) GetPreDeleteDRASnapshotForReceipt(string, DRAUnprepareEvent) (KueuePreDeleteDRASnapshot, bool, error) {
+func (failingBindingStore) GetPreDeleteDRASnapshotForReceipt(string, string, DRAUnprepareEvent) (KueuePreDeleteDRASnapshot, bool, error) {
 	return KueuePreDeleteDRASnapshot{}, false, errBindingUnreadable
 }
 

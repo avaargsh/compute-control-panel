@@ -204,6 +204,11 @@ func TestMemoryPreDeleteReceiptSnapshotLookupRejectsMalformedInput(t *testing.T)
 			}
 		})
 	}
+	for _, providerID := range []string{"", " provider-a ", "provider\x00a"} {
+		if _, ok, err := store.GetPreDeleteDRASnapshotForReceipt("tenant-a", providerID, event); !errors.Is(err, ErrUncorrelatedDRAUnprepare) || ok {
+			t.Fatalf("malformed Provider scope did not fail closed: ok=%t err=%v", ok, err)
+		}
+	}
 	var nilStore *MemoryKueueJobBindingStore
 	if _, ok, err := nilStore.GetPreDeleteDRASnapshotForReceipt("tenant-a", "provider-a", event); !errors.Is(err, ErrInvalidKueueObservation) || ok {
 		t.Fatalf("unavailable memory store error was hidden: ok=%t err=%v", ok, err)

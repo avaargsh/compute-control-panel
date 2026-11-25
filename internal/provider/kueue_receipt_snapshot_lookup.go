@@ -7,9 +7,10 @@ import (
 	"strings"
 )
 
-func validDRAReceiptSnapshotLookup(tenantID string, event DRAUnprepareEvent) bool {
+func validDRAReceiptSnapshotLookup(tenantID, providerID string, event DRAUnprepareEvent) bool {
 	if tenantID == "" || tenantID != strings.TrimSpace(tenantID) ||
 		strings.ContainsRune(tenantID, 0) ||
+		providerID == "" || providerID != strings.TrimSpace(providerID) || strings.ContainsRune(providerID, 0) ||
 		!validKubeName(event.ClaimNamespace) || !validKubeName(event.ClaimName) {
 		return false
 	}
@@ -25,9 +26,9 @@ func validDRAReceiptSnapshotLookup(tenantID string, event DRAUnprepareEvent) boo
 	return event.AllocatedDevice.ShareID == "" || validDRAIdentity(event.AllocatedDevice.ShareID)
 }
 
-func preDeleteSnapshotMatchesDRAReceipt(snapshot KueuePreDeleteDRASnapshot, tenantID string, event DRAUnprepareEvent) bool {
+func preDeleteSnapshotMatchesDRAReceipt(snapshot KueuePreDeleteDRASnapshot, tenantID, providerID string, event DRAUnprepareEvent) bool {
 	if snapshot.Digest == "" || snapshot.Digest != kueuePreDeleteSnapshotDigest(snapshot) ||
-		snapshot.Namespace != event.ClaimNamespace || snapshot.TenantID != tenantID ||
+		snapshot.Namespace != event.ClaimNamespace || snapshot.TenantID != tenantID || snapshot.ProviderID != providerID ||
 		snapshot.TenantID == "" || snapshot.WorkloadID == "" || snapshot.ProviderID == "" ||
 		snapshot.CreateOperationID == "" || snapshot.DeleteOperationID == "" ||
 		snapshot.CreateOperationID == snapshot.DeleteOperationID ||
@@ -64,18 +65,19 @@ func preDeleteSnapshotMatchesDRAReceipt(snapshot KueuePreDeleteDRASnapshot, tena
 }
 
 // GetPreDeleteDRASnapshotForReceipt resolves one immutable snapshot using the
-// authenticated tenant and the signed event's exact Claim/Pod/device identity.
+// authenticated tenant, independently registered signer Provider, and the
+// signed event's exact Claim/Pod/device identity.
 // The event is a lookup key only. Callers must still load and authenticate the
 // CREATE/DELETE operations and independent Provider/Kueue/Pod/Claim evidence;
 // this method does not establish receipt provenance, physical release,
 // Allocation RELEASED, or cost finality.
 func (s *MemoryKueueJobBindingStore) GetPreDeleteDRASnapshotForReceipt(
-	tenantID string, event DRAUnprepareEvent,
+	tenantID, providerID string, event DRAUnprepareEvent,
 ) (KueuePreDeleteDRASnapshot, bool, error) {
 	if err := s.usable(); err != nil {
 		return KueuePreDeleteDRASnapshot{}, false, err
 	}
-	if !validDRAReceiptSnapshotLookup(tenantID, event) {
+	if !validDRAReceiptSnapshotLookup(tenantID, providerID, event) {
 		return KueuePreDeleteDRASnapshot{}, false, ErrUncorrelatedDRAUnprepare
 	}
 	s.mu.Lock()
@@ -84,7 +86,7 @@ func (s *MemoryKueueJobBindingStore) GetPreDeleteDRASnapshotForReceipt(
 	var found KueuePreDeleteDRASnapshot
 	matched := false
 	for _, snapshot := range s.snapshots {
-		if snapshot.Namespace != event.ClaimNamespace || snapshot.TenantID != tenantID ||
+		if snapshot.Namespace != event.ClaimNamespace || snapshot.TenantID != tenantID || snapshot.ProviderID != providerID ||
 			snapshot.Claim.Name != event.ClaimName || snapshot.Claim.UID != event.ClaimUID ||
 			snapshot.Pod.UID != event.PodUID {
 			continue
@@ -94,7 +96,7 @@ func (s *MemoryKueueJobBindingStore) GetPreDeleteDRASnapshotForReceipt(
 		}
 		found, matched = snapshot, true
 	}
-	if !matched || !preDeleteSnapshotMatchesDRAReceipt(found, tenantID, event) {
+	if !matched || !preDeleteSnapshotMatchesDRAReceipt(found, tenantID, providerID, event) {
 		return KueuePreDeleteDRASnapshot{}, false, nil
 	}
 	return cloneKueuePreDeleteDRASnapshot(found), true, nil
@@ -104,12 +106,12 @@ func (s *MemoryKueueJobBindingStore) GetPreDeleteDRASnapshotForReceipt(
 // lookup. LIMIT 2 is deliberate: a duplicate historical Claim/Pod identity is
 // ambiguous and must not be resolved by choosing an arbitrary operation row.
 func (s *PostgresKueueJobBindingStore) GetPreDeleteDRASnapshotForReceipt(
-	tenantID string, event DRAUnprepareEvent,
+	tenantID, providerID string, event DRAUnprepareEvent,
 ) (KueuePreDeleteDRASnapshot, bool, error) {
 	if err := s.usable(); err != nil {
 		return KueuePreDeleteDRASnapshot{}, false, err
 	}
-	if !validDRAReceiptSnapshotLookup(tenantID, event) {
+	if !validDRAReceiptSnapshotLookup(tenantID, providerID, event) {
 		return KueuePreDeleteDRASnapshot{}, false, ErrUncorrelatedDRAUnprepare
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), kueueBindingQueryTimeout)
@@ -117,10 +119,10 @@ func (s *PostgresKueueJobBindingStore) GetPreDeleteDRASnapshotForReceipt(
 
 	query := "SELECT " + kueuePreDeleteSnapshotColumns +
 		"\nFROM public.kueue_job_pre_delete_dra_snapshots" +
-		"\nWHERE namespace=$1 AND tenant_id=$2 AND claim_name=$3 AND claim_uid=$4 AND pod_uid=$5" +
+		"\nWHERE namespace=$1 AND tenant_id=$2 AND provider_id=$3 AND claim_name=$4 AND claim_uid=$5 AND pod_uid=$6" +
 		"\nORDER BY delete_operation_id LIMIT 2"
 	rows, err := s.db.QueryContext(ctx, query,
-		event.ClaimNamespace, tenantID, event.ClaimName, event.ClaimUID, event.PodUID)
+		event.ClaimNamespace, tenantID, providerID, event.ClaimName, event.ClaimUID, event.PodUID)
 	if err != nil {
 		return KueuePreDeleteDRASnapshot{}, false, fmt.Errorf("lookup pre-delete DRA snapshot for receipt: %w", err)
 	}
@@ -141,7 +143,7 @@ func (s *PostgresKueueJobBindingStore) GetPreDeleteDRASnapshotForReceipt(
 	if err := rows.Err(); err != nil {
 		return KueuePreDeleteDRASnapshot{}, false, fmt.Errorf("iterate pre-delete DRA receipt snapshots: %w", err)
 	}
-	if !matched || !preDeleteSnapshotMatchesDRAReceipt(found, tenantID, event) {
+	if !matched || !preDeleteSnapshotMatchesDRAReceipt(found, tenantID, providerID, event) {
 		return KueuePreDeleteDRASnapshot{}, false, nil
 	}
 	return cloneKueuePreDeleteDRASnapshot(found), true, nil
