@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -69,5 +70,24 @@ func TestRunReportsBoundAddressAndServesHealth(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("server did not stop")
+	}
+}
+
+func TestRunDoesNotReportSuccessfulBindOnOccupiedPort(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var output bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&output, nil))
+	if err := run(ctx, listener.Addr().String(), logger); err == nil {
+		t.Fatal("occupied address unexpectedly accepted")
+	}
+	if output.Len() != 0 {
+		t.Fatalf("failed bind must not emit a startup event: %s", output.String())
 	}
 }
