@@ -30,7 +30,7 @@ type observationOptions struct {
 	query     provider.KubernetesJobQuery
 }
 
-func parseOptions(args []string, getenv func(string) string) (observationOptions, error) {
+func parseOptions(args []string, getenv func(string) string, help io.Writer) (observationOptions, error) {
 	var opts observationOptions
 	flags := flag.NewFlagSet("kueue-observe", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
@@ -43,6 +43,13 @@ func parseOptions(args []string, getenv func(string) string) (observationOptions
 	flags.StringVar(&opts.caPath, "ca", serviceAccountPath+"/ca.crt", "mounted Kubernetes API CA path")
 	flags.StringVar(&opts.tokenPath, "token", serviceAccountPath+"/token", "mounted ServiceAccount token path")
 	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			fmt.Fprintln(help, "Usage: kueue-observe [flags]")
+			fmt.Fprintln(help, "Inspect an existing, UID-pinned Kubernetes Job (read-only).")
+			fmt.Fprintln(help, "Set KUBERNETES_SERVICE_HOST and KUBERNETES_SERVICE_PORT_HTTPS when running an observation.")
+			flags.SetOutput(help)
+			flags.PrintDefaults()
+		}
 		return observationOptions{}, err
 	}
 	if len(flags.Args()) != 0 || getenv == nil {
@@ -71,7 +78,10 @@ func parseOptions(args []string, getenv func(string) string) (observationOptions
 }
 
 func run(ctx context.Context, args []string, getenv func(string) string, out io.Writer) error {
-	opts, err := parseOptions(args, getenv)
+	opts, err := parseOptions(args, getenv, out)
+	if errors.Is(err, flag.ErrHelp) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
