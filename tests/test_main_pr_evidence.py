@@ -58,6 +58,18 @@ class EvidenceTests(unittest.TestCase):
         self.assertTrue(any('base' in e.lower()
                             for e in validate(event(body(base='c' * 40)))))
 
+    def test_non_main_target_substring_rejected(self):
+        text = body().replace('main base=', 'not-main base=')
+        self.assertTrue(validate(event(text)))
+
+    def test_duplicate_base_rejected(self):
+        text = body().replace(f'head={HEAD}', f'head={HEAD} base={"c" * 40}')
+        self.assertTrue(validate(event(text)))
+
+    def test_duplicate_head_rejected(self):
+        text = body().replace(f'head={HEAD}', f'head={HEAD} head={"c" * 40}')
+        self.assertTrue(validate(event(text)))
+
     def test_blank_template_rejected(self):
         incomplete = '## Governance metadata\n\n- Affected domain / sole authoritative writer:\n'
         self.assertGreaterEqual(len(validate(event(incomplete))), 4)

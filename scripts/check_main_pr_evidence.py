@@ -75,11 +75,14 @@ def validate(event):
             errors.append('Empty or unexplained placeholder field: ' + prefix.strip())
 
     binding = (fields.get('Target branch ') or [''])[0]
-    declared_base = re.search(r'\bbase\s*=\s*([0-9a-f]{40})\b', binding)
-    declared_head = re.search(r'\bhead\s*=\s*([0-9a-f]{40})\b', binding)
-    if 'main' not in binding or not declared_base or declared_base.group(1) != expected_base:
+    # A single canonical declaration prevents substring and duplicate-SHA ambiguity.
+    declared = re.fullmatch(
+        r'main[ \t]+base[ \t]*=[ \t]*([0-9a-f]{40})[ \t]+head[ \t]*=[ \t]*([0-9a-f]{40})',
+        binding,
+    )
+    if not declared or declared.group(1) != expected_base:
         errors.append('PR base SHA/target does not match GitHub event main base')
-    if not declared_head or declared_head.group(1) != expected_head:
+    if not declared or declared.group(2) != expected_head:
         errors.append('PR head SHA does not match exact proposed commit')
 
     for prefix in ('Authorization/recovery negative-case evidence or explained N/A',
