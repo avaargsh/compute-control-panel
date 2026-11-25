@@ -53,3 +53,19 @@ The product's planned `web/` implementation remains **React + TypeScript + Vite 
 4. Provide Helm and Demo Quickstart for an installed, authenticated v0.1 release.
 
 The first UI should explain **why** a resource is UNKNOWN rather than claim that a green node condition proves physical GPU capacity.
+
+## Troubleshooting
+
+These checks are for the synthetic process started by `go run ./cmd/ccp-demo -addr 127.0.0.1:8081`. They do not start kind, PostgreSQL, or a live Console. Kind inventory remains the separate disposable script in [KUBEINVENTORY-KIND-L2.md](../testing/KUBEINVENTORY-KIND-L2.md); that path was not re-run for this section.
+
+The process logs `CCP Demo stopped` and exits non-zero when startup fails. The `error` value is one of:
+
+- `demo preview must bind explicitly to 127.0.0.1` — `-addr` is empty or the host is not exactly `127.0.0.1`. `0.0.0.0`, `localhost`, `[::]`, and LAN addresses are rejected. Curl from another machine cannot reach this bind; use the same machine.
+- `demo preview listen port is invalid` — the port is not an integer from 0 through 65535.
+- `listen tcp 127.0.0.1:8081: bind: address already in use` — something is already listening on the quickstart port. Stop that listener or choose another `127.0.0.1` port.
+
+`GET /api/v1/observations` with any query string, including a bare `?`, returns HTTP 400 and the body `Query parameters are not supported in Demo mode`. `GET /api/v1/workloads` returns HTTP 404. This process does not mount workload, provider, host-session, or receipt handlers.
+
+A usable observations response has `"data_mode":"demo"` and every item `"source":"synthetic/demo"`. If either differs, stop using that response. The preview does not report physical GPU readiness.
+
+`go.mod` requires Go 1.27.0 or newer. GitHub Go validation pins Go 1.27.4 with `GOTOOLCHAIN=local` and does not download a toolchain. If `go version` is older than 1.27.0, install a matching release before `go run` or `go test`.
