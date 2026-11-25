@@ -169,6 +169,11 @@ func (v *DRAUnprepareVerifier) Correlate(
 		return reject()
 	}
 	event := signed.Event
+	// A cleanup receipt cannot be correlated with an allocation observed
+	// only after the claimed cleanup. Equal stamps preserve clock granularity.
+	if event.CompletedAt.Before(candidate.PreDeleteSnapshot.ObservedAt) {
+		return reject()
+	}
 	prior := candidate.PriorPodClaim
 	if event.ClaimNamespace != prior.Claim.Claim.Namespace ||
 		event.ClaimName != prior.Claim.Claim.Name ||

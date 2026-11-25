@@ -209,6 +209,17 @@ func TestDRAUnprepareCorrelationRequiresExactDurablePreDeleteSnapshot(t *testing
 		}
 	})
 
+	t.Run("receipt predates pre-delete observation", func(t *testing.T) {
+		candidate := releaseCandidateFixture()
+		snapshot := *releaseCandidatePreDeleteSnapshot(candidate)
+		snapshot.ObservedAt = signed.Event.CompletedAt.Add(time.Second)
+		snapshot.Digest = kueuePreDeleteSnapshotDigest(snapshot)
+		candidate.PreDeleteSnapshot = &snapshot
+		if got, err := verifier.Correlate(candidate, signed, asOf); !errors.Is(err, ErrUncorrelatedDRAUnprepare) || got != (DRAUnprepareCorrelation{}) {
+			t.Fatalf("signed receipt predating the pre-delete observation correlated: %+v err=%v", got, err)
+		}
+	})
+
 	t.Run("successor claim UID", func(t *testing.T) {
 		candidate := releaseCandidateFixture()
 		snapshot := *releaseCandidatePreDeleteSnapshot(candidate)
