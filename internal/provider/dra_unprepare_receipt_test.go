@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -27,7 +28,7 @@ func unprepareTestReceipt(private ed25519.PrivateKey) SignedDRAUnprepare {
 		PodUID: "pod-uid-a", AllocatedClaimResourceVersion: "150",
 		AllocatedDevice: DRAAllocatedDevice{
 			Request: "gpu", Driver: "gpu.example.com", Pool: "pool-a",
-			Device: "device-a", ShareID: "share-a",
+			Device: "device-a",
 		},
 		CompletedAt: time.Date(2026, 11, 10, 10, 0, 30, 0, time.UTC),
 	}
@@ -180,6 +181,94 @@ func TestDriverUnprepareReceiptSignedAndBoundToHistoricalAllocation(t *testing.T
 			}
 		})
 	}
+}
+
+func TestDRAUnprepareCorrelationRequiresExactDurablePreDeleteSnapshot(t *testing.T) {
+	authority, private := unprepareTestAuthority()
+	verifier, err := NewDRAUnprepareVerifier(authority, 10*time.Minute, 30*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	asOf := time.Date(2026, 11, 10, 10, 1, 0, 0, time.UTC)
+	signed := unprepareTestReceipt(private)
+
+	t.Run("missing snapshot", func(t *testing.T) {
+		candidate := releaseCandidateFixture()
+		candidate.PreDeleteSnapshot = nil
+		if got, err := verifier.Correlate(candidate, signed, asOf); !errors.Is(err, ErrUncorrelatedDRAUnprepare) || got != (DRAUnprepareCorrelation{}) {
+			t.Fatalf("receipt correlated without durable pre-delete snapshot: %+v err=%v", got, err)
+		}
+	})
+
+	t.Run("exact snapshot", func(t *testing.T) {
+		candidate := releaseCandidateFixture()
+		candidate.PreDeleteSnapshot = releaseCandidatePreDeleteSnapshot(candidate)
+		if got, err := verifier.Correlate(candidate, signed, asOf); err != nil || got.Release.AllocationID != "allocation-a" ||
+			got.PreDeleteSnapshotDigest != candidate.PreDeleteSnapshot.Digest {
+			t.Fatalf("exact snapshot rejected or digest not retained: %+v err=%v", got, err)
+		}
+	})
+
+	t.Run("receipt predates pre-delete observation", func(t *testing.T) {
+		candidate := releaseCandidateFixture()
+		snapshot := *releaseCandidatePreDeleteSnapshot(candidate)
+		snapshot.ObservedAt = signed.Event.CompletedAt.Add(time.Second)
+		snapshot.Digest = kueuePreDeleteSnapshotDigest(snapshot)
+		candidate.PreDeleteSnapshot = &snapshot
+		if got, err := verifier.Correlate(candidate, signed, asOf); !errors.Is(err, ErrUncorrelatedDRAUnprepare) || got != (DRAUnprepareCorrelation{}) {
+			t.Fatalf("signed receipt predating the pre-delete observation correlated: %+v err=%v", got, err)
+		}
+	})
+
+	t.Run("successor claim UID", func(t *testing.T) {
+		candidate := releaseCandidateFixture()
+		snapshot := *releaseCandidatePreDeleteSnapshot(candidate)
+		snapshot.Claim.UID = "successor-claim-uid"
+		snapshot.Digest = kueuePreDeleteSnapshotDigest(snapshot)
+		candidate.PreDeleteSnapshot = &snapshot
+		if got, err := verifier.Correlate(candidate, signed, asOf); !errors.Is(err, ErrUncorrelatedDRAUnprepare) || got != (DRAUnprepareCorrelation{}) {
+			t.Fatalf("snapshot for successor Claim UID correlated: %+v err=%v", got, err)
+		}
+	})
+
+	t.Run("different DELETE operation", func(t *testing.T) {
+		candidate := releaseCandidateFixture()
+		snapshot := *releaseCandidatePreDeleteSnapshot(candidate)
+		snapshot.DeleteOperationID = "other-delete-op"
+		snapshot.Digest = kueuePreDeleteSnapshotDigest(snapshot)
+		candidate.PreDeleteSnapshot = &snapshot
+		if got, err := verifier.Correlate(candidate, signed, asOf); !errors.Is(err, ErrUncorrelatedDRAUnprepare) || got != (DRAUnprepareCorrelation{}) {
+			t.Fatalf("snapshot from another DELETE operation correlated: %+v err=%v", got, err)
+		}
+	})
+
+	t.Run("tampered digest", func(t *testing.T) {
+		candidate := releaseCandidateFixture()
+		snapshot := *releaseCandidatePreDeleteSnapshot(candidate)
+		snapshot.Digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		candidate.PreDeleteSnapshot = &snapshot
+		if got, err := verifier.Correlate(candidate, signed, asOf); !errors.Is(err, ErrUncorrelatedDRAUnprepare) || got != (DRAUnprepareCorrelation{}) {
+			t.Fatalf("tampered snapshot digest correlated: %+v err=%v", got, err)
+		}
+	})
+}
+
+func releaseCandidatePreDeleteSnapshot(candidate ReleaseEvidenceCandidate) *KueuePreDeleteDRASnapshot {
+	prior := candidate.PriorPodClaim
+	snapshot := KueuePreDeleteDRASnapshot{
+		Namespace: prior.Pod.Namespace, TenantID: candidate.Create.TenantID,
+		WorkloadID: candidate.Create.WorkloadID, ProviderID: candidate.Create.ProviderID,
+		CreateOperationID: candidate.Create.ID, DeleteOperationID: candidate.Delete.ID,
+		CreateGeneration: candidate.Create.Generation, DeleteGeneration: candidate.Delete.Generation,
+		Job: candidate.PriorQueue.Job.Job, KueueWorkload: candidate.PriorQueue.Job.KueueWorkload,
+		Pod: prior.Pod, NodeName: prior.NodeName, Claim: prior.Claim.Claim,
+		ClaimTemplateName: "gpu-template", PodClaimAlias: prior.PodClaimAlias,
+		ConsumerContainer: prior.ConsumerContainer, Devices: []DRAAllocatedDevice{prior.Claim.Device},
+		Source: "test-kueue-api", AdapterVersion: "test-v1",
+		ObservedAt: time.Date(2026, 11, 10, 9, 59, 0, 0, time.UTC),
+	}
+	snapshot.Digest = kueuePreDeleteSnapshotDigest(snapshot)
+	return &snapshot
 }
 
 func TestDRAUnprepareVerifierRejectsCallerKeyMutationAndBadAuthority(t *testing.T) {

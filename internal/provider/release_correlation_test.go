@@ -56,7 +56,10 @@ func releaseCandidateFixture() ReleaseEvidenceCandidate {
 		ProviderResourceID: "tenant-a/job-a", ProviderResourceUID: "job-uid-a",
 	}
 	claim := previousDRAClaimAllocation()
-	return ReleaseEvidenceCandidate{
+	// Pre-delete snapshot capture intentionally supports non-shared direct
+	// device allocations only; keep the historical receipt fixture in scope.
+	claim.Device.ShareID = ""
+	candidate := ReleaseEvidenceCandidate{
 		ExpectedAllocationID: "allocation-a",
 
 		Create:          create,
@@ -85,6 +88,8 @@ func releaseCandidateFixture() ReleaseEvidenceCandidate {
 			},
 		},
 	}
+	candidate.PreDeleteSnapshot = releaseCandidatePreDeleteSnapshot(candidate)
+	return candidate
 }
 
 func TestReleaseEvidenceCorrelationRejectsCrossAllocationSplicing(t *testing.T) {

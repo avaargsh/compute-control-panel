@@ -48,11 +48,12 @@ type draJournalSQL interface {
 }
 
 type draReceiptJournalRecord struct {
-	Release       ReleaseEvidenceCorrelation `json:"release"`
-	Event         DRAUnprepareEvent          `json:"event"`
-	PayloadSHA256 string                     `json:"payload_sha256"`
-	KeySHA256     string                     `json:"key_sha256"`
-	Signature     []byte                     `json:"signature"`
+	Release                 ReleaseEvidenceCorrelation `json:"release"`
+	Event                   DRAUnprepareEvent          `json:"event"`
+	PayloadSHA256           string                     `json:"payload_sha256"`
+	KeySHA256               string                     `json:"key_sha256"`
+	PreDeleteSnapshotDigest string                     `json:"pre_delete_snapshot_digest"`
+	Signature               []byte                     `json:"signature"`
 }
 
 func draJournalDigest(domain string, payload []byte) string {
@@ -126,11 +127,12 @@ func (j *DRAUnprepareReceiptJournal) VerifyAndRecord(
 		}
 	}
 	recordJSON, err := json.Marshal(draReceiptJournalRecord{
-		Release:       correlated.Release,
-		Event:         correlated.Event,
-		PayloadSHA256: correlated.PayloadSHA256,
-		KeySHA256:     correlated.KeySHA256,
-		Signature:     correlated.Signature[:],
+		Release:                 correlated.Release,
+		Event:                   correlated.Event,
+		PayloadSHA256:           correlated.PayloadSHA256,
+		KeySHA256:               correlated.KeySHA256,
+		PreDeleteSnapshotDigest: correlated.PreDeleteSnapshotDigest,
+		Signature:               correlated.Signature[:],
 	})
 	if err != nil {
 		return false, fmt.Errorf("%w: encode verified receipt: %v", ErrDRAReceiptJournalUnavailable, err)
