@@ -9,7 +9,12 @@ Requirements: a locally installed Go toolchain matching `go.mod` (currently Go 1
 ```bash
 git switch main
 go test ./internal/demoinventory ./cmd/ccp-demo
-go run ./cmd/ccp-demo -addr 127.0.0.1:8081
+
+# Start via Makefile (preferred for local iteration)
+make demo
+
+# Or directly
+# go run ./cmd/ccp-demo -addr 127.0.0.1:8081
 ```
 
 Open **http://127.0.0.1:8081** on the same machine. Use Dashboard / Clusters / GPUs in the sidebar and the Refresh button.

@@ -7,7 +7,11 @@ Go-based Compute Control Plane for self-hosted, Kubernetes-first heterogeneous c
 The synthetic-only Dashboard, Clusters and GPUs preview is available on `main`. It needs a Go toolchain matching `go.mod`, but no Kubernetes cluster, GPU, PostgreSQL or cloud credentials.
 
 ```bash
+# Option 1: direct
 go run ./cmd/ccp-demo -addr 127.0.0.1:8081
+
+# Option 2: via Makefile (recommended for repeated local use)
+make demo
 ```
 
 Open `http://127.0.0.1:8081` on the same machine. See the [Demo Quickstart](docs/product/DEMO-CONSOLE-QUICKSTART.md) for verification and limitations. This is not an authenticated live Console; never expose the Demo publicly.
