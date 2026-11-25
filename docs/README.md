@@ -15,6 +15,7 @@ Documents under `docs/` are **design contracts and architecture decisions**. The
 | Product preview | Local-only Dashboard / Clusters / GPUs with synthetic data | [DEMO-CONSOLE-QUICKSTART.md](product/DEMO-CONSOLE-QUICKSTART.md) |
 | Implementation | Go foundation notes | [GO-FOUNDATION.md](implementation/GO-FOUNDATION.md) |
 | Operations | Identity, release gates | [SPIFFE-WORKLOAD-IDENTITY-PROVISIONING.md](operations/SPIFFE-WORKLOAD-IDENTITY-PROVISIONING.md) |
+| Local PostgreSQL validation | Reproduce the Go validation `verify` job's database steps | [LOCAL-POSTGRES-VALIDATION.md](operations/LOCAL-POSTGRES-VALIDATION.md) |
 | Testing | Acceptance criteria | [RELIABILITY-ACCEPTANCE.md](testing/RELIABILITY-ACCEPTANCE.md) |
 | Decisions | Cross-repo ownership, llm-d serving and resource ownership | [ADR-001](adr/ADR-001-CROSS-REPO-OWNERSHIP.md), [ADR-002](adr/ADR-002-LLMD-SERVING-BASELINE.md), [ADR-003](adr/ADR-003-LLMD-RESOURCE-OWNERSHIP.md) |
 | Inference | Proposed three-layer source-aware readiness contract (v0.2 only) | [LLMD-INFERENCE-OBSERVATION-V0.md](contracts/LLMD-INFERENCE-OBSERVATION-V0.md) |
