@@ -18,6 +18,26 @@ class DRAReceiptReadCIContract(unittest.TestCase):
                 self.assertIn(required, self.verify)
         self.assertNotIn("Require real PostgreSQL recorded DRA receipt acceptance", self.verify)
 
+    def test_exact_source_tenant_scope_and_auth_are_required(self):
+        self.assertIn("ref: ${{ github.event.pull_request.head.sha }}", self.source)
+        step = self.source.split(
+            "Require authenticated DRA receipt tenant isolation (no skip)", 1
+        )[1].split("\n      - name:", 1)[0]
+        required = (
+            "TestDRAReceiptIngestRequiresVerifiedSPIFFEIdentityAndExactSource",
+            "TestDRAReceiptIngestRejectsHistoricalEvidenceFromDifferentProvider",
+            "TestDRAReceiptIngestRejectsHistoricalEvidenceFromDifferentTenant",
+        )
+        command = next(line for line in step.splitlines() if "go test -count=1" in line)
+        pass_check = next(line for line in step.splitlines() if "for test in " in line)
+        for name in required:
+            with self.subTest(name=name):
+                self.assertIn(name, command)
+                self.assertIn(name, pass_check)
+        self.assertIn('grep -F -- "--- PASS: $test "', step)
+        self.assertIn("if grep -F -- '--- SKIP:'", step)
+        self.assertIn("verified_dra_receipt_tenant_scope_source_sha=", step)
+
     def test_exact_source_receipt_tests(self):
         self.assertIn("ref: ${{ github.event.pull_request.head.sha }}", self.source)
         self.assertIn("Require real PostgreSQL release Generation/UID fence test", self.source)

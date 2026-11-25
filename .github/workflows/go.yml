@@ -321,6 +321,31 @@ jobs:
             echo 'real PostgreSQL recorded receipt reader acceptance was skipped' >&2
             exit 1
           fi
+      - name: Require authenticated DRA receipt tenant isolation (no skip)
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -count=1 -v -run '^(TestDRAReceiptIngestRequiresVerifiedSPIFFEIdentityAndExactSource|TestDRAReceiptIngestRejectsHistoricalEvidenceFromDifferentProvider|TestDRAReceiptIngestRejectsHistoricalEvidenceFromDifferentTenant)
+        shell: bash
+        env:
+          DATABASE_URL: postgres://postgres:compute-ci@127.0.0.1:5432/postgres?sslmode=disable
+        run: |
+          set -euo pipefail
+          go test -count=1 -v -run '^TestSignedRecordedAndCurrentGenerationOneTransaction$' ./internal/store/postgres | tee release-signed-same-tx-pg.log
+          grep -F -- '--- PASS: TestSignedRecordedAndCurrentGenerationOneTransaction ' release-signed-same-tx-pg.log
+          if grep -F -- '--- SKIP: TestSignedRecordedAndCurrentGenerationOneTransaction' release-signed-same-tx-pg.log; then
+            echo 'signed/current same-transaction PG test was skipped: no acceptance evidence' >&2
+            exit 1
+          fi
+ ./internal/httpapi | tee dra-receipt-tenant-scope.log
+          for test in TestDRAReceiptIngestRequiresVerifiedSPIFFEIdentityAndExactSource TestDRAReceiptIngestRejectsHistoricalEvidenceFromDifferentProvider TestDRAReceiptIngestRejectsHistoricalEvidenceFromDifferentTenant; do
+            grep -F -- "--- PASS: $test " dra-receipt-tenant-scope.log
+          done
+          if grep -F -- '--- SKIP:' dra-receipt-tenant-scope.log; then
+            echo 'DRA ingress tenant-isolation acceptance was skipped' >&2
+            exit 1
+          fi
+          printf 'verified_dra_receipt_tenant_scope_source_sha=%s\n' "$(git rev-parse --verify HEAD)"
       - name: Require real PostgreSQL signed-and-current release preflight (no skip)
         shell: bash
         env:
