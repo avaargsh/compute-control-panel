@@ -35,7 +35,12 @@ def validate(event):
     base, head = pr.get('base'), pr.get('head')
     if not isinstance(base, dict) or not isinstance(head, dict):
         return ['Missing GitHub base/head commit metadata']
-    if base.get('ref') != 'main' or pr.get('draft') is True:
+    base_ref = base.get('ref')
+    if not isinstance(base_ref, str) or not base_ref or base_ref != base_ref.strip():
+        return ['Missing or invalid GitHub base ref']
+    if not isinstance(pr.get('draft'), bool):
+        return ['Missing or invalid GitHub draft flag']
+    if base_ref != 'main' or pr['draft']:
         return []
 
     errors = []
@@ -109,7 +114,13 @@ def main():
         for error in errors:
             print('ERROR: ' + error, file=sys.stderr)
         return 1
-    print('PR declaration complete; independent verification/Ruleset enforcement not implied')
+    pr = event['pull_request']
+    if pr['base']['ref'] != 'main':
+        print('PR declaration skipped: non-main target; no promotion evidence')
+    elif pr['draft']:
+        print('PR declaration skipped: draft; Ready-stage validation required')
+    else:
+        print('PR declaration complete; independent verification/Ruleset enforcement not implied')
     return 0
 
 
