@@ -54,6 +54,7 @@ Build the binary from the chosen exact source commit:
 
 ```bash
 go build -trimpath -o kueue-observe ./cmd/kueue-observe
+./kueue-observe --help  # offline: shows required flags without credentials
 ```
 
 Package that binary into a non-root container image using your deployment pipeline and record its immutable digest. In a test Pod, use `serviceAccountName: ccp-kueue-observer` with the projected token/CA mount enabled. Do not use the control-plane API credential or a general cluster-admin kubeconfig.
