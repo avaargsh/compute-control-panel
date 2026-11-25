@@ -96,6 +96,34 @@ func TestGetPreDeleteDRASnapshotForReceiptIsTenantProviderAndIdentityScoped(t *t
 			if _, ok, err := store.GetPreDeleteDRASnapshotForReceipt(create.TenantID, "provider-other", event); err != nil || ok {
 				t.Fatalf("foreign Provider resolved receipt snapshot: ok=%t err=%v", ok, err)
 			}
+			// Identical Kubernetes names/UIDs can exist in different Provider
+			// clusters. They must not make each other's tenant-scoped history
+			// ambiguous; the registered Provider scope selects one lineage.
+			otherCreate := uniqueKueueRequest(t)
+			otherCreate.ProviderID = "provider-other"
+			otherSuffix := strings.TrimPrefix(otherCreate.OperationID, "op-")
+			otherJob, otherUID := "job-"+otherSuffix, "job-uid-"+otherSuffix
+			otherRemove := preDeleteDeleteRequest(otherCreate, namespace, otherJob, otherUID)
+			if err := store.PutCreatePin(namespace, otherCreate, otherJob, otherUID); err != nil {
+				t.Fatal(err)
+			}
+			otherSnapshot := preDeleteSnapshotFixture(otherCreate, otherRemove, namespace, otherJob, otherUID)
+			otherSnapshot.Claim = want.Claim
+			otherSnapshot.Pod = want.Pod
+			otherSnapshot.NodeName = want.NodeName
+			otherSnapshot.Devices = want.Devices
+			otherStored, err := store.PutPreDeleteDRASnapshot(namespace, otherRemove, otherSnapshot)
+			if err != nil {
+				t.Fatalf("store colliding cross-Provider snapshot: %v", err)
+			}
+			gotOther, ok, err := store.GetPreDeleteDRASnapshotForReceipt(otherCreate.TenantID, otherCreate.ProviderID, event)
+			if err != nil || !ok || gotOther.Digest != otherStored.Digest {
+				t.Fatalf("registered Provider did not select its own colliding snapshot: got=%+v ok=%t err=%v", gotOther, ok, err)
+			}
+			gotOriginal, ok, err := store.GetPreDeleteDRASnapshotForReceipt(create.TenantID, create.ProviderID, event)
+			if err != nil || !ok || gotOriginal.Digest != want.Digest {
+				t.Fatalf("foreign Provider collision made original history ambiguous: got=%+v ok=%t err=%v", gotOriginal, ok, err)
+			}
 			mutations := []struct {
 				name   string
 				mutate func(*DRAUnprepareEvent)
