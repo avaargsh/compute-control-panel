@@ -441,3 +441,61 @@ func TestPostgresKueuePreDeleteSnapshotInsertGuardsRejectTenantAndLateWrites(t *
 		t.Fatalf("late direct snapshot insert state=%s err=%v", postgresSQLState(err), err)
 	}
 }
+
+type preDeleteSnapshotReadOverride struct {
+	KueueJobBindingStore
+	snapshot KueuePreDeleteDRASnapshot
+}
+
+func (s preDeleteSnapshotReadOverride) GetPreDeleteDRASnapshot(string, Request) (KueuePreDeleteDRASnapshot, bool, error) {
+	return s.snapshot, true, nil
+}
+
+func TestKueuePreDeleteSnapshotReadRevalidatesCreatePinAndStructure(t *testing.T) {
+	store := NewMemoryKueueJobBindingStore()
+	create := uniqueKueueRequest(t)
+	const namespace = "tenant-a"
+	const jobName, jobUID = "job-a", "job-uid-a"
+	remove := preDeleteDeleteRequest(create, namespace, jobName, jobUID)
+	if err := store.PutCreatePin(namespace, create, jobName, jobUID); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.PutPreDeleteDRASnapshot(namespace, remove,
+		preDeleteSnapshotFixture(create, remove, namespace, jobName, jobUID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*KueuePreDeleteDRASnapshot)
+	}{
+		{name: "wrong CREATE generation", mutate: func(s *KueuePreDeleteDRASnapshot) { s.CreateGeneration++ }},
+		{name: "foreign Claim namespace", mutate: func(s *KueuePreDeleteDRASnapshot) { s.Claim.Namespace = "tenant-other" }},
+		{name: "missing Pod UID", mutate: func(s *KueuePreDeleteDRASnapshot) { s.Pod.UID = "" }},
+		{name: "missing provenance", mutate: func(s *KueuePreDeleteDRASnapshot) { s.Source = "" }},
+		{name: "missing observation time", mutate: func(s *KueuePreDeleteDRASnapshot) { s.ObservedAt = time.Time{} }},
+		{name: "unserializable observation time", mutate: func(s *KueuePreDeleteDRASnapshot) {
+			s.ObservedAt = time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			altered := cloneKueuePreDeleteDRASnapshot(stored)
+			tc.mutate(&altered)
+			altered.Digest = kueuePreDeleteSnapshotDigest(altered)
+			adapter := &KueueJobAdapter{
+				namespace: namespace, bindings: preDeleteSnapshotReadOverride{store, altered},
+				resourceClaimTemplateName: "gpu-template",
+			}
+			if err := adapter.requirePreDeleteDRASnapshot(remove); !errors.Is(err, ErrPreDeleteDRASnapshotRequired) {
+				t.Fatalf("invalid stored snapshot unlocked DELETE: %v", err)
+			}
+		})
+	}
+	adapter := &KueueJobAdapter{
+		namespace: namespace, bindings: preDeleteSnapshotReadOverride{store, stored},
+		resourceClaimTemplateName: "gpu-template",
+	}
+	if err := adapter.requirePreDeleteDRASnapshot(remove); err != nil {
+		t.Fatalf("valid immutable snapshot rejected: %v", err)
+	}
+}

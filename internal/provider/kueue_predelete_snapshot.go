@@ -260,11 +260,18 @@ func (a *KueueJobAdapter) requirePreDeleteDRASnapshot(req Request) error {
 		pin.Request.WorkloadID != req.WorkloadID || pin.Request.ProviderID != req.ProviderID {
 		return ErrPreDeleteDRASnapshotRequired
 	}
+	// Recheck the complete stored snapshot against the durable CREATE pin,
+	// not just the DELETE target and digest. A digest is not validation of
+	// the snapshot's generation, provenance or object identity fields.
+	canonical, err := validateKueuePreDeleteDRASnapshot(a.namespace, req, pin, snapshot)
+	if err != nil || canonical.Digest != snapshot.Digest {
+		return ErrPreDeleteDRASnapshotRequired
+	}
 	return nil
 }
 
 func preDeleteSnapshotMatchesDelete(snapshot KueuePreDeleteDRASnapshot, namespace string, req Request, templateName string) bool {
-	if len(snapshot.Devices) == 0 {
+	if len(snapshot.Devices) == 0 || snapshot.Digest == "" {
 		return false
 	}
 	return snapshot.Namespace == namespace && snapshot.TenantID == req.TenantID &&
