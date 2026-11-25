@@ -4,18 +4,15 @@
 
 ## Try the first three screens
 
-Requirements: a locally installed Go toolchain matching `go.mod` (currently Go 1.27.x). No running Kubernetes cluster, GPU, PostgreSQL service, npm or cloud credentials are needed.
+Requirements: a locally installed Go toolchain matching `go.mod` (Go 1.27.0 or newer). GitHub Go validation pins Go 1.27.4 with `GOTOOLCHAIN=local`. No running Kubernetes cluster, GPU, PostgreSQL service, npm or cloud credentials are needed.
 
 ```bash
 git switch main
 go test ./internal/demoinventory ./cmd/ccp-demo
-
-# Start via Makefile (preferred for local iteration)
 make demo
-
-# Or directly
-# go run ./cmd/ccp-demo -addr 127.0.0.1:8081
 ```
+
+`make demo` is `go run ./cmd/ccp-demo -addr 127.0.0.1:8081`. The same command works without Make. `make test` in the repository [README](../../README.md) is the broader race suite; PostgreSQL tests skip when `DATABASE_URL` is unset, so it is not the full GitHub Go validation job.
 
 Open **http://127.0.0.1:8081** on the same machine. Use Dashboard / Clusters / GPUs in the sidebar and the Refresh button.
 
