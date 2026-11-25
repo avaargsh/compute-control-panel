@@ -151,3 +151,40 @@ func TestMemoryPreDeleteReceiptSnapshotLookupRejectsAmbiguousIdentity(t *testing
 		t.Fatalf("ambiguous claim identity did not fail closed: ok=%t err=%v", ok, err)
 	}
 }
+
+func TestMemoryPreDeleteReceiptSnapshotLookupRejectsMalformedInput(t *testing.T) {
+	event := DRAUnprepareEvent{
+		ClaimNamespace: "tenant-a", ClaimName: "claim-a", ClaimUID: "claim-uid-a",
+		PodUID: "pod-uid-a", AllocatedClaimResourceVersion: "14", NodeName: "node-a",
+		AllocatedDevice: DRAAllocatedDevice{Request: "gpu", Driver: "vendor.example", Pool: "pool-a", Device: "gpu-a"},
+	}
+	cases := []struct {
+		name     string
+		tenantID string
+		mutate   func(*DRAUnprepareEvent)
+	}{
+		{name: "empty tenant", tenantID: "", mutate: func(*DRAUnprepareEvent) {}},
+		{name: "whitespace tenant", tenantID: " tenant-a ", mutate: func(*DRAUnprepareEvent) {}},
+		{name: "missing Claim UID", tenantID: "tenant-a", mutate: func(e *DRAUnprepareEvent) { e.ClaimUID = "" }},
+		{name: "missing Pod UID", tenantID: "tenant-a", mutate: func(e *DRAUnprepareEvent) { e.PodUID = "" }},
+		{name: "missing device", tenantID: "tenant-a", mutate: func(e *DRAUnprepareEvent) { e.AllocatedDevice.Device = "" }},
+	}
+	store := NewMemoryKueueJobBindingStore()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			changed := event
+			tc.mutate(&changed)
+			if _, ok, err := store.GetPreDeleteDRASnapshotForReceipt(tc.tenantID, changed); !errors.Is(err, ErrUncorrelatedDRAUnprepare) || ok {
+				t.Fatalf("malformed receipt lookup did not fail closed: ok=%t err=%v", ok, err)
+			}
+		})
+	}
+	var nilStore *MemoryKueueJobBindingStore
+	if _, ok, err := nilStore.GetPreDeleteDRASnapshotForReceipt("tenant-a", event); !errors.Is(err, ErrInvalidKueueObservation) || ok {
+		t.Fatalf("unavailable memory store error was hidden: ok=%t err=%v", ok, err)
+	}
+	var nilPostgres *PostgresKueueJobBindingStore
+	if _, ok, err := nilPostgres.GetPreDeleteDRASnapshotForReceipt("tenant-a", event); !errors.Is(err, ErrInvalidKueueObservation) || ok {
+		t.Fatalf("unavailable PostgreSQL store error was hidden: ok=%t err=%v", ok, err)
+	}
+}
