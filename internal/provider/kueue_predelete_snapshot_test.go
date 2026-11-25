@@ -441,3 +441,115 @@ func TestPostgresKueuePreDeleteSnapshotInsertGuardsRejectTenantAndLateWrites(t *
 		t.Fatalf("late direct snapshot insert state=%s err=%v", postgresSQLState(err), err)
 	}
 }
+
+type preDeleteSnapshotReadOverride struct {
+	KueueJobBindingStore
+	snapshot KueuePreDeleteDRASnapshot
+}
+
+func (s preDeleteSnapshotReadOverride) GetPreDeleteDRASnapshot(string, Request) (KueuePreDeleteDRASnapshot, bool, error) {
+	return s.snapshot, true, nil
+}
+
+func TestKueuePreDeleteSnapshotReadRevalidatesCreatePinAndStructure(t *testing.T) {
+	store := NewMemoryKueueJobBindingStore()
+	create := uniqueKueueRequest(t)
+	const namespace = "tenant-a"
+	const jobName, jobUID = "job-a", "job-uid-a"
+	remove := preDeleteDeleteRequest(create, namespace, jobName, jobUID)
+	if err := store.PutCreatePin(namespace, create, jobName, jobUID); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.PutPreDeleteDRASnapshot(namespace, remove,
+		preDeleteSnapshotFixture(create, remove, namespace, jobName, jobUID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*KueuePreDeleteDRASnapshot)
+	}{
+		{name: "wrong CREATE generation", mutate: func(s *KueuePreDeleteDRASnapshot) { s.CreateGeneration++ }},
+		{name: "wrong CREATE operation", mutate: func(s *KueuePreDeleteDRASnapshot) { s.CreateOperationID += "-successor" }},
+		{name: "foreign tenant", mutate: func(s *KueuePreDeleteDRASnapshot) { s.TenantID = "tenant-other" }},
+		{name: "foreign Claim namespace", mutate: func(s *KueuePreDeleteDRASnapshot) { s.Claim.Namespace = "tenant-other" }},
+		{name: "missing Pod UID", mutate: func(s *KueuePreDeleteDRASnapshot) { s.Pod.UID = "" }},
+		{name: "missing provenance", mutate: func(s *KueuePreDeleteDRASnapshot) { s.Source = "" }},
+		{name: "missing observation time", mutate: func(s *KueuePreDeleteDRASnapshot) { s.ObservedAt = time.Time{} }},
+		{name: "unserializable observation time", mutate: func(s *KueuePreDeleteDRASnapshot) {
+			s.ObservedAt = time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			altered := cloneKueuePreDeleteDRASnapshot(stored)
+			tc.mutate(&altered)
+			altered.Digest = kueuePreDeleteSnapshotDigest(altered)
+			adapter := &KueueJobAdapter{
+				namespace: namespace, bindings: preDeleteSnapshotReadOverride{store, altered},
+				resourceClaimTemplateName: "gpu-template",
+			}
+			if err := adapter.requirePreDeleteDRASnapshot(remove); !errors.Is(err, ErrPreDeleteDRASnapshotRequired) {
+				t.Fatalf("invalid stored snapshot unlocked DELETE: %v", err)
+			}
+		})
+	}
+	adapter := &KueueJobAdapter{
+		namespace: namespace, bindings: preDeleteSnapshotReadOverride{store, stored},
+		resourceClaimTemplateName: "gpu-template",
+	}
+	if err := adapter.requirePreDeleteDRASnapshot(remove); err != nil {
+		t.Fatalf("valid immutable snapshot rejected: %v", err)
+	}
+}
+
+func TestKueueJobAdapterBlocksDRADeleteWhenStoredSnapshotReadIsMalformed(t *testing.T) {
+	adapter, api, server := newKueueAdapterFixture(t, &kueueAPI{})
+	defer server.Close()
+	adapter.queueName = "queue-a"
+	if err := adapter.UseQueuedResourceClaimTemplate("gpu-template"); err != nil {
+		t.Fatal(err)
+	}
+	create := kueueAdapterRequest()
+	if _, err := adapter.Apply(context.Background(), create); err != nil {
+		t.Fatal(err)
+	}
+	jobName := kueueCreateJobName(create.TenantID, create.OperationID)
+	api.mu.Lock()
+	job := api.jobs[jobName]
+	api.mu.Unlock()
+	if job.Metadata.UID == "" {
+		t.Fatal("fake API did not persist created Job UID")
+	}
+
+	remove := create
+	remove.OperationID = "op-delete-malformed-snapshot"
+	remove.IdempotencyKey = "idem-delete-malformed-snapshot"
+	remove.Kind = operation.Delete
+	remove.TargetResourceID = adapter.namespace + "/" + jobName
+	remove.TargetResourceUID = job.Metadata.UID
+	snapshot, err := adapter.bindings.PutPreDeleteDRASnapshot(
+		adapter.namespace,
+		remove,
+		preDeleteSnapshotFixture(create, remove, adapter.namespace, jobName, job.Metadata.UID),
+	)
+	if err != nil {
+		t.Fatalf("persist valid pre-delete snapshot: %v", err)
+	}
+
+	// Recompute the digest after corruption: a checksum alone must not let an
+	// invalid generation reach the external Kubernetes DELETE.
+	corrupt := cloneKueuePreDeleteDRASnapshot(snapshot)
+	corrupt.CreateGeneration++
+	corrupt.Digest = kueuePreDeleteSnapshotDigest(corrupt)
+	adapter.bindings = preDeleteSnapshotReadOverride{adapter.bindings, corrupt}
+
+	if _, err := adapter.Apply(context.Background(), remove); !errors.Is(err, ErrPreDeleteDRASnapshotRequired) {
+		t.Fatalf("malformed stored snapshot did not block DELETE: %v", err)
+	}
+	if api.deleteCount() != 0 || api.storedJobs() != 1 {
+		t.Fatalf("malformed snapshot caused external DELETE: deletes=%d stored=%d", api.deleteCount(), api.storedJobs())
+	}
+	if _, ok, err := adapter.bindings.GetDeleteTombstone(adapter.namespace, remove); err != nil || ok {
+		t.Fatalf("DELETE intent was persisted for malformed snapshot: exists=%t err=%v", ok, err)
+	}
+}
