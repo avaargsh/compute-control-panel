@@ -51,13 +51,21 @@ func TestRunReportsBoundAddressAndServesHealth(t *testing.T) {
 		t.Fatal("server did not report its bound address")
 	}
 
-	client := &http.Client{Timeout: 2 * time.Second}
+	// Use a dedicated transport; do not leave reusable or speculative
+	// connections in the default transport when testing server shutdown.
+	transport := &http.Transport{DisableKeepAlives: true}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Transport: transport, Timeout: 2 * time.Second}
 	for _, endpoint := range []string{"/livez", "/readyz", "/api/v1/meta"} {
 		resp, err := client.Get("http://" + addr + endpoint)
 		if err != nil {
 			t.Fatal(err)
 		}
-		resp.Body.Close()
+		_, readErr := io.Copy(io.Discard, resp.Body)
+		closeErr := resp.Body.Close()
+		if readErr != nil || closeErr != nil {
+			t.Fatalf("GET %s: response body read=%v close=%v", endpoint, readErr, closeErr)
+		}
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("GET %s: got %d", endpoint, resp.StatusCode)
 		}
@@ -68,8 +76,9 @@ func TestRunReportsBoundAddressAndServesHealth(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("server did not stop")
+	case <-time.After(20 * time.Second):
+		// The server allows up to 15 seconds for graceful shutdown.
+		t.Fatal("server did not stop within its graceful shutdown budget")
 	}
 }
 
