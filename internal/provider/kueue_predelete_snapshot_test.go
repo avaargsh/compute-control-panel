@@ -470,6 +470,8 @@ func TestKueuePreDeleteSnapshotReadRevalidatesCreatePinAndStructure(t *testing.T
 		mutate func(*KueuePreDeleteDRASnapshot)
 	}{
 		{name: "wrong CREATE generation", mutate: func(s *KueuePreDeleteDRASnapshot) { s.CreateGeneration++ }},
+		{name: "wrong CREATE operation", mutate: func(s *KueuePreDeleteDRASnapshot) { s.CreateOperationID += "-successor" }},
+		{name: "foreign tenant", mutate: func(s *KueuePreDeleteDRASnapshot) { s.TenantID = "tenant-other" }},
 		{name: "foreign Claim namespace", mutate: func(s *KueuePreDeleteDRASnapshot) { s.Claim.Namespace = "tenant-other" }},
 		{name: "missing Pod UID", mutate: func(s *KueuePreDeleteDRASnapshot) { s.Pod.UID = "" }},
 		{name: "missing provenance", mutate: func(s *KueuePreDeleteDRASnapshot) { s.Source = "" }},
