@@ -11,7 +11,8 @@
 
 .PHONY: help build lint test demo clean
 
-BIN_DIR := bin
+# Keep build and clean inside the documented repository-local output directory.
+override BIN_DIR := bin
 
 help:
 	@echo "Targets:"
