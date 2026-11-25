@@ -30,10 +30,10 @@ func TestGetPreDeleteDRASnapshotForReceiptDistinguishesUnusableStoreFromUncorrel
 		read func() (KueuePreDeleteDRASnapshot, bool, error)
 	}{
 		{"unusable memory store", func() (KueuePreDeleteDRASnapshot, bool, error) {
-			return memory.GetPreDeleteDRASnapshotForReceipt(create.TenantID, event)
+			return memory.GetPreDeleteDRASnapshotForReceipt(create.TenantID, create.ProviderID, event)
 		}},
 		{"unusable PostgreSQL store", func() (KueuePreDeleteDRASnapshot, bool, error) {
-			return postgres.GetPreDeleteDRASnapshotForReceipt(create.TenantID, event)
+			return postgres.GetPreDeleteDRASnapshotForReceipt(create.TenantID, create.ProviderID, event)
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -45,7 +45,7 @@ func TestGetPreDeleteDRASnapshotForReceiptDistinguishesUnusableStoreFromUncorrel
 	}
 }
 
-func TestGetPreDeleteDRASnapshotForReceiptIsTenantAndIdentityScoped(t *testing.T) {
+func TestGetPreDeleteDRASnapshotForReceiptIsTenantProviderAndIdentityScoped(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		open func(*testing.T) KueueJobBindingStore
@@ -83,13 +83,18 @@ func TestGetPreDeleteDRASnapshotForReceiptIsTenantAndIdentityScoped(t *testing.T
 			}
 			event := receiptSnapshotLookupEvent(want)
 
-			got, ok, err := store.GetPreDeleteDRASnapshotForReceipt(create.TenantID, event)
+			got, ok, err := store.GetPreDeleteDRASnapshotForReceipt(create.TenantID, create.ProviderID, event)
 			if err != nil || !ok || got.Digest != want.Digest || got.DeleteOperationID != remove.OperationID {
 				t.Fatalf("exact receipt lookup got=%+v ok=%t err=%v", got, ok, err)
 			}
 
-			if _, ok, err := store.GetPreDeleteDRASnapshotForReceipt("tenant-other", event); err != nil || ok {
+			if _, ok, err := store.GetPreDeleteDRASnapshotForReceipt("tenant-other", create.ProviderID, event); err != nil || ok {
 				t.Fatalf("foreign tenant resolved snapshot: ok=%t err=%v", ok, err)
+			}
+			// Provider scope comes from the independently registered signer
+			// resolver, not from tenant input or the signed event itself.
+			if _, ok, err := store.GetPreDeleteDRASnapshotForReceipt(create.TenantID, "provider-other", event); err != nil || ok {
+				t.Fatalf("foreign Provider resolved receipt snapshot: ok=%t err=%v", ok, err)
 			}
 			mutations := []struct {
 				name   string
@@ -107,7 +112,7 @@ func TestGetPreDeleteDRASnapshotForReceiptIsTenantAndIdentityScoped(t *testing.T
 				t.Run(mutation.name, func(t *testing.T) {
 					changed := event
 					mutation.mutate(&changed)
-					if _, ok, err := store.GetPreDeleteDRASnapshotForReceipt(create.TenantID, changed); err != nil || ok {
+					if _, ok, err := store.GetPreDeleteDRASnapshotForReceipt(create.TenantID, create.ProviderID, changed); err != nil || ok {
 						t.Fatalf("mismatched receipt resolved snapshot: ok=%t err=%v", ok, err)
 					}
 				})
@@ -165,7 +170,7 @@ func TestPreDeleteReceiptSnapshotLookupRejectsAmbiguousIdentity(t *testing.T) {
 			if err != nil || !ok {
 				t.Fatalf("read first snapshot: ok=%t err=%v", ok, err)
 			}
-			if _, ok, err := store.GetPreDeleteDRASnapshotForReceipt(createA.TenantID, receiptSnapshotLookupEvent(snapshotA)); !errors.Is(err, ErrOperationConflict) || ok {
+			if _, ok, err := store.GetPreDeleteDRASnapshotForReceipt(createA.TenantID, createA.ProviderID, receiptSnapshotLookupEvent(snapshotA)); !errors.Is(err, ErrOperationConflict) || ok {
 				t.Fatalf("ambiguous claim identity did not fail closed: ok=%t err=%v", ok, err)
 			}
 		})
@@ -194,17 +199,17 @@ func TestMemoryPreDeleteReceiptSnapshotLookupRejectsMalformedInput(t *testing.T)
 		t.Run(tc.name, func(t *testing.T) {
 			changed := event
 			tc.mutate(&changed)
-			if _, ok, err := store.GetPreDeleteDRASnapshotForReceipt(tc.tenantID, changed); !errors.Is(err, ErrUncorrelatedDRAUnprepare) || ok {
+			if _, ok, err := store.GetPreDeleteDRASnapshotForReceipt(tc.tenantID, "provider-a", changed); !errors.Is(err, ErrUncorrelatedDRAUnprepare) || ok {
 				t.Fatalf("malformed receipt lookup did not fail closed: ok=%t err=%v", ok, err)
 			}
 		})
 	}
 	var nilStore *MemoryKueueJobBindingStore
-	if _, ok, err := nilStore.GetPreDeleteDRASnapshotForReceipt("tenant-a", event); !errors.Is(err, ErrInvalidKueueObservation) || ok {
+	if _, ok, err := nilStore.GetPreDeleteDRASnapshotForReceipt("tenant-a", "provider-a", event); !errors.Is(err, ErrInvalidKueueObservation) || ok {
 		t.Fatalf("unavailable memory store error was hidden: ok=%t err=%v", ok, err)
 	}
 	var nilPostgres *PostgresKueueJobBindingStore
-	if _, ok, err := nilPostgres.GetPreDeleteDRASnapshotForReceipt("tenant-a", event); !errors.Is(err, ErrInvalidKueueObservation) || ok {
+	if _, ok, err := nilPostgres.GetPreDeleteDRASnapshotForReceipt("tenant-a", "provider-a", event); !errors.Is(err, ErrInvalidKueueObservation) || ok {
 		t.Fatalf("unavailable PostgreSQL store error was hidden: ok=%t err=%v", ok, err)
 	}
 }
