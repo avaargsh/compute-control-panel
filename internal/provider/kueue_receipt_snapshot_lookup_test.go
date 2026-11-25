@@ -17,6 +17,33 @@ func receiptSnapshotLookupEvent(snapshot KueuePreDeleteDRASnapshot) DRAUnprepare
 	}
 }
 
+func TestGetPreDeleteDRASnapshotForReceiptDistinguishesUnusableStoreFromUncorrelatedEvent(t *testing.T) {
+	var memory *MemoryKueueJobBindingStore
+	var postgres *PostgresKueueJobBindingStore
+	create := uniqueKueueRequest(t)
+	remove := preDeleteDeleteRequest(create, "tenant-a", "job-a", "job-uid-a")
+	event := receiptSnapshotLookupEvent(preDeleteSnapshotFixture(create, remove, "tenant-a", "job-a", "job-uid-a"))
+
+	for _, tc := range []struct {
+		name string
+		read func() (KueuePreDeleteDRASnapshot, bool, error)
+	}{
+		{"unusable memory store", func() (KueuePreDeleteDRASnapshot, bool, error) {
+			return memory.GetPreDeleteDRASnapshotForReceipt(create.TenantID, event)
+		}},
+		{"unusable PostgreSQL store", func() (KueuePreDeleteDRASnapshot, bool, error) {
+			return postgres.GetPreDeleteDRASnapshotForReceipt(create.TenantID, event)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, ok, err := tc.read()
+			if ok || !errors.Is(err, ErrInvalidKueueObservation) {
+				t.Fatalf("unavailable snapshot store was misclassified as a normal uncorrelated receipt: ok=%t err=%v", ok, err)
+			}
+		})
+	}
+}
+
 func TestGetPreDeleteDRASnapshotForReceiptIsTenantAndIdentityScoped(t *testing.T) {
 	for _, tc := range []struct {
 		name string
