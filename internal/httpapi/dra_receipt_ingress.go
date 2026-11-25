@@ -312,6 +312,14 @@ func (h *draReceiptIngestHandler) ingest(w http.ResponseWriter, r *http.Request)
 		}
 		return
 	}
+	// The evidence resolver is a separate trust boundary. Even a structurally
+	// consistent candidate for another tenant must not reach the journal.
+	if candidate.Create.TenantID != principal.TenantID ||
+		candidate.Delete.TenantID != principal.TenantID ||
+		candidate.ProviderAbsence.TenantID != principal.TenantID {
+		writeWorkloadAPIError(w, http.StatusForbidden, "DRA_RECEIPT_UNTRUSTED", "Historical evidence does not match the authenticated tenant")
+		return
+	}
 	if candidate.Create.ProviderID != resolved.ProviderID ||
 		candidate.Delete.ProviderID != resolved.ProviderID ||
 		candidate.ProviderAbsence.ProviderID != resolved.ProviderID {

@@ -139,6 +139,9 @@ func draReceiptTestHandler(t *testing.T, authenticator WorkloadAuthenticator) (h
 		t.Fatal(err)
 	}
 	resolver := &draReceiptTestResolver{providerID: "provider-a", verifier: verifier, serverNow: time.Now().UTC()}
+	resolver.candidate.Create.TenantID = "platform"
+	resolver.candidate.Delete.TenantID = "platform"
+	resolver.candidate.ProviderAbsence.TenantID = "platform"
 	resolver.candidate.Create.ProviderID = "provider-a"
 	resolver.candidate.Delete.ProviderID = "provider-a"
 	resolver.candidate.ProviderAbsence.ProviderID = "provider-a"
@@ -251,6 +254,38 @@ func TestDRAReceiptIngestRejectsHistoricalEvidenceFromDifferentProvider(t *testi
 			h.ServeHTTP(rec, req)
 			if rec.Code != http.StatusForbidden || resolver.calls != 1 || journal.calls != 0 {
 				t.Fatalf("cross-Provider historical evidence reached journal: HTTP %d evidence=%d journal=%d",
+					rec.Code, resolver.calls, journal.calls)
+			}
+		})
+	}
+}
+
+func TestDRAReceiptIngestRejectsHistoricalEvidenceFromDifferentTenant(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*provider.ReleaseEvidenceCandidate)
+	}{
+		{name: "CREATE tenant differs", mutate: func(c *provider.ReleaseEvidenceCandidate) { c.Create.TenantID = "other-tenant" }},
+		{name: "DELETE tenant differs", mutate: func(c *provider.ReleaseEvidenceCandidate) { c.Delete.TenantID = "other-tenant" }},
+		{name: "absence tenant differs", mutate: func(c *provider.ReleaseEvidenceCandidate) { c.ProviderAbsence.TenantID = "other-tenant" }},
+		{name: "all evidence agrees on foreign tenant", mutate: func(c *provider.ReleaseEvidenceCandidate) {
+			c.Create.TenantID = "other-tenant"
+			c.Delete.TenantID = "other-tenant"
+			c.ProviderAbsence.TenantID = "other-tenant"
+		}},
+		{name: "missing tenant", mutate: func(c *provider.ReleaseEvidenceCandidate) { c.Create.TenantID = "" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, resolver, journal := draReceiptTestHandler(t, draReceiptSPIFFEAuthenticator(t))
+			tc.mutate(&resolver.candidate)
+			req := httptest.NewRequest(http.MethodPost, draReceiptIngestPath,
+				bytes.NewReader(draReceiptTestBody(t, draReceiptTestSigned())))
+			req.Header.Set("Content-Type", "application/json")
+			req.TLS = draReceiptTestTLS()
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != http.StatusForbidden || resolver.calls != 1 || journal.calls != 0 {
+				t.Fatalf("cross-tenant historical evidence reached journal: HTTP %d evidence=%d journal=%d",
 					rec.Code, resolver.calls, journal.calls)
 			}
 		})
