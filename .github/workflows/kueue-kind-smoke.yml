@@ -105,10 +105,6 @@ jobs:
           bash -n scripts/kueue_relist_kind_smoke.sh
           bash -n scripts/kueue_preemption_kind_smoke.sh
           bash -n scripts/kueue_cohort_kind_smoke.sh
-      - name: TEMPORARY RED probe (must fail required verdict)
-        run: |
-          echo 'intentional RED probe for #166; revert immediately after observing the required verdict'
-          exit 1
       - name: Kubernetes 1.34 / Kueue v0.19.6 + simulated DRA v0.2.0 + PG16 (disposable)
         env:
           CCP_DISPOSABLE_KIND_SMOKE: '1'
