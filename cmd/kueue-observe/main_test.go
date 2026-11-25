@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"io"
 	"strings"
 	"testing"
 )
@@ -21,7 +24,7 @@ func TestParseObservationOptionsRequiresUIDPinnedReadOnlyScope(t *testing.T) {
 		"--tenant", "tenant-a", "--workload", "workload-a",
 		"--generation", "7", "--namespace", "tenant-a",
 		"--job", "job-a", "--uid", "job-uid-a",
-	}, kubeEnv)
+	}, kubeEnv, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,8 +67,28 @@ func TestParseObservationOptionsRejectsMissingIdentityAndInvalidClusterSettings(
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := parseOptions(tc.args, tc.env); err == nil {
+			if _, err := parseOptions(tc.args, tc.env, io.Discard); err == nil {
 				t.Fatal("untrusted cluster or incomplete scope accepted")
+			}
+		})
+	}
+}
+
+func TestObserverHelpIsOffline(t *testing.T) {
+	for _, arg := range []string{"-h", "--help"} {
+		t.Run(arg, func(t *testing.T) {
+			var output bytes.Buffer
+			err := run(context.Background(), []string{arg}, func(key string) string {
+				t.Fatalf("help must not read Kubernetes environment variable %q", key)
+				return ""
+			}, &output)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, word := range []string{"Usage: kueue-observe", "read-only", "-tenant", "-workload", "-generation", "-namespace", "-job", "-uid", "KUBERNETES_SERVICE_HOST", "KUBERNETES_SERVICE_PORT_HTTPS"} {
+				if !strings.Contains(output.String(), word) {
+					t.Errorf("help missing %q", word)
+				}
 			}
 		})
 	}
