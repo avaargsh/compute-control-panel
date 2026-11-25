@@ -44,7 +44,7 @@ The product's planned `web/` implementation remains **React + TypeScript + Vite 
 ## Verification / acceptance boundaries
 
 - Local Go tests exercise Demo/Live schema parity, project isolation, source provenance, timestamp validity, read-only route behavior and loopback-only binding.
-- GitHub CI executes gofmt, vet, repository-wide race tests and separately checks `app.js` syntax.
+- GitHub CI runs gofmt, vet and the Go race suite. The separate Demo workflow checks `app.js` syntax and runs the rendering regressions. Run `node --test cmd/ccp-demo/app_test.cjs` to reproduce those regressions locally with Node.js 22 or newer, without installing npm packages. They simulate the DOM to verify missing versus reported-zero GPU quantities, incomplete totals and exact integer sums; they are not a full browser test.
 - Real kind/ServiceAccount L2 acceptance lives in [PR #141](https://github.com/avaargsh/compute-control-panel/pull/141).
 - This preview does **not** demonstrate physical GPU discovery, reliable allocation evidence, model deployment or production metering.
 
