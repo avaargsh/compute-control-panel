@@ -2,6 +2,7 @@ package provider
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -63,7 +64,8 @@ func TestGetPreDeleteDRASnapshotForReceiptIsTenantAndIdentityScoped(t *testing.T
 			store := tc.open(t)
 			create := uniqueKueueRequest(t)
 			const namespace = "tenant-a"
-			const jobName, jobUID = "job-a", "job-uid-a"
+			suffix := strings.TrimPrefix(create.OperationID, "op-")
+			jobName, jobUID := "job-"+suffix, "job-uid-"+suffix
 			remove := preDeleteDeleteRequest(create, namespace, jobName, jobUID)
 			if err := store.PutCreatePin(namespace, create, jobName, jobUID); err != nil {
 				t.Fatal(err)
@@ -114,41 +116,59 @@ func TestGetPreDeleteDRASnapshotForReceiptIsTenantAndIdentityScoped(t *testing.T
 	}
 }
 
-func TestMemoryPreDeleteReceiptSnapshotLookupRejectsAmbiguousIdentity(t *testing.T) {
-	store := NewMemoryKueueJobBindingStore()
-	createA := uniqueKueueRequest(t)
-	createB := uniqueKueueRequest(t)
-	const namespace = "tenant-a"
-	const jobA, uidA = "job-a", "job-uid-a"
-	const jobB, uidB = "job-b", "job-uid-b"
-	removeA := preDeleteDeleteRequest(createA, namespace, jobA, uidA)
-	removeB := preDeleteDeleteRequest(createB, namespace, jobB, uidB)
-	for _, item := range []struct {
-		create Request
-		remove Request
-		job    string
-		uid    string
-	}{{createA, removeA, jobA, uidA}, {createB, removeB, jobB, uidB}} {
-		if err := store.PutCreatePin(namespace, item.create, item.job, item.uid); err != nil {
-			t.Fatal(err)
-		}
-		snapshot := preDeleteSnapshotFixture(item.create, item.remove, namespace, item.job, item.uid)
-		if item.job == jobB {
-			snapshot.Claim = preDeleteSnapshotFixture(createA, removeA, namespace, jobA, uidA).Claim
-			snapshot.Pod = preDeleteSnapshotFixture(createA, removeA, namespace, jobA, uidA).Pod
-			snapshot.NodeName = preDeleteSnapshotFixture(createA, removeA, namespace, jobA, uidA).NodeName
-			snapshot.Devices = preDeleteSnapshotFixture(createA, removeA, namespace, jobA, uidA).Devices
-		}
-		if _, err := store.PutPreDeleteDRASnapshot(namespace, item.remove, snapshot); err != nil {
-			t.Fatal(err)
-		}
-	}
-	snapshotA, ok, err := store.GetPreDeleteDRASnapshot(namespace, removeA)
-	if err != nil || !ok {
-		t.Fatalf("read first snapshot: ok=%t err=%v", ok, err)
-	}
-	if _, ok, err := store.GetPreDeleteDRASnapshotForReceipt(createA.TenantID, receiptSnapshotLookupEvent(snapshotA)); !errors.Is(err, ErrOperationConflict) || ok {
-		t.Fatalf("ambiguous claim identity did not fail closed: ok=%t err=%v", ok, err)
+func TestPreDeleteReceiptSnapshotLookupRejectsAmbiguousIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		open func(*testing.T) KueueJobBindingStore
+	}{
+		{name: "memory", open: func(*testing.T) KueueJobBindingStore { return NewMemoryKueueJobBindingStore() }},
+		{name: "postgres", open: func(t *testing.T) KueueJobBindingStore {
+			store, err := NewPostgresKueueJobBindingStore(openProviderPostgresDB(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return store
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := tc.open(t)
+			createA := uniqueKueueRequest(t)
+			createB := uniqueKueueRequest(t)
+			const namespace = "tenant-a"
+			suffixA := strings.TrimPrefix(createA.OperationID, "op-")
+			suffixB := strings.TrimPrefix(createB.OperationID, "op-")
+			jobA, uidA := "job-"+suffixA, "job-uid-"+suffixA
+			jobB, uidB := "job-"+suffixB, "job-uid-"+suffixB
+			removeA := preDeleteDeleteRequest(createA, namespace, jobA, uidA)
+			removeB := preDeleteDeleteRequest(createB, namespace, jobB, uidB)
+			for _, item := range []struct {
+				create Request
+				remove Request
+				job    string
+				uid    string
+			}{{createA, removeA, jobA, uidA}, {createB, removeB, jobB, uidB}} {
+				if err := store.PutCreatePin(namespace, item.create, item.job, item.uid); err != nil {
+					t.Fatal(err)
+				}
+				snapshot := preDeleteSnapshotFixture(item.create, item.remove, namespace, item.job, item.uid)
+				if item.job == jobB {
+					snapshot.Claim = preDeleteSnapshotFixture(createA, removeA, namespace, jobA, uidA).Claim
+					snapshot.Pod = preDeleteSnapshotFixture(createA, removeA, namespace, jobA, uidA).Pod
+					snapshot.NodeName = preDeleteSnapshotFixture(createA, removeA, namespace, jobA, uidA).NodeName
+					snapshot.Devices = preDeleteSnapshotFixture(createA, removeA, namespace, jobA, uidA).Devices
+				}
+				if _, err := store.PutPreDeleteDRASnapshot(namespace, item.remove, snapshot); err != nil {
+					t.Fatal(err)
+				}
+			}
+			snapshotA, ok, err := store.GetPreDeleteDRASnapshot(namespace, removeA)
+			if err != nil || !ok {
+				t.Fatalf("read first snapshot: ok=%t err=%v", ok, err)
+			}
+			if _, ok, err := store.GetPreDeleteDRASnapshotForReceipt(createA.TenantID, receiptSnapshotLookupEvent(snapshotA)); !errors.Is(err, ErrOperationConflict) || ok {
+				t.Fatalf("ambiguous claim identity did not fail closed: ok=%t err=%v", ok, err)
+			}
+		})
 	}
 }
 
