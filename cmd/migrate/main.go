@@ -5,6 +5,8 @@ package main
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -15,7 +17,26 @@ import (
 	"github.com/avaargsh/compute-control-panel/internal/migrate"
 )
 
+func printUsage(w io.Writer) {
+	fmt.Fprintln(w, `Usage: migrate
+       migrate --help
+
+Applies forward-only SQL migrations.
+Set DATABASE_URL to the PostgreSQL connection string.
+MIGRATIONS_DIR defaults to ./migrations.`)
+}
+
 func main() {
+	if args := os.Args[1:]; len(args) != 0 {
+		if len(args) == 1 && (args[0] == "-h" || args[0] == "--help") {
+			printUsage(os.Stdout)
+			return
+		}
+		fmt.Fprintln(os.Stderr, "migrate does not accept arguments other than -h or --help.")
+		printUsage(os.Stderr)
+		os.Exit(2)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
