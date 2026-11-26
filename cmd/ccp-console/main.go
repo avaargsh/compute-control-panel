@@ -9,6 +9,7 @@ import (
 	"encoding/asn1"
 	"errors"
 	"flag"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -156,6 +157,27 @@ func serveConsole(ctx context.Context, ln net.Listener, cert tls.Certificate, h 
 	}
 }
 
+const maxAdminVerifierSize = 256
+
+func readAdminVerifier(path string) ([]byte, error) {
+	unavailable := errors.New("console bcrypt verifier unavailable")
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() > maxAdminVerifierSize {
+		return nil, unavailable
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, unavailable
+	}
+	defer f.Close()
+	// Guard the amount read even if a regular file grows after inspection.
+	hash, err := io.ReadAll(io.LimitReader(f, maxAdminVerifierSize+1))
+	if err != nil || len(hash) > maxAdminVerifierSize {
+		return nil, unavailable
+	}
+	return []byte(strings.TrimSpace(string(hash))), nil
+}
+
 func main() {
 	addr := flag.String("addr", consoleHost+":8443", "explicit loopback HTTPS address")
 	cert := flag.String("tls-cert", "", "TLS certificate file")
@@ -173,14 +195,14 @@ func main() {
 	flag.Parse()
 
 	// Secret material is read from files, never command-line passwords.
-	hash, err := os.ReadFile(*hashFile)
-	if err != nil || len(hash) > 256 {
-		slog.Error("console bcrypt verifier unavailable")
+	hash, err := readAdminVerifier(*hashFile)
+	if err != nil {
+		slog.Error(err.Error())
 		os.Exit(1)
 	}
 	cfg := liveConfig{
 		Auth: consoleauth.Config{
-			Username: *user, PasswordBcryptHash: []byte(strings.TrimSpace(string(hash))),
+			Username: *user, PasswordBcryptHash: hash,
 			TenantID: *tenant, ProjectID: *project, Origin: "https://" + *addr,
 			SessionTTL: time.Hour, Now: time.Now,
 		},

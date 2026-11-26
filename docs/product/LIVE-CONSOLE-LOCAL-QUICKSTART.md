@@ -8,7 +8,7 @@ The separate `cmd/ccp-console` executable exposes only a **single-administrator*
 
 - Go matching `go.mod` (CI pins Go **1.27.4**), `openssl`, and `htpasswd` for creating an interactive bcrypt verifier. `curl` and `jq` are used to verify the API and logout without printing session secrets.
 - An already reachable **HTTPS** Kubernetes API endpoint; its verified CA PEM; a **dedicated, time-bounded, rotatable ServiceAccount bearer-token file** that can only **list core/v1 Nodes**, not workloads or Secrets; and administrator-selected cluster, tenant and project IDs. Do not use cluster-admin credentials or a kubeconfig's client private key as the reader token.
-- A private workspace for the bcrypt verifier, TLS key, and session cookies (`umask 077`). Never add these files to Git, pass the password on a command line, or log them.
+- A private workspace for the bcrypt verifier, TLS key, and session cookies (`umask 077`). Keep the verifier in a regular file containing the bcrypt hash (at most 256 bytes). Never add these files to Git, pass the password on a command line, or log them.
 - This preview requires direct TLS to the local server. No reverse proxy, port forwarding, shared host, public load balancer, ingress, wildcard listener, `X-Forwarded-Proto` trust, or persistent/HA browser sessions.
 
 ## 1. Create local-only development credentials
