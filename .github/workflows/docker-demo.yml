@@ -1,0 +1,62 @@
+name: Docker Demo
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ccp-docker-demo-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-and-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6, immutable commit
+        with:
+          persist-credentials: false
+      - name: Build the synthetic Demo image
+        run: docker build --tag ccp-demo:ci .
+      - name: Reject a non-loopback listen address
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          logs="$(docker run --rm --network host ccp-demo:ci -addr 0.0.0.0:8081 2>&1)"
+          status=$?
+          set -e
+          printf '%s\n' "$logs"
+          test "$status" -ne 0
+          grep -q 'demo preview must bind explicitly to 127.0.0.1' <<<"$logs"
+      - name: Serve the synthetic Demo on the host loopback
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --name ccp-demo-smoke --network host ccp-demo:ci
+          cleanup() {
+            docker stop ccp-demo-smoke >/dev/null 2>&1 || true
+            docker rm -f ccp-demo-smoke >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          ok=0
+          body=""
+          for _ in $(seq 1 30); do
+            if body="$(curl -fsS http://127.0.0.1:8081/api/v1/observations 2>/dev/null)" \
+              && grep -q '"data_mode":"demo"' <<<"$body" \
+              && grep -q '"source":"synthetic/demo"' <<<"$body"; then
+              ok=1
+              break
+            fi
+            sleep 1
+          done
+          if [[ "$ok" -ne 1 ]]; then
+            docker logs ccp-demo-smoke >&2 || true
+            printf 'observations body:\n%s\n' "$body" >&2
+            exit 1
+          fi
+          curl -fsS http://127.0.0.1:8081/ | grep -q '模拟数据 · 非真实 GPU 监控'
