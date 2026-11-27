@@ -82,6 +82,23 @@ func TestMigrateWithoutArgumentsLoadsConfiguredMigrations(t *testing.T) {
 	}
 }
 
+func TestMigrateRejectsDirectoryWithoutSQLBeforeOpeningDatabase(t *testing.T) {
+	for _, extraFile := range []string{"", "README.md"} {
+		t.Run("migration-files-absent/"+extraFile, func(t *testing.T) {
+			dir := t.TempDir()
+			if extraFile != "" {
+				if err := os.WriteFile(dir+"/"+extraFile, []byte("not a migration"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			stdout, stderr, code := runCLI(t, nil, "DATABASE_URL=not-used", "MIGRATIONS_DIR="+dir)
+			if code != 1 || stdout != "" || !strings.Contains(stderr, "no SQL migrations found") || !strings.Contains(stderr, dir) || strings.Contains(stderr, "open database") || strings.Contains(stderr, "apply migrations") {
+				t.Fatalf("exit=%d stdout=%q stderr=%q; want empty directory rejection before database access", code, stdout, stderr)
+			}
+		})
+	}
+}
+
 func runCLI(t *testing.T, args []string, extraEnv ...string) (stdout, stderr string, code int) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)

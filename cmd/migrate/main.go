@@ -62,6 +62,10 @@ func main() {
 		slog.Error("load migrations", "error", err)
 		os.Exit(1)
 	}
+	if len(migrations) == 0 {
+		slog.Error("no SQL migrations found", "directory", dir)
+		os.Exit(1)
+	}
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		slog.Error("open database", "error", err)

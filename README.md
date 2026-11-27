@@ -61,7 +61,7 @@ export MIGRATIONS_DIR="$ccp_checkout/migrations"
 "$ccp_checkout/bin/migrate"
 ```
 
-With an absolute `MIGRATIONS_DIR` you can invoke the installed binary from any working directory. If unset, it looks for `./migrations` relative to your working directory. A second run with the same database and unmodified files reports no new migrations. There is no dry-run or rollback command; help and version do not validate database connectivity.
+With an absolute `MIGRATIONS_DIR` you can invoke the installed binary from any working directory. If unset, it looks for `./migrations` relative to your working directory. A missing directory, or one without SQL migrations, fails before contacting PostgreSQL. A second run with the same database and unmodified files reports no new migrations. There is no dry-run or rollback command; help and version do not validate database connectivity.
 
 ## Interview highlights
 
