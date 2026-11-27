@@ -193,6 +193,10 @@ func main() {
 	resources := flag.String("gpu-resources", "", "comma-separated explicit extended resource names")
 	checkConfig := flag.Bool("check-config", false, "validate local configuration without listening or contacting Kubernetes")
 	flag.Parse()
+	if flag.NArg() != 0 {
+		slog.Error("console does not accept positional arguments")
+		os.Exit(2)
+	}
 
 	// Secret material is read from files, never command-line passwords.
 	hash, err := readAdminVerifier(*hashFile)

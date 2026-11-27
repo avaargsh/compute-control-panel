@@ -69,7 +69,13 @@ subjects:
 
 Obtain a short-lived token using the cluster administrator's approved procedure (for example `kubectl create token ccp-console-reader --duration=1h` in the selected namespace); store it with mode `0600`, rotate before expiry and revoke promptly. **Do not** assume this minimal example is sufficient for enterprise IAM, issuer/audience, network or credential-rotation policy. The Kubernetes CA must verify the exact `-kube-api` HTTPS origin.
 
-## 3. Start the opt-in HTTPS Console
+## 3. Install and start the opt-in HTTPS Console
+
+From the checkout containing this preview, install the separate binary into the private directory from step 1. This does not enable the Console in the default CCP service.
+
+```bash
+GOBIN="$work/bin" GOTOOLCHAIN=local go install ./cmd/ccp-console
+```
 
 Replace only the example cluster endpoint and scoped identifiers with actual administrator-approved values:
 
@@ -77,7 +83,7 @@ Replace only the example cluster endpoint and scoped identifiers with actual adm
 KUBE_API="https://127.0.0.1:6443"           # actual verified Kubernetes API origin
 KUBE_CA="/secure/path/kubernetes-ca.pem"     # PEM, not a client key
 KUBE_TOKEN_FILE="/secure/path/node-reader.token"
-go run ./cmd/ccp-console \
+"$work/bin/ccp-console" \
   -addr "127.0.0.1:8443" \
   -tls-cert "$work/console.crt" \
   -tls-key "$work/console.key" \
@@ -89,7 +95,7 @@ go run ./cmd/ccp-console \
   -gpu-resources "nvidia.com/gpu"
 ```
 
-To validate local startup inputs first, append `-check-config` to that command. The check exits without listening or contacting Kubernetes. It validates the local certificate, bcrypt verifier, scope, Kubernetes HTTPS origin and CA PEM, and token file path. It does not check whether the port is free, the API is reachable, or the token is authorized; still perform the authenticated read below.
+To validate local startup inputs first, append `-check-config` to that command. Supply options as flags only; the executable rejects unexpected positional arguments. The check exits without listening or contacting Kubernetes. It validates the local certificate, bcrypt verifier, scope, Kubernetes HTTPS origin and CA PEM, and token file path. It does not check whether the port is free, the API is reachable, or the token is authorized; still perform the authenticated read below.
 
 The API refuses non-loopback bind, missing/invalid certificate or key, unexpected certificate IP SAN, wrong Origin, invalid bcrypt hash, and mismatched tenant/project inventory scope. It does not start a browser UI. The `-gpu-resources` flag accepts explicit comma-separated extended-resource names. Ensure the local API port is available. After the port is bound, the server logs `console HTTPS listener bound` with the exact local URL. This is not a Kubernetes readiness check; verify the authenticated read in the next section.
 
