@@ -4,6 +4,7 @@
 // console will reuse the same observation wire contract, not this demo server.
 const $ = (id) => document.getElementById(id);
 const state = { page: "dashboard", items: [], generatedAt: "", loaded: false, failed: false };
+let freshnessTimer = null;
 const pages = {
   dashboard: ["Dashboard", "资源总览", "从可信来源和观察时间理解集群与 GPU 资源。"],
   clusters: ["Clusters", "集群与节点", "查看节点 Ready、UID、状态原因和观察时间。"],
@@ -199,6 +200,28 @@ function render() {
   else renderGPUs(root);
 }
 
+// Repaint age-sensitive controls at the next observation boundary. This is
+// only a DOM update: a local clock never substitutes for a successful fetch.
+function renderTimed() {
+  if (freshnessTimer !== null) clearTimeout(freshnessTimer);
+  freshnessTimer = null;
+  const startedAt = Date.now();
+  render();
+  if (!state.loaded || state.failed) return;
+  let next = Infinity;
+  for (const item of state.items) {
+    const observed = Date.parse(item.observed_at);
+    const expires = Date.parse(item.expires_at);
+    if (!Number.isFinite(observed) || !Number.isFinite(expires)) continue;
+    if (observed > startedAt && observed < expires) next = Math.min(next, observed);
+    if (expires > startedAt) next = Math.min(next, expires);
+  }
+  if (next < Infinity) {
+    const delay = Math.min(15000, Math.max(0, next - Date.now()));
+    freshnessTimer = setTimeout(renderTimed, delay);
+  }
+}
+
 async function refresh() {
   const button = $("refresh");
   button.disabled = true;
@@ -230,7 +253,7 @@ async function refresh() {
     $("observed").textContent = "—";
   } finally {
     button.disabled = false;
-    render();
+    renderTimed();
   }
 }
 
@@ -239,9 +262,11 @@ document.querySelectorAll("[data-page]").forEach((button) => {
     const target = button.dataset.page;
     if (!Object.hasOwn(pages, target)) return;
     state.page = target;
-    render();
+    renderTimed();
   });
 });
 $("refresh").addEventListener("click", refresh);
-setInterval(() => { if (state.loaded && !state.failed) render(); }, 15000);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") renderTimed();
+});
 refresh();
