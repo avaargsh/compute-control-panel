@@ -24,7 +24,13 @@ make build  # writes bin/ccp-demo, bin/compute-control-panel, bin/migrate, bin/k
 make clean  # deletes bin/ only; it does not clear the Go build cache
 ```
 
-`bin/compute-control-panel -version` prints `<binary> <version> (commit <sha>[, dirty], built <date>)` and exits. `make build` embeds those values with `-ldflags` (`VERSION` defaults to `git describe --tags --always --dirty`, or `dev` when git is unavailable; `DATE` is UTC and honors `SOURCE_DATE_EPOCH`). `ccp-demo`, `migrate`, and `kueue-observe` accept the same flag. `go install ./cmd/...@` and `go run` builds leave the linker values unset and fall back to Go build info.
+`bin/compute-control-panel -version` prints `<binary> <version> (commit <sha>[, dirty], built <date>)` and exits. `make build` embeds those values with `-ldflags` (`VERSION` defaults to `git describe --tags --always --dirty`, or `dev` when git is unavailable; `DATE` is UTC and honors `SOURCE_DATE_EPOCH`). `ccp-demo`, `migrate`, and `kueue-observe` accept the same flag. From the repository root, install just the four user-facing binaries into a directory of your choice:
+
+```bash
+GOBIN="$(pwd)/bin" GOTOOLCHAIN=local go install ./cmd/ccp-demo ./cmd/compute-control-panel ./cmd/migrate ./cmd/kueue-observe
+```
+
+Checkout installs and `go run` builds leave the linker values unset and fall back to Go build info. For `migrate`, use `-h`/`--help` or `-version`/`--version` alone. All other arguments are rejected before any database access.
 
 `make lint` and `make test` do not start PostgreSQL or a kind cluster. Tests that need `DATABASE_URL` skip when it is unset, so a passing local `make test` is the race command from Go validation, not that whole job. The job also applies migrations, checks schema constraints, and repeats the SIGKILL recovery test. Kind workflows are separate and are not invoked by these targets.
 

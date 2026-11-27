@@ -38,6 +38,36 @@ func TestVersionFlagExitsBeforeDatabase(t *testing.T) {
 	}
 }
 
+func TestMigrateOfflineArgumentsMustStandAlone(t *testing.T) {
+	for _, args := range [][]string{
+		{"--dry-run"},
+		{"--dry-run", "--version"},
+		{"--version", "--dry-run"},
+		{"--help", "-version"},
+		{"-version", "-version"},
+		{"--", "--version"},
+		{"check"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			stdout, stderr, code := runCLI(t, args)
+			if code != 2 || stdout != "" || !strings.Contains(stderr, "does not accept arguments") || strings.Contains(stderr, "DATABASE_URL is required") {
+				t.Fatalf("exit=%d stdout=%q stderr=%q; want argument rejection without database configuration", code, stdout, stderr)
+			}
+		})
+	}
+}
+
+func TestMigrationHelpExitsBeforeDatabase(t *testing.T) {
+	for _, arg := range []string{"-h", "--help"} {
+		t.Run(arg, func(t *testing.T) {
+			stdout, stderr, code := runCLI(t, []string{arg})
+			if code != 0 || !strings.Contains(stdout, "Usage: migrate") || stderr != "" {
+				t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+			}
+		})
+	}
+}
+
 func TestMigrateWithoutVersionStillRequiresDatabaseURL(t *testing.T) {
 	stdout, stderr, code := runCLI(t, nil)
 	if code != 2 || strings.Contains(stdout, "(commit ") || !strings.Contains(stderr, "DATABASE_URL is required") {
