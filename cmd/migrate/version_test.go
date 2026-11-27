@@ -75,15 +75,22 @@ func TestMigrateWithoutVersionStillRequiresDatabaseURL(t *testing.T) {
 	}
 }
 
-func runCLI(t *testing.T, args []string) (stdout, stderr string, code int) {
+func TestMigrateWithoutArgumentsLoadsConfiguredMigrations(t *testing.T) {
+	stdout, stderr, code := runCLI(t, nil, "DATABASE_URL=not-used")
+	if code != 1 || stdout != "" || !strings.Contains(stderr, "load migrations") {
+		t.Fatalf("exit=%d stdout=%q stderr=%q; want the configured migration loader", code, stdout, stderr)
+	}
+}
+
+func runCLI(t *testing.T, args []string, extraEnv ...string) (stdout, stderr string, code int) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, os.Args[0], append([]string{"-test.run=^TestVersionHelper$", "--"}, args...)...)
-	cmd.Env = helperEnv([]string{
+	cmd.Env = helperEnv(append([]string{
 		"LISTEN_ADDR=bad-address",
 		"MIGRATIONS_DIR=" + t.TempDir() + "/missing",
-	})
+	}, extraEnv...))
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errb

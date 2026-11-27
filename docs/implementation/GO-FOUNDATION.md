@@ -60,7 +60,7 @@ cluster ingress/network policy.
 
 1. Integrate the inspect-only recovery library with a real, authenticated Provider Inspect adapter and supervised worker lifecycle; verify genuine process termination, ambiguous commit acknowledgements and fencing recovery.
 2. Complete Workload/Allocation API and admission-derived Allocation projection, tenant AuthN/AuthZ and quota policy; keep Kueue as the admission authority.
-3. Migration runner done (`go run ./cmd/migrate`, checksummed, advisory-locked, forward-only; `DATABASE_URL`, optional `MIGRATIONS_DIR`). Still add restore testing, durable Outbox publisher, unique event delivery and operational metrics.
+3. Migration runner done (`go run ./cmd/migrate`, checksummed, advisory-locked, forward-only; `DATABASE_URL`, optional `MIGRATIONS_DIR`). Use `go run ./cmd/migrate --help` for offline help. The runner has no dry-run mode. See the [installed migration quickstart](../../README.md#apply-the-database-migrations) for locating the SQL files. Still add restore testing, durable Outbox publisher, unique event delivery and operational metrics.
 4. Implement Kubernetes Job + Kueue + DRA adapter with exact-UID deletion finality, then migrate GHCR/distroless, cosign, Trivy and release acceptance gates.
 
 No custom GPU scheduler is part of this plan.
