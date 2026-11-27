@@ -60,6 +60,7 @@ type Manager struct {
 	sessions map[[32]byte]storedSession
 	attempts int
 	retryAt  time.Time
+	lastSeen time.Time
 }
 
 // NewHandler composes a session-scoped read-only API. The returned handler
@@ -169,15 +170,31 @@ func (m *Manager) authSession(r *http.Request) ([32]byte, storedSession, error) 
 		return empty, storedSession{}, ErrUnauthenticated
 	}
 	id := sha256.Sum256(token)
-	now := m.cfg.Now().UTC()
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	now, valid := m.sessionClockLocked()
+	if !valid {
+		return empty, storedSession{}, ErrUnauthenticated
+	}
 	s, ok := m.sessions[id]
-	if !ok || now.IsZero() || !now.Before(s.expires) {
+	if !ok || !now.Before(s.expires) {
 		delete(m.sessions, id)
 		return empty, storedSession{}, ErrUnauthenticated
 	}
 	return id, s, nil
+}
+
+// sessionClockLocked fences session issuance and authorization against wall-clock
+// rollback. Keep the high-water mark and throttle state until recovery; revoked
+// sessions must never reappear after the clock catches up. Caller holds m.mu.
+func (m *Manager) sessionClockLocked() (time.Time, bool) {
+	now := m.cfg.Now().UTC()
+	if now.IsZero() || now.Before(m.lastSeen) {
+		clear(m.sessions)
+		return time.Time{}, false
+	}
+	m.lastSeen = now
+	return now, true
 }
 
 func (m *Manager) allowedMutation(r *http.Request) bool {
@@ -216,10 +233,10 @@ func (m *Manager) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := m.cfg.Now().UTC()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if now.IsZero() {
+	now, valid := m.sessionClockLocked()
+	if !valid {
 		http.Error(w, "login unavailable", http.StatusServiceUnavailable)
 		return
 	}

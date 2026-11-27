@@ -48,6 +48,8 @@ The product's planned `web/` implementation remains **React + TypeScript + Vite 
 - Real kind/ServiceAccount L2 acceptance lives in [PR #141](https://github.com/avaargsh/compute-control-panel/pull/141).
 - This preview does **not** demonstrate physical GPU discovery, reliable allocation evidence, model deployment or production metering.
 
+The separate, opt-in authenticated live Console command is being reviewed in [PR #183](https://github.com/avaargsh/compute-control-panel/pull/183). For explicit loopback-only HTTPS and read-only Kubernetes setup, see [Live Console local quickstart](LIVE-CONSOLE-LOCAL-QUICKSTART.md). It is NOT the synthetic Demo process and is not production-approved.
+
 ## Next product increments
 
 1. The read-only observation contract, Kubernetes reader and local kind acceptance (#139–#141) are integrated foundations.
