@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -12,10 +13,16 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	"github.com/avaargsh/compute-control-panel/internal/buildinfo"
 	"github.com/avaargsh/compute-control-panel/internal/migrate"
 )
 
 func main() {
+	if buildinfo.VersionRequested(os.Args[1:]) {
+		fmt.Println(buildinfo.Line("migrate"))
+		return
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

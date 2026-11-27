@@ -18,8 +18,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/avaargsh/compute-control-panel/internal/buildinfo"
 	"github.com/avaargsh/compute-control-panel/internal/provider"
 )
+
+var errVersionRequested = errors.New("version requested")
 
 const serviceAccountPath = "/var/run/secrets/kubernetes.io/serviceaccount"
 
@@ -42,6 +45,8 @@ func parseOptions(args []string, getenv func(string) string, help io.Writer) (ob
 	flags.StringVar(&opts.query.ExpectedJobUID, "uid", "", "immutable expected Kubernetes Job UID")
 	flags.StringVar(&opts.caPath, "ca", serviceAccountPath+"/ca.crt", "mounted Kubernetes API CA path")
 	flags.StringVar(&opts.tokenPath, "token", serviceAccountPath+"/token", "mounted ServiceAccount token path")
+	var showVersion bool
+	flags.BoolVar(&showVersion, "version", false, "print version and exit")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			fmt.Fprintln(help, "Usage: kueue-observe [flags]")
@@ -51,6 +56,10 @@ func parseOptions(args []string, getenv func(string) string, help io.Writer) (ob
 			flags.PrintDefaults()
 		}
 		return observationOptions{}, err
+	}
+	if showVersion {
+		fmt.Fprintln(help, buildinfo.Line("kueue-observe"))
+		return observationOptions{}, errVersionRequested
 	}
 	if len(flags.Args()) != 0 || getenv == nil {
 		return observationOptions{}, errors.New("unexpected arguments or absent environment")
@@ -78,8 +87,12 @@ func parseOptions(args []string, getenv func(string) string, help io.Writer) (ob
 }
 
 func run(ctx context.Context, args []string, getenv func(string) string, out io.Writer) error {
+	if buildinfo.VersionRequested(args) {
+		fmt.Fprintln(out, buildinfo.Line("kueue-observe"))
+		return nil
+	}
 	opts, err := parseOptions(args, getenv, out)
-	if errors.Is(err, flag.ErrHelp) {
+	if errors.Is(err, flag.ErrHelp) || errors.Is(err, errVersionRequested) {
 		return nil
 	}
 	if err != nil {
@@ -101,6 +114,10 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 }
 
 func main() {
+	if buildinfo.VersionRequested(os.Args[1:]) {
+		fmt.Println(buildinfo.Line("kueue-observe"))
+		return
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx, os.Args[1:], os.Getenv, os.Stdout); err != nil {

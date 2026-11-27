@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/avaargsh/compute-control-panel/internal/buildinfo"
 	"github.com/avaargsh/compute-control-panel/internal/httpapi"
 )
 
@@ -54,6 +56,10 @@ func run(ctx context.Context, addr string, logger *slog.Logger) error {
 }
 
 func main() {
+	if buildinfo.VersionRequested(os.Args[1:]) {
+		fmt.Println(buildinfo.Line("compute-control-panel"))
+		return
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	addr := os.Getenv("LISTEN_ADDR")

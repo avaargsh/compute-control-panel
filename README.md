@@ -24,6 +24,8 @@ make build  # writes bin/ccp-demo, bin/compute-control-panel, bin/migrate, bin/k
 make clean  # deletes bin/ only; it does not clear the Go build cache
 ```
 
+`bin/compute-control-panel -version` prints `<binary> <version> (commit <sha>[, dirty], built <date>)` and exits. `make build` embeds those values with `-ldflags` (`VERSION` defaults to `git describe --tags --always --dirty`, or `dev` when git is unavailable; `DATE` is UTC and honors `SOURCE_DATE_EPOCH`). `ccp-demo`, `migrate`, and `kueue-observe` accept the same flag. `go install ./cmd/...@` and `go run` builds leave the linker values unset and fall back to Go build info.
+
 `make lint` and `make test` do not start PostgreSQL or a kind cluster. Tests that need `DATABASE_URL` skip when it is unset, so a passing local `make test` is the race command from Go validation, not that whole job. The job also applies migrations, checks schema constraints, and repeats the SIGKILL recovery test. Kind workflows are separate and are not invoked by these targets.
 
 `bin/compute-control-panel` serves `GET /livez`, `GET /readyz`, and `GET /api/v1/meta`. It listens on `127.0.0.1:8080` unless `LISTEN_ADDR` is set. For a free local port, run `LISTEN_ADDR=127.0.0.1:0 bin/compute-control-panel` and use the address printed in the startup log. It does not mount workload, provider, host-session, or receipt handlers. `bin/migrate` applies SQL from `MIGRATIONS_DIR` (default `./migrations`) only when `DATABASE_URL` is set; running it is not part of `make build`. `bin/kueue-observe` is a one-shot read-only Kubernetes Job observer. With no flags it exits before contacting Kubernetes (`all Job identity and credential-path flags are required`). In-cluster execution was not verified.

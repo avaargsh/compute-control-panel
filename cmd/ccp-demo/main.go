@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/avaargsh/compute-control-panel/internal/buildinfo"
 	"github.com/avaargsh/compute-control-panel/internal/demoinventory"
 	"github.com/avaargsh/compute-control-panel/internal/observation"
 )
@@ -157,8 +158,18 @@ func run(ctx context.Context, addr string) error {
 }
 
 func main() {
+	if buildinfo.VersionRequested(os.Args[1:]) {
+		fmt.Println(buildinfo.Line("ccp-demo"))
+		return
+	}
 	addr := flag.String("addr", "127.0.0.1:8081", "loopback-only Demo HTTP address")
+	var showVersion bool
+	flag.BoolVar(&showVersion, "version", false, "print version and exit")
 	flag.Parse()
+	if showVersion {
+		fmt.Println(buildinfo.Line("ccp-demo"))
+		return
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	if err := run(ctx, *addr); err != nil {
