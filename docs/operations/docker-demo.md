@@ -12,7 +12,7 @@ Docker port publishing (`-p` / `--publish`) delivers connections to the containe
 
 On Docker Engine for Linux, `--network host` runs the process in the host network namespace. It binds that machine's `127.0.0.1:8081` and still does not listen on other interfaces. Open `http://127.0.0.1:8081` on the same machine.
 
-Docker Desktop on macOS and Windows runs the engine inside a Linux VM. `--network host` binds the VM loopback, which is not the macOS or Windows loopback, so the command below does not open the demo in the desktop browser. Use the Go quickstart on those systems.
+This Docker procedure is verified on Linux Docker Engine. Docker Desktop 4.34 and later offers [opt-in host networking for Linux containers](https://docs.docker.com/engine/network/drivers/host/#docker-desktop), but this Demo's exact loopback bind has not been verified there for desktop-browser access or LAN isolation. On macOS or Windows, use the [Go quickstart](../product/DEMO-CONSOLE-QUICKSTART.md).
 
 ## Build
 
@@ -28,7 +28,8 @@ The builder is the official `golang:1.27.4-bookworm` image, the Go version pinne
 
 ```bash
 docker run -d --name ccp-demo --network host ccp-demo:local
-curl -fsS http://127.0.0.1:8081/api/v1/observations
+curl -fsS --retry 10 --retry-connrefused --retry-delay 1 --max-time 2 \
+  http://127.0.0.1:8081/api/v1/observations
 ```
 
 A usable response has `"data_mode":"demo"` and every item `"source":"synthetic/demo"`. Then open `http://127.0.0.1:8081` on the same machine.
