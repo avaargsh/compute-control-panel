@@ -19,12 +19,8 @@ override BIN_DIR := bin
 # DATE is UTC and uses SOURCE_DATE_EPOCH when that is set.
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
-ifdef SOURCE_DATE_EPOCH
-DATE := $(shell date -u -d '@$(SOURCE_DATE_EPOCH)' +%Y-%m-%dT%H:%M:%SZ)
-else
-DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
-endif
-LDFLAGS := -X github.com/avaargsh/compute-control-panel/internal/buildinfo.Version=$(VERSION) -X github.com/avaargsh/compute-control-panel/internal/buildinfo.Commit=$(COMMIT) -X github.com/avaargsh/compute-control-panel/internal/buildinfo.Date=$(DATE)
+export SOURCE_DATE_EPOCH
+LDFLAGS := -X github.com/avaargsh/compute-control-panel/internal/buildinfo.Version=$(VERSION) -X github.com/avaargsh/compute-control-panel/internal/buildinfo.Commit=$(COMMIT)
 
 help:
 	@echo "Targets:"
@@ -37,11 +33,13 @@ help:
 	@echo "  make clean  - delete $(BIN_DIR)/ only; does not clear the Go build cache"
 
 build:
-	mkdir -p $(BIN_DIR)
-	go build -ldflags '$(LDFLAGS)' -o $(BIN_DIR)/ccp-demo ./cmd/ccp-demo
-	go build -ldflags '$(LDFLAGS)' -o $(BIN_DIR)/compute-control-panel ./cmd/compute-control-panel
-	go build -ldflags '$(LDFLAGS)' -o $(BIN_DIR)/migrate ./cmd/migrate
-	go build -ldflags '$(LDFLAGS)' -o $(BIN_DIR)/kueue-observe ./cmd/kueue-observe
+	@set -e; \
+	  build_date=$$(sh scripts/build-date.sh); \
+	  mkdir -p $(BIN_DIR); \
+	  flags='$(LDFLAGS) -X github.com/avaargsh/compute-control-panel/internal/buildinfo.Date='"$$build_date"; \
+	  for binary in ccp-demo compute-control-panel migrate kueue-observe; do \
+	    go build -ldflags "$$flags" -o "$(BIN_DIR)/$$binary" "./cmd/$$binary"; \
+	  done
 
 lint:
 	unformatted=$$(gofmt -l .) || exit $$?; \

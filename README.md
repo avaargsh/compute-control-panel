@@ -24,7 +24,7 @@ make build  # writes bin/ccp-demo, bin/compute-control-panel, bin/migrate, bin/k
 make clean  # deletes bin/ only; it does not clear the Go build cache
 ```
 
-`bin/compute-control-panel -version` prints `<binary> <version> (commit <sha>[, dirty], built <date>)` and exits. `make build` embeds those values with `-ldflags` (`VERSION` defaults to `git describe --tags --always --dirty`, or `dev` when git is unavailable; `DATE` is UTC and honors `SOURCE_DATE_EPOCH`). `ccp-demo`, `migrate`, and `kueue-observe` accept the same flag. From the repository root, install just the four user-facing binaries into a directory of your choice:
+`bin/compute-control-panel -version` prints `<binary> <version> (commit <sha>[, dirty], built <date>)` and exits. `make build` embeds those values with `-ldflags` (`VERSION` defaults to `git describe --tags --always --dirty`, or `dev` when git is unavailable; `DATE` is UTC and honors `SOURCE_DATE_EPOCH` as non-negative decimal Unix seconds; an invalid value stops the build before writing binaries). `ccp-demo`, `migrate`, and `kueue-observe` accept the same flag. From the repository root, install just the four user-facing binaries into a directory of your choice:
 
 ```bash
 GOBIN="$(pwd)/bin" GOTOOLCHAIN=local go install ./cmd/ccp-demo ./cmd/compute-control-panel ./cmd/migrate ./cmd/kueue-observe
