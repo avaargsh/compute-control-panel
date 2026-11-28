@@ -5,6 +5,8 @@ package main
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -12,10 +14,37 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	"github.com/avaargsh/compute-control-panel/internal/buildinfo"
 	"github.com/avaargsh/compute-control-panel/internal/migrate"
 )
 
+func printUsage(w io.Writer) {
+	fmt.Fprintln(w, `Usage: migrate
+       migrate --help
+       migrate --version
+
+Applies forward-only SQL migrations.
+Set DATABASE_URL to the PostgreSQL connection string.
+MIGRATIONS_DIR defaults to ./migrations.`)
+}
+
 func main() {
+	if args := os.Args[1:]; len(args) != 0 {
+		if len(args) == 1 {
+			switch args[0] {
+			case "-h", "--help":
+				printUsage(os.Stdout)
+				return
+			case "-version", "--version":
+				fmt.Println(buildinfo.Line("migrate"))
+				return
+			}
+		}
+		fmt.Fprintln(os.Stderr, "migrate does not accept arguments other than standalone help or version.")
+		printUsage(os.Stderr)
+		os.Exit(2)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -31,6 +60,10 @@ func main() {
 	migrations, err := migrate.Load(os.DirFS(dir))
 	if err != nil {
 		slog.Error("load migrations", "error", err)
+		os.Exit(1)
+	}
+	if len(migrations) == 0 {
+		slog.Error("no SQL migrations found", "directory", dir)
 		os.Exit(1)
 	}
 	db, err := sql.Open("pgx", dsn)

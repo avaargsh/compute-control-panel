@@ -24,9 +24,44 @@ make build  # writes bin/ccp-demo, bin/compute-control-panel, bin/migrate, bin/k
 make clean  # deletes bin/ only; it does not clear the Go build cache
 ```
 
+`bin/compute-control-panel -version` prints `<binary> <version> (commit <sha>[, dirty], built <date>)` and exits. `make build` embeds those values with `-ldflags` (`VERSION` defaults to `git describe --tags --always --dirty`, or `dev` when git is unavailable; `DATE` is UTC and honors `SOURCE_DATE_EPOCH` as non-negative decimal Unix seconds; an invalid value stops the build before writing binaries). `ccp-demo`, `migrate`, and `kueue-observe` accept the same flag. From the repository root, install just the four user-facing binaries into a directory of your choice:
+
+```bash
+GOBIN="$(pwd)/bin" GOTOOLCHAIN=local go install ./cmd/ccp-demo ./cmd/compute-control-panel ./cmd/migrate ./cmd/kueue-observe
+```
+
+Checkout installs and `go run` builds leave the linker values unset and fall back to Go build info. For `migrate`, use `-h`/`--help` or `-version`/`--version` alone. All other arguments are rejected before any database access.
+
 `make lint` and `make test` do not start PostgreSQL or a kind cluster. Tests that need `DATABASE_URL` skip when it is unset, so a passing local `make test` is the race command from Go validation, not that whole job. The job also applies migrations, checks schema constraints, and repeats the SIGKILL recovery test. Kind workflows are separate and are not invoked by these targets.
 
-`bin/compute-control-panel` serves `GET /livez`, `GET /readyz`, and `GET /api/v1/meta`. It listens on `127.0.0.1:8080` unless `LISTEN_ADDR` is set. For a free local port, run `LISTEN_ADDR=127.0.0.1:0 bin/compute-control-panel` and use the address printed in the startup log. It does not mount workload, provider, host-session, or receipt handlers. `bin/migrate` applies SQL from `MIGRATIONS_DIR` (default `./migrations`) only when `DATABASE_URL` is set; running it is not part of `make build`. `bin/kueue-observe` is a one-shot read-only Kubernetes Job observer. With no flags it exits before contacting Kubernetes (`all Job identity and credential-path flags are required`). In-cluster execution was not verified.
+`bin/compute-control-panel` serves `GET /livez`, `GET /readyz`, and `GET /api/v1/meta`. It listens on `127.0.0.1:8080` unless `LISTEN_ADDR` is set. For a free local port, run `LISTEN_ADDR=127.0.0.1:0 bin/compute-control-panel` and use the address printed in the startup log. It does not mount workload, provider, host-session, or receipt handlers. `bin/kueue-observe` is a one-shot read-only Kubernetes Job observer. With no flags it exits before contacting Kubernetes (`all Job identity and credential-path flags are required`). In-cluster execution was not verified.
+
+### Apply the database migrations
+
+The installed `migrate` binary does not include the SQL files. Use the `migrations/` directory from the **same checkout** used to build the binary.
+
+For a first run on a **fresh, disposable PostgreSQL instance**, provision the six restricted roles separately as a database administrator. PostgreSQL roles are cluster-wide; do not run these statements against a shared instance. These examples set no passwords or memberships and do not configure runtime service authentication. For an existing instance, ask its DBA to check any existing roles against the migration requirements rather than recreating or changing them.
+
+```sql
+CREATE ROLE ccp_provider_audit_owner NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+CREATE ROLE ccp_host_identity_guard_owner NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+CREATE ROLE ccp_host_session_guard_owner NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+CREATE ROLE ccp_host_session_writer LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+CREATE ROLE ccp_kueue_job_binding LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+CREATE ROLE ccp_dra_receipt_ingest LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+```
+
+Then, from the checkout root, record the absolute paths for the database setup:
+
+```bash
+ccp_checkout="$(pwd)"
+export MIGRATIONS_DIR="$ccp_checkout/migrations"
+# Export DATABASE_URL with an administrator connection string for the disposable database.
+"$ccp_checkout/bin/migrate" --help
+"$ccp_checkout/bin/migrate"
+```
+
+With an absolute `MIGRATIONS_DIR` you can invoke the installed binary from any working directory. If unset, it looks for `./migrations` relative to your working directory. A missing directory, or one without SQL migrations, fails before contacting PostgreSQL. A second run with the same database and unmodified files reports no new migrations. There is no dry-run or rollback command; help and version do not validate database connectivity.
 
 ## Interview highlights
 

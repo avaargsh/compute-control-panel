@@ -1,0 +1,158 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"os"
+	"os/exec"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/avaargsh/compute-control-panel/internal/buildinfo"
+)
+
+func TestVersionHelper(t *testing.T) {
+	if os.Getenv("CCP_VERSION_HELPER") != "1" {
+		return
+	}
+	args, ok := argsAfterDoubleDash()
+	if !ok {
+		os.Exit(2)
+	}
+	os.Args = append([]string{"migrate"}, args...)
+	main()
+	os.Exit(0)
+}
+
+func TestVersionFlagExitsBeforeDatabase(t *testing.T) {
+	for _, args := range [][]string{{"-version"}, {"--version"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			stdout, stderr, code := runCLI(t, args)
+			want := buildinfo.Line("migrate") + "\n"
+			if code != 0 || stdout != want || stderr != "" {
+				t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+			}
+		})
+	}
+}
+
+func TestMigrateOfflineArgumentsMustStandAlone(t *testing.T) {
+	for _, args := range [][]string{
+		{"--dry-run"},
+		{"--dry-run", "--version"},
+		{"--version", "--dry-run"},
+		{"--help", "-version"},
+		{"-version", "-version"},
+		{"--", "--version"},
+		{"check"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			stdout, stderr, code := runCLI(t, args)
+			if code != 2 || stdout != "" || !strings.Contains(stderr, "does not accept arguments") || strings.Contains(stderr, "DATABASE_URL is required") {
+				t.Fatalf("exit=%d stdout=%q stderr=%q; want argument rejection without database configuration", code, stdout, stderr)
+			}
+		})
+	}
+}
+
+func TestMigrationHelpExitsBeforeDatabase(t *testing.T) {
+	for _, arg := range []string{"-h", "--help"} {
+		t.Run(arg, func(t *testing.T) {
+			stdout, stderr, code := runCLI(t, []string{arg})
+			if code != 0 || !strings.Contains(stdout, "Usage: migrate") || stderr != "" {
+				t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+			}
+		})
+	}
+}
+
+func TestMigrateWithoutVersionStillRequiresDatabaseURL(t *testing.T) {
+	stdout, stderr, code := runCLI(t, nil)
+	if code != 2 || strings.Contains(stdout, "(commit ") || !strings.Contains(stderr, "DATABASE_URL is required") {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+}
+
+func TestMigrateWithoutArgumentsLoadsConfiguredMigrations(t *testing.T) {
+	stdout, stderr, code := runCLI(t, nil, "DATABASE_URL=not-used")
+	if code != 1 || stdout != "" || !strings.Contains(stderr, "load migrations") {
+		t.Fatalf("exit=%d stdout=%q stderr=%q; want the configured migration loader", code, stdout, stderr)
+	}
+}
+
+func TestMigrateRejectsDirectoryWithoutSQLBeforeOpeningDatabase(t *testing.T) {
+	for _, extraFile := range []string{"", "README.md"} {
+		t.Run("migration-files-absent/"+extraFile, func(t *testing.T) {
+			dir := t.TempDir()
+			if extraFile != "" {
+				if err := os.WriteFile(dir+"/"+extraFile, []byte("not a migration"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			stdout, stderr, code := runCLI(t, nil, "DATABASE_URL=not-used", "MIGRATIONS_DIR="+dir)
+			if code != 1 || stdout != "" || !strings.Contains(stderr, "no SQL migrations found") || !strings.Contains(stderr, dir) || strings.Contains(stderr, "open database") || strings.Contains(stderr, "apply migrations") {
+				t.Fatalf("exit=%d stdout=%q stderr=%q; want empty directory rejection before database access", code, stdout, stderr)
+			}
+		})
+	}
+}
+
+func runCLI(t *testing.T, args []string, extraEnv ...string) (stdout, stderr string, code int) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], append([]string{"-test.run=^TestVersionHelper$", "--"}, args...)...)
+	cmd.Env = helperEnv(append([]string{
+		"LISTEN_ADDR=bad-address",
+		"MIGRATIONS_DIR=" + t.TempDir() + "/missing",
+	}, extraEnv...))
+	var out, errb bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errb
+	err := cmd.Run()
+	if ctx.Err() != nil {
+		t.Fatalf("timed out: stdout=%q stderr=%q err=%v", out.String(), errb.String(), err)
+	}
+	if err == nil {
+		return out.String(), errb.String(), 0
+	}
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) {
+		t.Fatalf("run: %v stdout=%q stderr=%q", err, out.String(), errb.String())
+	}
+	return out.String(), errb.String(), exit.ExitCode()
+}
+
+func helperEnv(extra []string) []string {
+	drop := map[string]struct{}{
+		"DATABASE_URL":                  {},
+		"LISTEN_ADDR":                   {},
+		"MIGRATIONS_DIR":                {},
+		"KUBERNETES_SERVICE_HOST":       {},
+		"KUBERNETES_SERVICE_PORT_HTTPS": {},
+		"CCP_VERSION_HELPER":            {},
+	}
+	env := []string{"CCP_VERSION_HELPER=1"}
+	for _, entry := range os.Environ() {
+		key, _, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		if _, skip := drop[key]; skip {
+			continue
+		}
+		env = append(env, entry)
+	}
+	return append(env, extra...)
+}
+
+func argsAfterDoubleDash() ([]string, bool) {
+	for i, arg := range os.Args {
+		if arg == "--" {
+			return os.Args[i+1:], true
+		}
+	}
+	return nil, false
+}

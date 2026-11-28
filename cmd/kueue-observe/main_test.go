@@ -6,6 +6,8 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/avaargsh/compute-control-panel/internal/buildinfo"
 )
 
 func kubeEnv(key string) string {
@@ -69,6 +71,24 @@ func TestParseObservationOptionsRejectsMissingIdentityAndInvalidClusterSettings(
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := parseOptions(tc.args, tc.env, io.Discard); err == nil {
 				t.Fatal("untrusted cluster or incomplete scope accepted")
+			}
+		})
+	}
+}
+
+func TestVersionFlagSkipsKubernetesAccess(t *testing.T) {
+	for _, args := range [][]string{{"-version"}, {"--version"}, {"-version=true"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			var output bytes.Buffer
+			err := run(context.Background(), args, func(key string) string {
+				t.Fatalf("version must not read %s", key)
+				return ""
+			}, &output)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if output.String() != buildinfo.Line("kueue-observe")+"\n" {
+				t.Fatalf("output=%q", output.String())
 			}
 		})
 	}
