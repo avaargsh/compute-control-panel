@@ -21,7 +21,15 @@ jobs:
         with:
           persist-credentials: false
       - name: Build the synthetic Demo image
-        run: docker build --tag ccp-demo:ci .
+        shell: bash
+        run: |
+          set -euo pipefail
+          revision="$(git rev-parse --verify HEAD)"
+          test "$revision" = "$GITHUB_SHA"
+          docker build --tag ccp-demo:ci --build-arg "CCP_SOURCE_REVISION=$revision" .
+          actual="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' ccp-demo:ci)"
+          test "$actual" = "$revision"
+          printf 'Verified image revision: %s\n' "$actual"
       - name: Reject a non-loopback listen address
         shell: bash
         run: |

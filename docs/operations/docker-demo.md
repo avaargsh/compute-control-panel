@@ -19,11 +19,19 @@ This Docker procedure was verified on Linux with the standard daemon. It does no
 
 ## Build
 
-From the repository root:
+From the root of a clean Git checkout:
 
 ```bash
-docker build -t ccp-demo:local .
+docker build -t ccp-demo:local --build-arg "CCP_SOURCE_REVISION=$(git rev-parse HEAD)" .
+docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' ccp-demo:local
 ```
+
+The second command prints the source revision supplied at build time. This
+label is useful for troubleshooting, but does not identify a running container
+or independently verify where the image came from. For a source archive, or a checkout with local
+changes, omit the build argument; the label then reports `unknown`.
+`make build` sets CLI build fields separately. This image label does not set
+those fields.
 
 The builder is the official `golang:1.27.4-bookworm` image, the Go version pinned by GitHub Go validation, with `CGO_ENABLED=0` and `GOTOOLCHAIN=local`. `go.mod` requires Go 1.27.0 or newer. The runtime image is `gcr.io/distroless/static-debian12:nonroot` and runs as uid 65532. The build does not push an image to a registry.
 
