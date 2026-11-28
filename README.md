@@ -12,6 +12,8 @@ make demo
 
 That runs `go run ./cmd/ccp-demo -addr 127.0.0.1:8081`. Open `http://127.0.0.1:8081` on the same machine. See the [Demo Quickstart](docs/product/DEMO-CONSOLE-QUICKSTART.md) for verification and limitations. This is not an authenticated live Console; never expose the Demo publicly.
 
+Docker Engine on Linux, without a local Go toolchain, can run the same preview. See [Docker Demo](docs/operations/docker-demo.md). The container still binds only `127.0.0.1`, does not use PostgreSQL or Kubernetes, and does not show physical GPU readiness.
+
 ## Local checks
 
 From a checkout that contains the Makefile:
